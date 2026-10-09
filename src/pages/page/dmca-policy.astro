@@ -1,0 +1,10 @@
+---
+import Base from '../../layouts/Base.astro'
+import Root from '../../app/roots/DmcaPolicy.vue'
+import { pageState } from '../../lib/content'
+
+const state = await pageState(Astro.url, { name: "page-dmca-policy" })
+---
+<Base seo={{ title: "🚀 Dmca Policy ", description: "Dmca Policy page", type: 'website' }} state={state}>
+  <Root client:load />
+</Base>

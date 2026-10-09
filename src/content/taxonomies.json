@@ -1,0 +1,20 @@
+{
+  "categories": [
+    { "id": "1", "slug": "laravel", "name": "Laravel", "description": "Laravel" },
+    { "id": "2", "slug": "vuejs", "name": "VueJs", "description": "VueJs" },
+    { "id": "3", "slug": "jobs", "name": "Jobs", "description": "Jobs" },
+    { "id": "4", "slug": "ebooks", "name": "eBooks", "description": "eBooks" }
+  ],
+  "tags": [
+    { "id": "1", "slug": "laravel", "name": "Laravel" },
+    { "id": "2", "slug": "vuejs", "name": "VueJs" },
+    { "id": "3", "slug": "graphql", "name": "GraphQL" },
+    { "id": "4", "slug": "apollo", "name": "Apollo" },
+    { "id": "5", "slug": "nuxtjs", "name": "NuxtJs" },
+    { "id": "6", "slug": "nova", "name": "Nova" },
+    { "id": "7", "slug": "php", "name": "PHP" },
+    { "id": "8", "slug": "community", "name": "Community" },
+    { "id": "9", "slug": "setup", "name": "Setup" },
+    { "id": "10", "slug": "roadmap", "name": "Roadmap" }
+  ]
+}

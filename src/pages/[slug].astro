@@ -1,0 +1,17 @@
+---
+import Base from '../layouts/Base.astro'
+import Root from '../app/roots/Post.vue'
+import { allPosts, pageState } from '../lib/content'
+
+// pages/_slug/index.vue + middleware/post.js (postBySlug)
+export async function getStaticPaths() {
+  const posts = await allPosts()
+  return posts.map((post) => ({ params: { slug: post.slug }, props: { post } }))
+}
+const { post } = Astro.props
+const state = await pageState(Astro.url, { name: 'slug', params: { slug: post.slug } }, { post: { single: post } })
+const seo = { title: post.title, description: post.excerpt, image: post.image_url, url: post.url, tags: post.tags, type: 'article' }
+---
+<Base seo={seo} state={state}>
+  <Root client:load />
+</Base>

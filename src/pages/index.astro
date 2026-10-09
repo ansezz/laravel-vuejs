@@ -1,0 +1,17 @@
+---
+import Base from '../layouts/Base.astro'
+import Root from '../app/roots/Home.vue'
+import { pageState } from '../lib/content'
+
+// middleware/home.js: popular (4), latest (13) and featured (8) posts
+const state = await pageState(Astro.url, { name: 'index' })
+const seo = {
+  title: 'The latest Articles , Q/A, Trends, Video, Jobs, Services, news, tutorials, plugins, packages, repositories, repository, Vue.Js Vue Laravel',
+  description: 'Laravel VueJs The latest Articles , Q/A, Trends, Video, Jobs, Services, news, tutorials, plugins, packages, repositories, repository, Vue.Js Vue Laravel',
+  image: '',
+  type: 'website',
+}
+---
+<Base seo={seo} state={state}>
+  <Root client:load />
+</Base>

@@ -1,0 +1,19 @@
+{
+  // Cloudflare Workers static assets: the site is fully static (astro build -> dist/), no Worker code.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "laravel-vuejs",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // dist/404.html is served (with a 404 status) for unknown URLs
+    "not_found_handling": "404-page",
+    // /posts and /posts/ both serve dist/posts/index.html
+    "html_handling": "auto-trailing-slash"
+  }
+  // Uncomment once the laravel-vuejs.space zone is in the same Cloudflare account;
+  // `wrangler deploy` then creates the DNS records and certificates for these hostnames.
+  // "routes": [
+  //   { "pattern": "laravel-vuejs.space", "custom_domain": true },
+  //   { "pattern": "www.laravel-vuejs.space", "custom_domain": true }
+  // ]
+}

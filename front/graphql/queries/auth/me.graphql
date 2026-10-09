@@ -1,8 +1,0 @@
-query me {
-  me {
-    id
-    name
-    email
-    created_at
-  }
-}

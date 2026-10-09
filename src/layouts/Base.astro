@@ -1,0 +1,84 @@
+---
+// Document shell. Reproduces nuxt.config.js `head`, the `seo` mixin (mixins/seo.js) and the
+// global CSS list, then serialises the store state for the hydrated Vue page.
+import 'swiper/dist/css/swiper.css'
+import 'ionicons/dist/css/ionicons.min.css'
+import 'bootstrap/dist/css/bootstrap.css'
+import 'font-awesome/css/font-awesome.css'
+import '../app/assets/AvenirNextLTPro.css'
+import '../app/assets/stylus/index.styl'
+import '../app/assets/toast.css'
+import { applyState } from '../lib/content'
+import { SITE_URL, SITE_NAME, TWITTER_HANDLE, FB_APP_ID, THEME_COLOR } from '../app/config/site.js'
+
+interface Props {
+  seo?: { title?: string; description?: string; image?: string; url?: string; type?: string; tags?: { name: string }[] }
+  state: any
+}
+const { seo = {}, state } = Astro.props
+const serialized = applyState(state)
+
+const path = Astro.url.pathname.replace(/\/$/, '') || '/'
+const canonical = SITE_URL + (path === '/' ? '/' : path)
+const title = `${seo.title ?? 'Laravel VueJs'}  ←  ${SITE_NAME}`
+const image = seo.image ? (seo.image.startsWith('http') ? seo.image : SITE_URL + seo.image) : `${SITE_URL}/icon.png`
+const description = seo.description ?? 'Laravel VueJs'
+const type = seo.type ?? 'website'
+
+const env = import.meta.env
+const ADSENSE = env.PUBLIC_GOOGLE_ADSENSE ? 'ca-' + String(env.PUBLIC_GOOGLE_ADSENSE).replace(/^ca-/, '') : null
+const GA = env.PUBLIC_GOOGLE_ANALYTICS
+const GTM = env.PUBLIC_GOOGLE_TAG_MANAGER
+const SITE_VERIFICATION = env.PUBLIC_GOOGLE_SITE_VERIFICATION
+---
+<!doctype html>
+<html dir="ltr" lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {SITE_VERIFICATION && <meta name="google-site-verification" content={SITE_VERIFICATION}>}
+  <title>{title}</title>
+  <link rel="canonical" href={canonical}>
+  <meta name="description" content={description}>
+  <meta property="fb:app_id" content={FB_APP_ID}>
+  <meta name="author" content={canonical}>
+  <meta name="publisher" content={canonical}>
+  <meta name="apple-mobile-web-app-title" content={seo.title ?? 'Laravel VueJs'}>
+  <meta name="theme-color" content={THEME_COLOR}>
+  <meta property="og:type" content={type}>
+  <meta property="og:url" content={canonical}>
+  <meta property="og:image" content={image}>
+  <meta property="og:description" content={description}>
+  <meta property="og:title" content={seo.title ?? 'Laravel VueJs'}>
+  <meta property="og:site_name" content={SITE_NAME}>
+  <meta property="og:locale" content="en_US">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content={TWITTER_HANDLE}>
+  <meta name="twitter:title" content={seo.title ?? 'Laravel VueJs'}>
+  <meta name="twitter:description" content={description}>
+  <meta name="twitter:creator" content={TWITTER_HANDLE}>
+  <meta name="twitter:image" content={image}>
+  <meta name="twitter:image:src" content={image}>
+  <meta itemprop="name" content={seo.title ?? 'Laravel VueJs'}>
+  <meta itemprop="description" content={description}>
+  <meta itemprop="image" content={image}>
+  {(seo.tags ?? []).map(t => <meta name="article:tag" content={t.name}>)}
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="alternate" type="application/rss+xml" href={`${SITE_URL}/feed.xml`} title="News">
+  <link rel="alternate" type="application/rss+xml" href={`${SITE_URL}/feed/posts.xml`} title="Posts News">
+  <link rel="alternate" type="application/rss+xml" href={`${SITE_URL}/feed/categories.xml`} title="Categories News">
+  <link rel="alternate" type="application/rss+xml" href={`${SITE_URL}/feed/tags.xml`} title="Tags News">
+  {ADSENSE && <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>}
+  {ADSENSE && <script is:inline set:html={`(adsbygoogle = window.adsbygoogle || []).push({google_ad_client: "${ADSENSE}", enable_page_level_ads: true});`}></script>}
+  {GA && <script async src={`https://www.googletagmanager.com/gtag/js?id=${GA}`}></script>}
+  {GA && <script is:inline set:html={`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${GA}');`}></script>}
+  {GTM && <script is:inline set:html={`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${GTM}');`}></script>}
+  <script is:inline set:html={`window.__LV_STATE__=${serialized}`}></script>
+</head>
+<body>
+  <div id="__nuxt"><div id="__layout">
+    <slot />
+  </div></div>
+</body>
+</html>

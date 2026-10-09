@@ -1,8 +1,0 @@
-type Menu {
-    id: ID!
-    name: String!
-    description: String!
-    menuItems: [MenuItem] @hasMany
-    created_at: DateTime!
-    updated_at: DateTime!
-}

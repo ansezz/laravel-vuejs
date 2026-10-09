@@ -1,6 +1,0 @@
-type Category {
-    id: ID!
-    name: String!
-    description: String!
-    slug: String!
-}
