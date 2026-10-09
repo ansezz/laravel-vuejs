@@ -1,28 +1,39 @@
 {
-    "private": true,
-    "scripts": {
-        "dev": "npm run development",
-        "development": "cross-env NODE_ENV=development node_modules/webpack/bin/webpack.js --progress --hide-modules --config=node_modules/laravel-mix/setup/webpack.config.js",
-        "watch": "npm run development -- --watch",
-        "watch-poll": "npm run watch -- --watch-poll",
-        "hot": "cross-env NODE_ENV=development node_modules/webpack-dev-server/bin/webpack-dev-server.js --inline --hot --config=node_modules/laravel-mix/setup/webpack.config.js",
-        "prod": "npm run production",
-        "production": "cross-env NODE_ENV=production node_modules/webpack/bin/webpack.js --no-progress --hide-modules --config=node_modules/laravel-mix/setup/webpack.config.js",
-        "build-category": "cd nova-components/nova-categories-field && npm run dev",
-        "build-category-prod": "cd nova-components/nova-categories-field && npm run prod"
-    },
-    "devDependencies": {
-        "axios": "^0.18",
-        "bootstrap": "^4.0.0",
-        "cross-env": "^5.1",
-        "jquery": "^3.2",
-        "laravel-mix": "^4.0.7",
-        "lodash": "^4.17.5",
-        "popper.js": "^1.12",
-        "resolve-url-loader": "^2.3.1",
-        "sass": "^1.15.2",
-        "sass-loader": "^7.1.0",
-        "vue": "^2.5.17",
-        "vue-template-compiler": "^2.5.21"
-    }
+  "name": "laravel-vuejs",
+  "version": "3.0.0",
+  "description": "Laravel & VueJs blog — static Astro build of laravel-vuejs.space",
+  "author": "Anass EZ-ZOUAINE <ansezzouaine@gmail.com>",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "cf:dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@astrojs/rss": "^4.0.19",
+    "@astrojs/vue": "^7.0.3",
+    "@vojtechlanka/vue-tags-input": "^3.1.2",
+    "astro": "^7.3.8",
+    "bootstrap": "3.4.1",
+    "font-awesome": "4.7.0",
+    "ionicons": "4.5.5",
+    "prismjs": "^1.29.0",
+    "swiper": "4.5.1",
+    "vue": "^3.5.43"
+  },
+  "devDependencies": {
+    "lost": "^9.0.2",
+    "postcss": "^8.5.29",
+    "postcss-rtl": "^2.0.0",
+    "rupture": "^0.7.1",
+    "stylus": "^0.54.8",
+    "wrangler": "^4.149.0"
+  }
 }

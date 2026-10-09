@@ -1,21 +1,22 @@
-/node_modules
-/public/hot
-/public/css
-/public/js
-/public/storage
-/public/mix-manifest.json
-/storage/*.key
-/vendor
-.env
-.phpunit.result.cache
-Homestead.json
-Homestead.yaml
-npm-debug.log
-yarn-error.log
-/nova-app
+# build output
+dist/
+.astro/
+.wrangler/
 
-storage/app/wp-importer/*
+# dependencies
+node_modules/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# environment variables
+.env
+.env.production
+.dev.vars
+
+# editors / OS
 .idea/
-nova/
-public/photos
-public/sitemap*
+.vscode/
+.DS_Store

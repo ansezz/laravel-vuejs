@@ -1,0 +1,16 @@
+---
+import Base from '../../layouts/Base.astro'
+import Root from '../../app/roots/Category.vue'
+import { allPosts, categories, pageState, paginate } from '../../lib/content'
+
+// pages/category/_slug + middleware/category.js (categoryBySlug, postsByCategory)
+export function getStaticPaths() {
+  return categories.map((category) => ({ params: { slug: category.slug }, props: { category } }))
+}
+const { category } = Astro.props
+const posts = (await allPosts()).filter(p => p.categories.some((c: any) => c.slug === category.slug))
+const state = await pageState(Astro.url, { name: 'category-slug', params: { slug: category.slug } }, { category: { category, posts: paginate(posts, 12) } })
+---
+<Base seo={{ title: category.name, description: category.description }} state={state}>
+  <Root client:load />
+</Base>

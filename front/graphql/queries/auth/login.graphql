@@ -1,6 +1,0 @@
-query login($email: String!, $password: String!, $remember_me: Boolean) {
-  login(email : $email, password : $password, remember_me : $remember_me) {
-    access_token
-    expires_at
-  }
-}

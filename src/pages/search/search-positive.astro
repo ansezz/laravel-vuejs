@@ -1,0 +1,10 @@
+---
+import Base from '../../layouts/Base.astro'
+import Root from '../../app/roots/SearchPositive.vue'
+import { pageState } from '../../lib/content'
+
+const state = await pageState(Astro.url, { name: "search-search-positive" })
+---
+<Base seo={{}} state={state}>
+  <Root client:load />
+</Base>

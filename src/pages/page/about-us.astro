@@ -1,0 +1,10 @@
+---
+import Base from '../../layouts/Base.astro'
+import Root from '../../app/roots/AboutUs.vue'
+import { pageState } from '../../lib/content'
+
+const state = await pageState(Astro.url, { name: "page-about-us" })
+---
+<Base seo={{ title: "About us", description: "About us page", type: 'website' }} state={state}>
+  <Root client:load />
+</Base>

@@ -1,0 +1,10 @@
+---
+import Base from '../../layouts/Base.astro'
+import Root from '../../app/roots/PrivacyPolicy.vue'
+import { pageState } from '../../lib/content'
+
+const state = await pageState(Astro.url, { name: "page-privacy-policy" })
+---
+<Base seo={{ title: "🚀 Privacy Policy ", description: "Privacy Policy page", type: 'website' }} state={state}>
+  <Root client:load />
+</Base>

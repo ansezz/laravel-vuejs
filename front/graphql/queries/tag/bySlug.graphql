@@ -1,8 +1,0 @@
-query tagBySlug($slug: String!) {
-    tagBySlug(slug: $slug) {
-        id
-        name
-        slug
-    }
-}
-

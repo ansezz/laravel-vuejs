@@ -1,0 +1,12 @@
+---
+import Base from '../../layouts/Base.astro'
+import Root from '../../app/roots/Posts.vue'
+import { allPosts, pageState, paginate } from '../../lib/content'
+
+// views/web/post/archive.vue: first page of `posts(count: 12, sort_by: latest)`
+const posts = await allPosts()
+const state = await pageState(Astro.url, { name: 'posts' }, { post: { posts: paginate(posts, 12) } })
+---
+<Base seo={{ title: '🚀 Posts ', description: 'Posts', type: 'website' }} state={state}>
+  <Root client:load />
+</Base>

@@ -1,0 +1,13 @@
+<template>
+  <web-layout>
+    <page-view/>
+  </web-layout>
+</template>
+
+<script>
+  // Page root (generated): Nuxt rendered layouts/web.vue around views/web/page/term-conditions.vue
+  import WebLayout from '@/layouts/web.vue'
+  import PageView from '@/views/web/page/term-conditions.vue'
+
+  export default { name: 'TermConditionsRoot', components: { WebLayout, PageView } }
+</script>

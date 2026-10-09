@@ -1,0 +1,10 @@
+---
+import Base from '../../layouts/Base.astro'
+import Root from '../../app/roots/TermsAndConditions.vue'
+import { pageState } from '../../lib/content'
+
+const state = await pageState(Astro.url, { name: "page-terms-and-conditions" })
+---
+<Base seo={{ title: "🚀 Terms and conditions ", description: "Terms and conditions page", type: 'website' }} state={state}>
+  <Root client:load />
+</Base>

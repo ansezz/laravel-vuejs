@@ -1,8 +1,0 @@
-type Setting {
-    id: ID!
-    name: String!
-    key: String!
-    value: String
-    created_at: DateTime!
-    updated_at: DateTime!
-}
