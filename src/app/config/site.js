@@ -3,9 +3,9 @@
 export const SITE_URL = 'https://laravel-vuejs.space'
 export const SITE_NAME = 'Laravel-VueJs.space'
 
-// TODO contact email: the old addresses (contact@ / help@ / dmca@ on the previous domain) were removed.
-// Put the new public contact address here; every page that shows an email reads this value.
-export const CONTACT_EMAIL = 'TODO contact email'
+// Public contact address (replaces the contact@ / help@ / dmca@ addresses of the previous domain).
+// Every page that shows an email reads this value.
+export const CONTACT_EMAIL = 'contact@laravel-vuejs.space'
 
 export const DISQUS_SHORTNAME = 'laravel-vuejs-com' // Disqus forum id (not a URL); add laravel-vuejs.space to its trusted domains
 export const TWITTER_HANDLE = '@LaravelVueJs'
