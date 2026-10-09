@@ -335,7 +335,7 @@ textarea.input { min-height: 140px; resize: vertical; }
 .post-meta span { display: inline-flex; align-items: center; gap: 7px; }
 .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--grad); color: #0D1424; font: 700 .8rem/1 var(--font-mono); }
 .post-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 64px; padding-block: 48px 24px; }
-@media (max-width: 1080px) { .post-layout { grid-template-columns: 1fr; } .toc { display: none; } }
+@media (max-width: 1080px) { .post-layout { grid-template-columns: minmax(0, 1fr); } .toc { display: none; } }
 .post-cover { margin-top: 36px; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); }
 .post-cover .cover { aspect-ratio: 21 / 8; }
 @media (max-width: 640px) { .post-cover .cover { aspect-ratio: 16/8; } }
