@@ -18,22 +18,11 @@
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.19",
-    "@astrojs/vue": "^7.0.3",
-    "@vojtechlanka/vue-tags-input": "^3.1.2",
-    "astro": "^7.3.8",
-    "bootstrap": "3.4.1",
-    "font-awesome": "4.7.0",
-    "ionicons": "4.5.5",
-    "prismjs": "^1.29.0",
-    "swiper": "4.5.1",
-    "vue": "^3.5.43"
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "astro": "^7.3.8"
   },
   "devDependencies": {
-    "lost": "^9.0.2",
-    "postcss": "^8.5.29",
-    "postcss-rtl": "^2.0.0",
-    "rupture": "^0.7.1",
-    "stylus": "^0.54.8",
     "wrangler": "^4.149.0"
   }
 }

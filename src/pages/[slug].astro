@@ -1,17 +1,115 @@
 ---
 import Base from '../layouts/Base.astro'
-import Root from '../app/roots/Post.vue'
-import { allPosts, pageState } from '../lib/content'
+import Cover from '../components/Cover.astro'
+import PostCard from '../components/PostCard.astro'
+import Icon from '../components/Icon.astro'
+import NewsletterBand from '../components/NewsletterBand.astro'
+import { allPosts, related, enhanceHtml, fmtDate, absolute, type Post } from '../lib/content'
+import { SITE_NAME, SITE_URL, DISQUS_SHORTNAME, GITHUB_URL } from '../config/site'
 
-// pages/_slug/index.vue + middleware/post.js (postBySlug)
 export async function getStaticPaths() {
   const posts = await allPosts()
-  return posts.map((post) => ({ params: { slug: post.slug }, props: { post } }))
+  return posts.map((post, i) => ({ params: { slug: post.slug }, props: { post, newer: posts[i - 1], older: posts[i + 1] } }))
 }
-const { post } = Astro.props
-const state = await pageState(Astro.url, { name: 'slug', params: { slug: post.slug } }, { post: { single: post } })
-const seo = { title: post.title, description: post.excerpt, image: post.image_url, url: post.url, tags: post.tags, type: 'article' }
+interface Props { post: Post; newer?: Post; older?: Post }
+const { post, newer, older } = Astro.props
+const posts = await allPosts()
+const html = enhanceHtml(post.entry.rendered?.html ?? '')
+const headings = ((post.entry.rendered?.metadata?.headings ?? []) as { depth: number; slug: string; text: string }[]).filter(h => h.depth === 2 || h.depth === 3)
+const url = absolute(post.url)
+const enc = encodeURIComponent
+const share = [
+  { id: 'x', label: 'Share on X', href: `https://x.com/intent/post?url=${enc(url)}&text=${enc(post.title)}&via=LaravelVueJs` },
+  { id: 'linkedin', label: 'Share on LinkedIn', href: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}` },
+  { id: 'facebook', label: 'Share on Facebook', href: `https://www.facebook.com/sharer/sharer.php?u=${enc(url)}` },
+  { id: 'reddit', label: 'Share on Reddit', href: `https://www.reddit.com/submit?url=${enc(url)}&title=${enc(post.title)}` },
+  { id: 'telegram', label: 'Share on Telegram', href: `https://t.me/share/url?url=${enc(url)}&text=${enc(post.title)}` },
+  { id: 'whatsapp', label: 'Share on WhatsApp', href: `https://wa.me/?text=${enc(post.title + ' ' + url)}` },
+  { id: 'mail', label: 'Share by email', href: `mailto:?subject=${enc(post.title)}&body=${enc(url)}` },
+]
+const jsonld = [{
+  '@context': 'https://schema.org', '@type': 'BlogPosting', headline: post.title, description: post.excerpt,
+  datePublished: post.date.toISOString(), dateModified: (post.updated ?? post.date).toISOString(),
+  url, mainEntityOfPage: url, image: `${SITE_URL}/og/${post.slug}.png`, keywords: post.tags.map(t => t.name).join(', '),
+  author: { '@type': 'Organization', name: post.author, url: SITE_URL + '/' }, publisher: { '@type': 'Organization', name: SITE_NAME, logo: { '@type': 'ImageObject', url: SITE_URL + '/icon.png' } },
+}, {
+  '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL + '/' },
+    { '@type': 'ListItem', position: 2, name: 'Articles', item: SITE_URL + '/posts' },
+    { '@type': 'ListItem', position: 3, name: post.title, item: url }],
+}]
 ---
-<Base seo={seo} state={state}>
-  <Root client:load />
+<Base title={post.title} description={post.excerpt} type="article" image={`/og/${post.slug}.png`} jsonld={jsonld}
+  article={{ published: post.date, modified: post.updated, tags: post.tags.map(t => t.name), section: post.categories[0]?.name }}>
+  <article>
+    <header class="page-hero post-hero">
+      <div class="hero-bg"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+      <div class="container">
+        <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a><span aria-hidden="true">/</span><a href="/posts">Articles</a>
+          {post.categories[0] && <><span aria-hidden="true">/</span><a href={`/category/${post.categories[0].slug}`}>{post.categories[0].name}</a></>}</nav>
+        <h1 style="margin-top:22px">{post.title}</h1>
+        <p class="lead">{post.excerpt}</p>
+        <div class="post-meta">
+          <span><span class="avatar" aria-hidden="true">LV</span> {post.author}</span>
+          <span><Icon name="calendar" size={15} /><time datetime={post.date.toISOString()}>{fmtDate(post.date)}</time></span>
+          {post.updated && <span><Icon name="sparkles" size={15} />Updated <time datetime={post.updated.toISOString()}>{fmtDate(post.updated)}</time></span>}
+          <span><Icon name="clock" size={15} />{post.readingMinutes} min read</span>
+        </div>
+        <div class="post-cover"><Cover post={post} /></div>
+      </div>
+    </header>
+
+    <div class="container post-layout">
+      <div>
+        <div class="prose" set:html={html} />
+        <footer class="post-foot">
+          <div class="card-cats">
+            {post.tags.map(t => <a class="chip" href={`/tag/${t.slug}`}><Icon name="tag" size={13} />{t.name}</a>)}
+          </div>
+          <div class="share">
+            <span>Share</span>
+            {share.map(s => <a class="icon-btn" href={s.href} target="_blank" rel="noopener" aria-label={s.label}><Icon name={s.id} size={18} /></a>)}
+            <a class="icon-btn" href={`${GITHUB_URL}/edit/master/src/content/posts/${post.slug}.md`} target="_blank" rel="noopener" aria-label="Suggest an edit on GitHub"><Icon name="github" size={18} /></a>
+          </div>
+          {(newer || older) && (
+            <nav class="pager" aria-label="More articles">
+              {older ? <a class="card" href={older.url}><small><Icon name="arrow-left" size={13} /> Previous</small><strong>{older.title}</strong></a> : <span />}
+              {newer && <a class="card next" href={newer.url}><small>Next <Icon name="arrow" size={13} /></small><strong>{newer.title}</strong></a>}
+            </nav>
+          )}
+          <section class="comments" aria-label="Comments">
+            <div id="disqus_thread"></div>
+            <button class="btn" type="button" data-comments><Icon name="message" size={18} /> Load comments</button>
+            <p class="form-note">Comments are powered by Disqus and only load when you click.</p>
+          </section>
+        </footer>
+      </div>
+      <aside class="toc" aria-label="On this page">
+        {headings.length > 0 && <>
+          <h2>On this page</h2>
+          <ol>{headings.map(h => <li class={`d${h.depth}`}><a href={`#${h.slug}`}>{h.text}</a></li>)}</ol>
+        </>}
+        <div class="side-box">
+          <strong>Join the community</strong>
+          <p>Questions about this article? Ask thousands of Laravel and Vue developers.</p>
+          <a class="btn btn-primary btn-sm" href="https://www.facebook.com/groups/LaravelVueJs/" target="_blank" rel="noopener">Join the group</a>
+        </div>
+      </aside>
+    </div>
+  </article>
+
+  <section class="container section-tight" aria-labelledby="related">
+    <div class="section-head"><div><p class="kicker">Keep reading</p><h2 id="related">Related articles</h2></div></div>
+    <div class="grid grid-3">{related(post, posts).map(p => <PostCard post={p} />)}</div>
+  </section>
+  <NewsletterBand />
+
+  <script is:inline define:vars={{ shortname: DISQUS_SHORTNAME, url, id: String(post.id), title: post.title }}>
+    document.querySelector('[data-comments]')?.addEventListener('click', function () {
+      this.remove()
+      window.disqus_config = function () { this.page.url = url; this.page.identifier = id; this.page.title = title }
+      var s = document.createElement('script'); s.src = 'https://' + shortname + '.disqus.com/embed.js'
+      s.setAttribute('data-timestamp', String(+new Date())); document.body.appendChild(s)
+    }, { once: true })
+  </script>
 </Base>

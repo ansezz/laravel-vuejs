@@ -1,0 +1,29 @@
+---
+import PostCard from './PostCard.astro'
+import PageHero from './PageHero.astro'
+import Icon from './Icon.astro'
+import NewsletterBand from './NewsletterBand.astro'
+import { categories, type Post } from '../lib/content'
+interface Props { kicker: string; title: string; lead?: string; posts: Post[]; crumbs?: { label: string; href?: string }[] }
+const { kicker, title, lead, posts, crumbs } = Astro.props
+const path = Astro.url.pathname.replace(/\/$/, '')
+---
+<PageHero kicker={kicker} title={title} lead={lead} crumbs={crumbs}>
+  <div class="card-cats" style="margin-top:28px">
+    <a class={`chip ${path === '/posts' ? 'chip-brand' : ''}`} href="/posts">All</a>
+    {categories.map(c => <a class={`chip ${path === '/category/' + c.slug ? 'chip-brand' : ''}`} href={`/category/${c.slug}`}>{c.name}</a>)}
+  </div>
+</PageHero>
+<section class="container section-tight">
+  {posts.length ? (
+    <div class="grid grid-3">{posts.map(p => <PostCard post={p} headingLevel="h2" />)}</div>
+  ) : (
+    <div class="empty">
+      <div class="tile tile-icon" style="padding:0"><Icon name="sparkles" size={22} /></div>
+      <h3>Nothing here yet</h3>
+      <p>We have not published anything on this topic yet. Want to write the first article? Posts are Markdown files, and pull requests are welcome.</p>
+      <a class="btn btn-primary" href="/who-we-are#write-for-the-blog">Write for us <Icon name="arrow" size={16} class="icon-arrow" /></a>
+    </div>
+  )}
+</section>
+<NewsletterBand />

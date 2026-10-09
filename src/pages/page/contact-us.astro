@@ -1,10 +1,36 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/ContactUs.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-contact-us" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import { CONTACT_EMAIL, GROUPS, GITHUB_URL } from '../../config/site'
+const topics = ['General question', 'Advertising', 'Write for the blog', 'Hire us', 'Report a problem', 'Copyright (DMCA)']
 ---
-<Base seo={{ title: "Contact us", description: "Contact us page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Contact us" kicker="Contact" heading="Let's talk." lead="Questions, ideas, partnerships or feedback: we read every message.">
+  <section class="container section-tight">
+    <div class="grid" style="grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:32px">
+      <form class="card" style="padding:28px;gap:18px" id="contact-form">
+        <div class="grid grid-2" style="gap:16px">
+          <div class="field"><label for="c-name">Your name</label><input class="input" id="c-name" name="name" required autocomplete="name"></div>
+          <div class="field"><label for="c-email">Your email</label><input class="input" id="c-email" name="email" type="email" required autocomplete="email"></div>
+        </div>
+        <div class="field"><label for="c-topic">Topic</label><select class="input" id="c-topic" name="topic">{topics.map(t => <option>{t}</option>)}</select></div>
+        <div class="field"><label for="c-msg">Message</label><textarea class="input" id="c-msg" name="message" required placeholder="How can we help?"></textarea></div>
+        <div><button class="btn btn-primary" type="submit">Send message <Icon name="arrow" size={16} class="icon-arrow" /></button>
+        <p class="form-note">This opens your email app with the message ready to send to {CONTACT_EMAIL}.</p></div>
+      </form>
+      <div class="grid" style="gap:16px;align-content:start">
+        <a class="card social-card" href={`mailto:${CONTACT_EMAIL}`}><span class="tile-icon"><Icon name="mail" size={20} /></span><span><strong>Email</strong><small>{CONTACT_EMAIL}</small></span><Icon name="arrow-up-right" size={18} class="go" /></a>
+        <a class="card social-card" href={GROUPS[0].url} target="_blank" rel="noopener"><span class="tile-icon"><Icon name="users" size={20} /></span><span><strong>Community questions</strong><small>Ask in the Facebook group</small></span><Icon name="arrow-up-right" size={18} class="go" /></a>
+        <a class="card social-card" href={`${GITHUB_URL}/issues`} target="_blank" rel="noopener"><span class="tile-icon"><Icon name="github" size={20} /></span><span><strong>Bugs and ideas</strong><small>Open a GitHub issue</small></span><Icon name="arrow-up-right" size={18} class="go" /></a>
+        <a class="card social-card" href="https://t.me/LaravelVueJs" target="_blank" rel="noopener"><span class="tile-icon"><Icon name="telegram" size={20} /></span><span><strong>Telegram</strong><small>t.me/LaravelVueJs</small></span><Icon name="arrow-up-right" size={18} class="go" /></a>
+      </div>
+    </div>
+  </section>
+  <script is:inline define:vars={{ to: CONTACT_EMAIL }}>
+    document.getElementById('contact-form').addEventListener('submit', function (e) {
+      e.preventDefault(); var f = new FormData(this)
+      var body = f.get('message') + '\n\n— ' + f.get('name') + ' <' + f.get('email') + '>'
+      location.href = 'mailto:' + to + '?subject=' + encodeURIComponent('[' + f.get('topic') + '] Message from ' + f.get('name')) + '&body=' + encodeURIComponent(body)
+    })
+  </script>
+</Page>
+<style>@media (max-width: 860px) { .grid[style*="1.3fr"] { grid-template-columns: 1fr !important; } }</style>

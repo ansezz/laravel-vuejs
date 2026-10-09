@@ -1,0 +1,27 @@
+---
+import Logo from './Logo.astro'
+import Icon from './Icon.astro'
+import { FOOTER, SOCIALS, CONTACT_EMAIL, SITE_DOMAIN, GITHUB_URL } from '../config/site'
+const year = new Date().getFullYear()
+---
+<footer class="site-footer">
+  <div class="container footer-grid">
+    <div class="footer-about">
+      <a href="/" aria-label="Laravel & VueJs home"><Logo /></a>
+      <p>Practical guides and a friendly community for developers who build with Laravel and Vue.</p>
+      <div class="socials">
+        {SOCIALS.map(s => <a class="icon-btn" href={s.url} rel="noopener me" target="_blank" aria-label={s.name}><Icon name={s.id} size={18} /></a>)}
+      </div>
+    </div>
+    {FOOTER.map(col => (
+      <div class="footer-col">
+        <h3>{col.title}</h3>
+        <ul>{col.links.map(l => <li><a href={l.href}>{l.label}</a></li>)}</ul>
+      </div>
+    ))}
+  </div>
+  <div class="container footer-bottom">
+    <span>© {year} {SITE_DOMAIN} · Open source under the MIT license</span>
+    <span><a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> · <a href={GITHUB_URL} rel="noopener">GitHub</a></span>
+  </div>
+</footer>

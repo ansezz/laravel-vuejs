@@ -1,0 +1,5 @@
+---
+const links = [['Jobs', '/jobs/job-archive'], ['Post a job', '/jobs/create-job'], ['Pricing', '/jobs/pricing'], ['Companies', '/jobs/companies']]
+const path = Astro.url.pathname.replace(/\/$/, '')
+---
+<div class="card-cats" style="margin-top:28px">{links.map(([l, h]) => <a class={`chip ${path === h ? 'chip-brand' : ''}`} href={h}>{l}</a>)}</div>

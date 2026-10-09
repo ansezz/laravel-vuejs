@@ -1,10 +1,33 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/JobsCreateJob.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "jobs-create-job" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import JobsNav from '../../components/JobsNav.astro'
+import { CONTACT_EMAIL, GROUPS } from '../../config/site'
+const template = `Role: Senior Laravel + Vue developer
+Company: Acme Inc. (https://acme.example)
+Type: Freelance / Contract / Full-time
+Location: Remote (UTC±3)
+Budget or salary: ...
+Stack: Laravel 13, Vue 3, Inertia, MySQL
+What you will do: ...
+How to apply: email jobs@acme.example`
+const mail = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Featured job listing')}&body=${encodeURIComponent(template)}`
 ---
-<Base seo={{}} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Post a job" kicker="Jobs" heading="Post a Laravel or Vue job" lead="Reach developers who know the stack. Free in the community group, or featured across our channels.">
+  <JobsNav slot="hero" />
+  <section class="container section-tight">
+    <div class="steps grid grid-3">
+      <div class="card step reveal"><h3>Write a clear listing</h3><p class="muted">Use the template below: role, stack, location, budget and how to apply. Listings with a budget get far more replies.</p></div>
+      <div class="card step reveal"><h3>Post it in the group</h3><p class="muted">Share it in <a class="link-arrow" href={GROUPS[1].url} rel="noopener" target="_blank">{GROUPS[1].name}</a>. It is free and moderated against spam.</p></div>
+      <div class="card step reveal"><h3>Want more reach?</h3><p class="muted">Ask for a featured listing: we share it on our page, channels and newsletter. See <a class="link-arrow" href="/jobs/pricing">pricing</a>.</p></div>
+    </div>
+  </section>
+  <section class="container-narrow section-tight">
+    <div class="prose" style="max-width:none">
+      <h2 style="margin-top:0">Listing template</h2>
+      <div class="code"><div class="code-head"><span class="code-lang">text</span><button type="button" class="copy-btn" aria-label="Copy template"><Icon name="copy" size={14} class="i-copy" /><Icon name="check" size={14} class="i-check" /><span class="copy-label">Copy</span></button></div>
+        <pre class="astro-code" style="white-space:pre-wrap"><code>{template}</code></pre></div>
+    </div>
+    <div class="hero-cta"><a class="btn btn-primary" href={GROUPS[1].url} rel="noopener" target="_blank">Post for free <Icon name="arrow-up-right" size={16} /></a><a class="btn" href={mail}><Icon name="mail" size={16} /> Request a featured listing</a></div>
+  </section>
+</Page>

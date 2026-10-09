@@ -1,0 +1,14 @@
+---
+import Base from './Base.astro'
+import PageHero from '../components/PageHero.astro'
+interface Props { title: string; heading?: string; kicker?: string; lead?: string; description?: string; noindex?: boolean; canonical?: string; prose?: boolean; updated?: string }
+const { title, heading, kicker, lead, description, noindex, canonical, prose = false, updated } = Astro.props
+---
+<Base title={title} description={description ?? lead} noindex={noindex} canonical={canonical}>
+  <PageHero kicker={kicker} title={heading ?? title} lead={lead} crumbs={[{ label: title }]}>
+    <slot name="hero" />
+    {updated && <p class="muted mono" style="margin-top:18px;font-size:.85rem">Last updated {updated}</p>}
+  </PageHero>
+  {prose ? <div class="container-narrow section-tight"><div class="prose"><slot /></div></div> : <slot />}
+  <slot name="after" />
+</Base>

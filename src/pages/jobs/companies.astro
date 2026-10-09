@@ -1,10 +1,16 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/JobsCompanies.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "jobs-companies" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import JobsNav from '../../components/JobsNav.astro'
 ---
-<Base seo={{}} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Hiring companies" kicker="Jobs" heading="Companies hiring Laravel &amp; Vue developers" lead="Employer profiles are coming with the on-site jobs board.">
+  <JobsNav slot="hero" />
+  <section class="container section-tight">
+    <div class="empty">
+      <div class="tile tile-icon" style="padding:0"><Icon name="briefcase" size={22} /></div>
+      <h3>Want your company here?</h3>
+      <p>We will feature teams that build with Laravel and Vue, with their stack, culture and open roles. Get in touch to be one of the first.</p>
+      <div class="hero-cta" style="justify-content:center;margin-top:0"><a class="btn btn-primary" href="/jobs/pricing">See hiring options</a><a class="btn" href="/jobs/job-archive">Browse jobs</a></div>
+    </div>
+  </section>
+</Page>

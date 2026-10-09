@@ -1,35 +1,40 @@
 ---
 id: 4
 title: "Who we are: the Laravel & VueJs community"
-excerpt: "The mission of Laravel & VueJs is to help web professionals up their skill and knowledge of Laravel & VueJs."
-image: /storage/posts/full.jpg
+excerpt: "Our mission is to help web developers level up with Laravel and Vue. Here is how to join the community, follow our channels, advertise, or write for the blog."
 date: 2019-05-18T02:28:19Z
+updated: 2026-10-10T00:00:00Z
+snippet: "php artisan community:join"
 featured: true
 categories: [laravel, vuejs]
-tags: [laravel, vuejs, community]
+tags: [community, laravel, vuejs]
 ---
 
-<!-- Source: resources/docs/1.0/overview.md (Larecipe docs). -->
+Laravel & VueJs exists to help web developers grow their skills with two frameworks that work beautifully together. We publish practical articles and tutorials, share the best content from the wider community, and connect developers with freelance and remote work.
 
-## Who We Are?
+## Join the community
 
-The mission of Laravel & VueJs web site is to help web professionals up their skill and knowledge of Laravel & VueJs. We provide articles and tutorials through our blog, and a weekly newsletter to keep you up-to-date with the best content from the wider Laravel & VueJs community.
+Thousands of developers follow and talk with us every week. Pick the channel that suits you:
 
-Our online community has now grown to thousands of developers passionate about Laravel & VueJs. You join us in the following ways: • Laravel & VueJs [Facebook group](https://www.facebook.com/groups/LaravelVueJs/) You can also follow Laravel & VueJs on social media:
-
-- [Facebook](https://www.facebook.com/LaravelVueJs)
-- [Twitter](https://twitter.com/LaravelVueJs)
-- [LinkedIn](https://www.linkedin.com/in/laravel-vuejs/)
-- [Instagram](http://instagram.com/LaravelVueJs)
+- **Facebook page:** [facebook.com/LaravelVueJs](https://www.facebook.com/LaravelVueJs)
+- **Facebook group:** [Laravel & VueJs](https://www.facebook.com/groups/LaravelVueJs/), for questions, discussions and show-and-tell
+- **Jobs group:** [Laravel & VueJs Freelance & Remote Jobs](https://www.facebook.com/groups/Laravel.Vuejs.Jobs)
+- **X:** [@LaravelVueJs](https://x.com/LaravelVueJs)
+- **LinkedIn:** [Laravel & VueJs](https://www.linkedin.com/company/laravel-vuejs)
+- **Instagram:** [@laravelvuejs](https://www.instagram.com/laravelvuejs)
+- **Telegram:** [t.me/LaravelVueJs](https://t.me/LaravelVueJs)
+- **Pinterest:** [pinterest.com/laravelvuejs](https://www.pinterest.com/laravelvuejs)
 
 ## Advertise with us
 
-We offer a great way to expose your brand to web development professionals by offering a variety of advertising options across our newsletter and highly active social media assets. Email {{CONTACT_EMAIL}} to inquire about rates.
+Want to put your product, course or conference in front of Laravel and Vue developers? We offer placements on the site, in our community channels and in the newsletter. Email {{CONTACT_EMAIL}} and tell us what you have in mind; we will send you the options and rates.
 
-## Contribute to the blog
+## Write for the blog
 
-We're always on the lookout for new contributors to the Laravel & VueJs blog to ensure our articles represent a diverse set of skills and experiences. For authors, we can offer you a great way to expose your article to thousands of Laravel & VueJs enthusiasts from around the world, in addition to powerful backlinks to your own web assets. If you're interested in publishing an article, get in touch at {{CONTACT_EMAIL}}.
+We are always looking for new voices, so our articles reflect many different skills and experiences. Your article reaches thousands of developers around the world, with a link back to your own site or profile.
 
-## Freelance & Remote Jobs
+Posts are Markdown files in our [GitHub repository](https://github.com/ansezz/laravel-vuejs). Open a pull request with your draft, or email {{CONTACT_EMAIL}} with your idea first if you would like feedback.
 
-Are you looking for (or offering) Laravel & VueJs freelance projects or remote jobs? Join and post for free in our Laravel & VueJs - [Freelance & Remote Jobs Group](https://www.facebook.com/groups/Laravel.Vuejs.Jobs)
+## Freelance and remote jobs
+
+Looking for a Laravel or Vue developer, or for your next project? Post for free in the [Freelance & Remote Jobs group](https://www.facebook.com/groups/Laravel.Vuejs.Jobs), or read our [jobs page](/jobs/job-archive) for more options.

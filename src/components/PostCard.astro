@@ -1,0 +1,22 @@
+---
+import Cover from './Cover.astro'
+import Icon from './Icon.astro'
+import { fmtDate, type Post } from '../lib/content'
+interface Props { post: Post; feature?: boolean; headingLevel?: 'h2' | 'h3' }
+const { post, feature = false, headingLevel: H = 'h3' } = Astro.props
+---
+<article class={`card reveal ${feature ? 'card-feature' : ''}`}>
+  <Cover post={post} />
+  <div class="card-body">
+    <div class="card-cats">
+      {post.categories.map(c => <a class="chip chip-brand" href={`/category/${c.slug}`}>{c.name}</a>)}
+    </div>
+    <H><a href={post.url}>{post.title}</a></H>
+    <p>{post.excerpt}</p>
+    <div class="card-meta">
+      <span><Icon name="calendar" size={14} /><time datetime={(post.updated ?? post.date).toISOString()}>{fmtDate(post.updated ?? post.date)}</time></span>
+      <span><Icon name="clock" size={14} />{post.readingMinutes} min read</span>
+      {feature && <span class="link-arrow" style="margin-left:auto">Read <Icon name="arrow" size={16} /></span>}
+    </div>
+  </div>
+</article>

@@ -1,102 +1,59 @@
-// Build-time data layer: turns the Markdown content collection into the same shapes the
-// GraphQL API returned (posts / featuredPosts / postBySlug / postsByCategory / postsByTag),
-// and prepares the per-page store state consumed by the ported Vue components.
-import { getCollection } from 'astro:content'
+import { getCollection, type CollectionEntry } from 'astro:content'
 import taxonomies from '../content/taxonomies.json'
-import { setPageState, serializeState } from '../app/lib/store.js'
-import { SITE_URL, CONTACT_EMAIL } from '../app/config/site.js'
+import { CONTACT_EMAIL, SITE_URL } from '../config/site'
 
-export type Category = { id: string; name: string; slug: string; description?: string }
-export type Tag = { id: string; name: string; slug: string }
-
+export type Category = { id: string; slug: string; name: string; description: string }
+export type Tag = { id: string; slug: string; name: string }
 export const categories: Category[] = taxonomies.categories
 export const tags: Tag[] = taxonomies.tags
-const category = (slug: string) => categories.find(c => c.slug === slug) ?? { id: slug, name: slug, slug, description: slug }
-const tag = (slug: string) => tags.find(t => t.slug === slug) ?? { id: slug, name: slug, slug }
+export const categoryBySlug = (slug: string) => categories.find(c => c.slug === slug) ?? { id: slug, slug, name: slug, description: '' }
+export const tagBySlug = (slug: string) => tags.find(t => t.slug === slug) ?? { id: slug, slug, name: slug }
 
-// Carbon::diffForHumans() equivalent, evaluated at build time.
-export function timeAgo(date: Date, now = new Date()) {
-  const s = Math.max(1, Math.round((now.getTime() - date.getTime()) / 1000))
-  const units: [string, number][] = [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]]
-  for (const [u, n] of units) if (s >= n) { const v = Math.floor(s / n); return `${v} ${u}${v > 1 ? 's' : ''} ago` }
-  return 'just now'
+export type Post = {
+  entry: CollectionEntry<'posts'>
+  id: number; slug: string; url: string; title: string; excerpt: string
+  date: Date; updated?: Date; featured: boolean; author: string
+  categories: Category[]; tags: Tag[]; readingMinutes: number; hue: number; snippet: string
 }
 
-let cache: any[] | undefined
-export async function allPosts() {
+// ~230 words per minute for prose, code counted at roughly half speed
+const words = (s: string) => s.split(/\s+/).filter(Boolean).length + (s.match(/```[\s\S]*?```/g) ?? []).join(' ').split(/\s+/).length * 0.5
+
+let cache: Post[] | undefined
+export async function allPosts(): Promise<Post[]> {
   if (cache) return cache
   const entries = await getCollection('posts')
-  cache = entries.map((e) => {
-    // Markdown is rendered by the glob loader; the HTML goes into the v-html content block like before.
-    const content = (e.rendered?.html ?? '').replaceAll('{{CONTACT_EMAIL}}', CONTACT_EMAIL)
-    const d = e.data
+  cache = entries.map((entry) => {
+    const d = entry.data
     return {
-      id: String(d.id),
-      title: d.title,
-      slug: e.id,
-      excerpt: d.excerpt,
-      content,
-      image_url: d.image,
-      url: `${SITE_URL}/${e.id}`,
-      source: d.source ?? null,
-      views: d.views,
-      type: 1,
-      status: 1,
-      comment_status: 1,
-      featured: d.featured,
-      date: d.date.toISOString(),
-      time_ago: timeAgo(d.date),
-      user: { id: '1', name: d.author },
-      media: [{ id: String(d.id), full_url: SITE_URL + d.image }],
-      tags: d.tags.map(tag),
-      categories: d.categories.map(category),
+      entry, id: d.id, slug: entry.id, url: `/${entry.id}`, title: d.title, excerpt: d.excerpt,
+      date: d.date, updated: d.updated, featured: d.featured, author: d.author,
+      categories: d.categories.map(categoryBySlug), tags: d.tags.map(tagBySlug),
+      readingMinutes: Math.max(1, Math.round(words(entry.body ?? '') / 230)), snippet: d.snippet ?? `cat ${entry.id}.md`,
+      hue: (d.id * 47) % 360,
     }
-  })
-  cache.sort((a, b) => +b.id - +a.id) // latest('id')
-  for (const p of cache) {
-    // Post::getRelatedPostsAttribute(): other posts sharing tags/categories
-    const keys = new Set([...p.tags.map((t: Tag) => 't' + t.slug), ...p.categories.map((c: Category) => 'c' + c.slug)])
-    p.related_posts = cache.filter(o => o.id !== p.id)
-      .map(o => ({ o, score: [...o.tags.map((t: Tag) => 't' + t.slug), ...o.categories.map((c: Category) => 'c' + c.slug)].filter(k => keys.has(k)).length }))
-      .filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 10)
-      .map(({ o }) => ({ id: o.id, title: o.title, slug: o.slug, image_url: o.image_url }))
-  }
+  }).sort((a, b) => b.id - a.id || +b.date - +a.date)
   return cache
 }
 
-export const listItem = (p: any) => ({ id: p.id, title: p.title, slug: p.slug, excerpt: p.excerpt, image_url: p.image_url, time_ago: p.time_ago, categories: p.categories })
-
-export function paginate(list: any[], count: number, page = 1) {
-  const total = list.length, lastPage = Math.max(1, Math.ceil(total / count))
-  const data = list.slice((page - 1) * count, page * count).map(listItem)
-  return { data, paginatorInfo: { count: data.length, currentPage: page, firstItem: (page - 1) * count + 1, hasMorePages: page < lastPage, lastItem: (page - 1) * count + data.length, lastPage, perPage: count, total } }
+export function related(post: Post, posts: Post[], n = 3) {
+  const keys = new Set([...post.tags.map(t => 't:' + t.slug), ...post.categories.map(c => 'c:' + c.slug)])
+  return posts.filter(p => p.slug !== post.slug)
+    .map(p => ({ p, s: [...p.tags.map(t => 't:' + t.slug), ...p.categories.map(c => 'c:' + c.slug)].filter(k => keys.has(k)).length }))
+    .sort((a, b) => b.s - a.s || b.p.id - a.p.id).slice(0, n).map(x => x.p)
 }
 
-// Mirrors the Nuxt middlewares: every page gets the shared widgets' data
-// (featured posts, popular posts), page-specific data is merged on top.
-export async function pageState(url: URL, route: { name: string; params?: Record<string, string> }, extra: any = {}) {
-  const posts = await allPosts()
-  const popular = [...posts].sort((a, b) => b.views - a.views || +b.id - +a.id)
-  const state = {
-    route: { name: route.name, path: url.pathname.replace(/\/$/, '') || '/', fullPath: url.pathname, params: route.params ?? {}, query: {} },
-    post: {
-      posts: paginate(posts, 13),            // home: LOAD_POSTS count 13, latest
-      featured: paginate(posts.filter(p => p.featured), 8),
-      popular: paginate(popular, 4),
-    },
-  }
-  return deepMerge(state, extra)
-}
+const COPY_SVG = '<svg class="i-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="i-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+const LANG: Record<string, string> = { md: 'markdown', sh: 'bash', js: 'javascript', ts: 'typescript', plaintext: 'text' }
 
-function deepMerge(a: any, b: any) {
-  for (const [k, v] of Object.entries(b)) {
-    if (v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object') deepMerge(a[k], v)
-    else a[k] = v
-  }
-  return a
+// Post-processes rendered Markdown: contact email, code-block frames (language + copy button), heading anchors.
+export function enhanceHtml(html: string) {
+  return html
+    .replaceAll('{{CONTACT_EMAIL}}', `<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>`)
+    .replace(/<pre class="astro-code[^"]*"[^>]*data-language="([^"]*)"[^>]*>[\s\S]*?<\/pre>/g, (pre, lang) =>
+      `<div class="code"><div class="code-head"><span class="code-lang">${LANG[lang] ?? lang}</span><button type="button" class="copy-btn" aria-label="Copy code">${COPY_SVG}<span class="copy-label">Copy</span></button></div>${pre}</div>`)
+    .replace(/<(h[23]) id="([^"]+)">([\s\S]*?)<\/\1>/g, (_, tag, id, inner) =>
+      `<${tag} id="${id}">${inner}<a class="anchor" href="#${id}" aria-label="Link to this section">#</a></${tag}>`)
 }
-
-export function applyState(state: any) {
-  setPageState(state)
-  return serializeState()
-}
+export const absolute = (path: string) => SITE_URL + (path === '/' ? '/' : path.replace(/\/$/, ''))
+export const fmtDate = (d: Date) => d.toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })

@@ -1,10 +1,33 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/Newsletter.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-newsletter" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import { CONTACT_EMAIL } from '../../config/site'
+const perks = [
+  { icon: 'book', title: 'New guides first', text: 'Every new tutorial on the blog, with a one-line summary so you know what is worth your time.' },
+  { icon: 'sparkles', title: 'Releases, explained', text: 'What changed in Laravel, Vue, Inertia and Nuxt, and whether you should upgrade now.' },
+  { icon: 'link', title: 'Hand-picked links', text: 'The best packages, talks and articles from the wider community, curated by humans.' },
+  { icon: 'briefcase', title: 'Jobs worth applying for', text: 'A few freelance and remote roles from the community jobs group.' },
+]
 ---
-<Base seo={{ title: "🚀 Signup to our Newsletter ", description: "Signup to our Newsletter", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Newsletter" kicker="Newsletter" heading="One email a month. <span class='grad-text'>All signal.</span>"
+  lead="The best of Laravel and Vue in a five-minute read: new guides, releases worth knowing about and community picks. Free, no spam, unsubscribe any time.">
+  <section class="container section-tight">
+    <div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;align-items:start">
+      <div class="card" style="padding:32px;gap:16px">
+        <h2 style="font-size:1.4rem">Subscribe</h2>
+        <form class="grid" style="gap:14px" action="/page/newsletter" data-mailto={CONTACT_EMAIL} data-subject="Subscribe to the Laravel & VueJs newsletter">
+          <div class="field"><label for="n-email">Email address</label><input class="input" id="n-email" name="email" type="email" required placeholder="you@example.com" autocomplete="email"></div>
+          <button class="btn btn-primary" type="submit" style="justify-content:center">Subscribe <Icon name="arrow" size={16} class="icon-arrow" /></button>
+        </form>
+        <p class="form-note">This opens your email app with a subscribe request to {CONTACT_EMAIL}. We only use your address for the newsletter. See our <a class="link-arrow" href="/page/privacy-policy">privacy policy</a>.</p>
+        <hr style="border:0;border-top:1px solid var(--border);margin:6px 0">
+        <p class="muted" style="font-size:.95rem">Prefer feeds? Follow along without an email address:</p>
+        <div class="card-cats"><a class="chip" href="/feed.xml"><Icon name="rss" size={13} /> RSS</a><a class="chip" href="https://t.me/LaravelVueJs" rel="noopener"><Icon name="telegram" size={13} /> Telegram</a><a class="chip" href="https://x.com/LaravelVueJs" rel="noopener"><Icon name="x" size={13} /> X</a><a class="chip" href="https://www.linkedin.com/company/laravel-vuejs" rel="noopener"><Icon name="linkedin" size={13} /> LinkedIn</a></div>
+      </div>
+      <div class="grid" style="gap:14px">
+        {perks.map(p => <div class="card social-card reveal" style="align-items:flex-start"><span class="tile-icon"><Icon name={p.icon} size={20} /></span><span><strong>{p.title}</strong><span class="muted" style="display:block;font-size:.93rem;margin-top:4px">{p.text}</span></span></div>)}
+      </div>
+    </div>
+  </section>
+</Page>
+<style>@media (max-width: 860px) { .grid[style*="minmax(0,1fr) minmax(0,1fr)"] { grid-template-columns: 1fr !important; } }</style>

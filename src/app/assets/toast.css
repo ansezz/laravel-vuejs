@@ -1,6 +1,0 @@
-/* Minimal vue-toasted look (used by @nuxtjs/toast, position top-center) */
-.toasted-container { position: fixed; z-index: 10000; top: 10%; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
-.toasted { display: flex; align-items: center; min-height: 38px; margin-top: 10px; padding: 0 20px; border-radius: 3px; background: #353535; color: #fff; font-size: 15px; font-weight: 300; line-height: 1.1em; box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.24); }
-.toasted.success { background: #4caf50; }
-.toasted.error { background: #f44336; }
-.toasted.info { background: #3f51b5; }

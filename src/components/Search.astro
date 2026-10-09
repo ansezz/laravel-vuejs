@@ -1,0 +1,48 @@
+---
+import PageHero from './PageHero.astro'
+import Icon from './Icon.astro'
+---
+<PageHero kicker="Search" title="Search the blog" lead="Find guides by title, topic, tag or section heading." crumbs={[{ label: 'Search' }]}>
+  <form class="search-box" style="margin-top:28px" action="/search" method="get" role="search">
+    <Icon name="search" size={20} />
+    <label class="sr-only" for="q">Search articles</label>
+    <input class="input" id="q" name="q" type="search" placeholder="Try “inertia”, “setup” or “PHP 8.3”" autocomplete="off" autofocus>
+  </form>
+</PageHero>
+<section class="container section-tight" style="padding-top:8px">
+  <p class="search-status" id="search-status" aria-live="polite">Type to search all articles.</p>
+  <div class="grid grid-3" id="search-results"></div>
+</section>
+<script>
+  type Item = { url: string; title: string; excerpt: string; date: string; minutes: number; categories: { slug: string; name: string }[]; tags: string[]; headings: string[]; text: string }
+  const input = document.querySelector<HTMLInputElement>('#q')!
+  const out = document.querySelector<HTMLElement>('#search-results')!
+  const status = document.querySelector<HTMLElement>('#search-status')!
+  let index: Item[] | undefined
+  const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+  const mark = (s: string, terms: string[]) => terms.reduce((acc, t) => acc.replace(new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), '<mark>$1</mark>'), esc(s))
+  const fmt = (d: string) => new Date(d).toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
+  async function run() {
+    const q = input.value.trim()
+    const url = new URL(location.href); q ? url.searchParams.set('q', q) : url.searchParams.delete('q'); history.replaceState(null, '', url)
+    if (!q) { out.innerHTML = ''; status.textContent = 'Type to search all articles.'; return }
+    index ??= await (await fetch('/api/posts.json')).json()
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean)
+    const scored = index!.map(p => {
+      const fields = [[p.title, 5], [p.tags.join(' '), 3], [p.categories.map(c => c.name).join(' '), 3], [p.headings.join(' '), 2], [p.excerpt, 1], [p.text, 1]] as const
+      const score = terms.reduce((s, t) => { const hit = fields.reduce((a, [f, w]) => a + (f.toLowerCase().includes(t) ? w : 0), 0); return hit ? s + hit : -Infinity }, 0)
+      return { p, score }
+    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score)
+    status.textContent = scored.length ? `${scored.length} ${scored.length === 1 ? 'result' : 'results'} for “${q}”` : `No results for “${q}”. Try a broader term, or browse all articles.`
+    out.innerHTML = scored.map(({ p }) => `<article class="card"><div class="card-body">
+      <div class="card-cats">${p.categories.map(c => `<a class="chip chip-brand" href="/category/${c.slug}">${esc(c.name)}</a>`).join('')}</div>
+      <h2 style="font-size:1.2rem"><a href="${p.url}" style="position:static">${mark(p.title, terms)}</a></h2>
+      <p>${mark(p.excerpt, terms)}</p>
+      <div class="card-meta"><span>${fmt(p.date)}</span><span>${p.minutes} min read</span></div></div></article>`).join('')
+  }
+  let t: number | undefined
+  input.addEventListener('input', () => { clearTimeout(t); t = window.setTimeout(run, 120) })
+  input.closest('form')!.addEventListener('submit', e => { e.preventDefault(); run() })
+  const initial = new URL(location.href).searchParams.get('q') ?? new URL(location.href).searchParams.get('s')
+  if (initial) { input.value = initial; run() }
+</script>

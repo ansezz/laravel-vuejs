@@ -1,10 +1,7 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/TermConditions.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-term-conditions" })
+import Page from '../../layouts/Page.astro'
+import Terms from '../../components/Terms.astro'
 ---
-<Base seo={{ title: "🚀 Terms and conditions ", description: "Terms and conditions page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Terms and conditions" heading="Terms &amp; conditions" kicker="Legal" lead="The short, plain-language rules for using laravel-vuejs.space." updated="October 10, 2026" prose canonical="https://laravel-vuejs.space/page/terms-and-conditions">
+  <Terms />
+</Page>

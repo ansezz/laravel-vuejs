@@ -1,10 +1,66 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/AboutUs.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-about-us" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import NewsletterBand from '../../components/NewsletterBand.astro'
+import { SOCIALS, GROUPS, GITHUB_URL } from '../../config/site'
+const pillars = [
+  { icon: 'book', title: 'Practical guides', text: 'Step-by-step tutorials with real, copy-ready code, kept current with Laravel 13 and Vue 3.' },
+  { icon: 'users', title: 'A friendly community', text: 'Groups and channels where developers ask questions, share projects and help each other.' },
+  { icon: 'briefcase', title: 'Work and hiring', text: 'A free jobs group that connects Laravel and Vue developers with freelance and remote work.' },
+]
+const team = [
+  { name: 'Anass Ez-zouaine', role: 'Founder & maintainer', url: 'https://github.com/ansezz', initials: 'AE' },
+  { name: 'Othmane Gourirran', role: 'Contributor', url: 'https://github.com/OthmanDev', initials: 'OG' },
+  { name: 'Omar Bourhaouta', role: 'Contributor', url: 'https://github.com/bourhaouta', initials: 'OB' },
+]
 ---
-<Base seo={{ title: "About us", description: "About us page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="About us" kicker="About" heading="We help developers <span class='grad-text'>level up</span> with Laravel &amp; Vue."
+  lead="Laravel & VueJs is an open source blog and community for web developers who build with Laravel on the back end and Vue on the front end.">
+  <section class="container section-tight">
+    <div class="grid grid-3">
+      {pillars.map(p => <div class="card tile reveal"><span class="tile-icon"><Icon name={p.icon} size={22} /></span><h2 style="font-size:1.15rem">{p.title}</h2><p>{p.text}</p></div>)}
+    </div>
+  </section>
+
+  <section class="container section-tight">
+    <div class="grid grid-2" style="align-items:center;gap:48px">
+      <div class="prose">
+        <p class="kicker">Our story</p>
+        <h2 style="margin-top:12px">From a Facebook page to an open source platform</h2>
+        <p>Laravel & VueJs started as a place to share the best Laravel and Vue content we could find. The community grew quickly, so we built our own site: a full Laravel + GraphQL + Nuxt CMS, released as open source.</p>
+        <p>In 2026 we moved to <strong>laravel-vuejs.space</strong> and rebuilt the site as a fast static site. Articles are now Markdown files on GitHub, so anyone can suggest a fix or write a post with a pull request.</p>
+        <p><a href="/laravel-vuejs-open-source-cms">Read the full story</a> or <a href={GITHUB_URL}>browse the code</a>.</p>
+      </div>
+      <div class="grid" style="gap:12px">
+        {team.map(m => (
+          <a class="card social-card reveal" href={m.url} rel="noopener" target="_blank">
+            <span class="avatar" style="width:46px;height:46px">{m.initials}</span>
+            <span><strong>{m.name}</strong><small>{m.role}</small></span>
+            <Icon name="github" size={18} class="go" />
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="container section-tight" id="community">
+    <div class="section-head"><div><p class="kicker">Find us</p><h2>Join the conversation</h2><p>Pick the channels you like. We post new guides everywhere, and the Facebook groups are where most discussions happen.</p></div></div>
+    <div class="grid grid-2" style="margin-bottom:24px">
+      {GROUPS.map(g => (
+        <a class="card tile reveal" href={g.url} rel="noopener" target="_blank">
+          <span class="tile-icon"><Icon name={g.name.includes('Jobs') ? 'briefcase' : 'users'} size={22} /></span>
+          <h3>{g.name} <span class="muted" style="font-weight:400">· Facebook group</span></h3><p>{g.description}</p>
+          <span class="link-arrow">Join the group <Icon name="arrow-up-right" size={16} /></span>
+        </a>
+      ))}
+    </div>
+    <div class="grid grid-3">
+      {SOCIALS.map(s => (
+        <a class="card social-card reveal" href={s.url} rel="noopener" target="_blank">
+          <span class="tile-icon"><Icon name={s.id} size={20} /></span><span><strong>{s.name}</strong><small>{s.handle}</small></span><Icon name="arrow-up-right" size={18} class="go" />
+        </a>
+      ))}
+    </div>
+  </section>
+  <NewsletterBand slot="after" />
+</Page>

@@ -1,10 +1,42 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/HireUs.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-hire-us" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import { CONTACT_EMAIL } from '../../config/site'
+const services = [
+  { icon: 'layers', title: 'Laravel back ends', text: 'APIs, admin panels, queues, billing and integrations, built on Laravel 13 with tests from day one.' },
+  { icon: 'code', title: 'Vue front ends', text: 'Fast, accessible interfaces with Vue 3, TypeScript and Inertia or Nuxt, from a single widget to a full SPA.' },
+  { icon: 'zap', title: 'Upgrades & migrations', text: 'Move old Laravel, Vue 2 or Nuxt 2 apps to current versions safely, step by step, without a big-bang rewrite.' },
+  { icon: 'shield', title: 'Code reviews & audits', text: 'A clear report on security, performance and maintainability, with a prioritised list of fixes.' },
+  { icon: 'globe', title: 'Performance & hosting', text: 'Caching, query tuning, edge delivery and deploy pipelines on Forge, Laravel Cloud, Cloudflare and more.' },
+  { icon: 'users', title: 'Team support', text: 'Pairing, workshops and long-term help for teams adopting Laravel and Vue.' },
+]
+const steps = [
+  { title: 'Tell us about your project', text: 'Send a short description, your timeline and any links. A few lines are enough to start.' },
+  { title: 'Free intro call', text: 'We talk through goals and constraints, and tell you honestly whether we are a good fit.' },
+  { title: 'Clear proposal', text: 'You get a written scope, milestones and a fixed or capped price. No surprises.' },
+  { title: 'Build, ship, hand over', text: 'Regular demos, clean code in your repository, documentation and a smooth handover.' },
+]
+const mail = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Project inquiry')}`
+const ads = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Advertising inquiry')}`
 ---
-<Base seo={{ title: "🚀 Hire us ", description: "Hire us page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Hire us" kicker="Work with us" heading="Need a Laravel &amp; Vue team? <span class='grad-text'>Let's build it.</span>"
+  lead="We design, build and rescue Laravel and Vue applications, from first prototype to production at scale.">
+  <section class="container section-tight">
+    <div class="hero-cta" style="margin:0 0 40px"><a class="btn btn-primary" href={mail}>Start a project <Icon name="arrow" size={18} class="icon-arrow" /></a><a class="btn" href="#advertise">Advertise with us</a></div>
+    <div class="grid grid-3">
+      {services.map(s => <div class="card tile reveal"><span class="tile-icon"><Icon name={s.icon} size={22} /></span><h2 style="font-size:1.15rem">{s.title}</h2><p>{s.text}</p></div>)}
+    </div>
+  </section>
+  <section class="container section-tight">
+    <div class="section-head"><div><p class="kicker">How it works</p><h2>From idea to launch in four steps</h2></div></div>
+    <div class="steps grid grid-2">{steps.map(s => <div class="card step reveal"><h3>{s.title}</h3><p class="muted">{s.text}</p></div>)}</div>
+  </section>
+  <section class="container section-tight" id="advertise">
+    <div class="band reveal">
+      <p class="kicker" style="color:var(--mint)">Advertise</p>
+      <h2 style="margin-top:14px">Reach Laravel and Vue developers where they learn.</h2>
+      <p>Sponsored posts, newsletter placements and community shout-outs for products, courses, jobs and events that developers will actually find useful. Tell us what you want to promote and we will send you the options and rates.</p>
+      <div class="row"><a class="btn btn-light" href={ads}>Ask about advertising <Icon name="arrow" size={16} class="icon-arrow" /></a><a class="btn" href={mail}>Email {CONTACT_EMAIL}</a></div>
+    </div>
+  </section>
+</Page>

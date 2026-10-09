@@ -1,0 +1,34 @@
+---
+import Logo from './Logo.astro'
+import Icon from './Icon.astro'
+import { NAV } from '../config/site'
+const path = Astro.url.pathname.replace(/\/$/, '') || '/'
+const isActive = (href: string) => path === href || (href !== '/' && path.startsWith(href + '/')) ||
+  (href === '/posts' && (path.startsWith('/tag/') || path === '/posts')) ||
+  (href === '/jobs/job-archive' && path.startsWith('/jobs')) ||
+  (href === '/page/about-us' && ['/page/about-us', '/who-we-are'].includes(path))
+---
+<header class="site-header" id="top">
+  <a class="skip" href="#main">Skip to content</a>
+  <nav class="container nav" aria-label="Main">
+    <a class="nav-brand" href="/" aria-label="Laravel & VueJs home"><Logo /></a>
+    <ul class="nav-links">
+      {NAV.map(l => <li><a href={l.href} aria-current={isActive(l.href) ? 'page' : undefined}>{l.label}</a></li>)}
+    </ul>
+    <div class="nav-actions">
+      <a class="icon-btn" href="/search" aria-label="Search articles"><Icon name="search" size={18} /></a>
+      <button class="icon-btn theme-toggle" type="button" aria-label="Toggle dark mode" data-theme-toggle>
+        <Icon name="sun" size={18} class="sun" /><Icon name="moon" size={18} class="moon" />
+      </button>
+      <a class="btn btn-primary btn-sm hide-sm" href="/page/newsletter">Subscribe</a>
+      <details class="mobile-nav">
+        <summary class="icon-btn" aria-label="Menu"><Icon name="menu" size={18} class="i-menu" /><Icon name="close" size={18} class="i-close" /></summary>
+        <div class="mobile-panel">
+          {NAV.map(l => <a href={l.href}>{l.label}<Icon name="arrow" size={18} /></a>)}
+          <a href="/search">Search<Icon name="search" size={18} /></a>
+          <a class="btn btn-primary" href="/page/newsletter">Subscribe to the newsletter</a>
+        </div>
+      </details>
+    </div>
+  </nav>
+</header>
