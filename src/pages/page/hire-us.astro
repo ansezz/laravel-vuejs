@@ -1,7 +1,11 @@
 ---
 import Page from '../../layouts/Page.astro'
 import Icon from '../../components/Icon.astro'
+import FormGuard from '../../components/FormGuard.astro'
 import { CONTACT_EMAIL } from '../../config/site'
+const serviceOptions = ['New Laravel + Vue app', 'Laravel back end / API', 'Vue front end', 'Upgrade or migration', 'Code review or audit', 'Performance & hosting', 'Team support', 'Advertising', 'Something else']
+const budgets = ['Not sure yet', 'Under $5k', '$5k – $15k', '$15k – $50k', '$50k+']
+const timelines = ['Flexible', 'As soon as possible', 'Within a month', 'In 1–3 months', 'Later this year']
 const services = [
   { icon: 'layers', title: 'Laravel back ends', text: 'APIs, admin panels, queues, billing and integrations, built on Laravel 13 with tests from day one.' },
   { icon: 'code', title: 'Vue front ends', text: 'Fast, accessible interfaces with Vue 3, TypeScript and Inertia or Nuxt, from a single widget to a full SPA.' },
@@ -16,13 +20,11 @@ const steps = [
   { title: 'Clear proposal', text: 'You get a written scope, milestones and a fixed or capped price. No surprises.' },
   { title: 'Build, ship, hand over', text: 'Regular demos, clean code in your repository, documentation and a smooth handover.' },
 ]
-const mail = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Project inquiry')}`
-const ads = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Advertising inquiry')}`
 ---
 <Page title="Hire us" kicker="Work with us" heading="Need a Laravel &amp; Vue team? <span class='grad-text'>Let's build it.</span>"
   lead="We design, build and rescue Laravel and Vue applications, from first prototype to production at scale.">
   <section class="container section-tight">
-    <div class="hero-cta" style="margin:0 0 40px"><a class="btn btn-primary" href={mail}>Start a project <Icon name="arrow" size={18} class="icon-arrow" /></a><a class="btn" href="#advertise">Advertise with us</a></div>
+    <div class="hero-cta" style="margin:0 0 40px"><a class="btn btn-primary" href="#start">Start a project <Icon name="arrow" size={18} class="icon-arrow" /></a><a class="btn" href="#advertise">Advertise with us</a></div>
     <div class="grid grid-3">
       {services.map(s => <div class="card tile reveal"><span class="tile-icon"><Icon name={s.icon} size={22} /></span><h2 style="font-size:1.15rem">{s.title}</h2><p>{s.text}</p></div>)}
     </div>
@@ -36,7 +38,23 @@ const ads = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Advertising i
       <p class="kicker" style="color:var(--mint)">Advertise</p>
       <h2 style="margin-top:14px">Reach Laravel and Vue developers where they learn.</h2>
       <p>Sponsored posts, newsletter placements and community shout-outs for products, courses, jobs and events that developers will actually find useful. Tell us what you want to promote and we will send you the options and rates.</p>
-      <div class="row"><a class="btn btn-light" href={ads}>Ask about advertising <Icon name="arrow" size={16} class="icon-arrow" /></a><a class="btn" href={mail}>Email {CONTACT_EMAIL}</a></div>
+      <div class="row"><a class="btn btn-light" href="#start">Ask about advertising <Icon name="arrow" size={16} class="icon-arrow" /></a><a class="btn" href={`mailto:${CONTACT_EMAIL}`}>Email {CONTACT_EMAIL}</a></div>
     </div>
+  </section>
+  <section class="container-narrow section-tight" id="start">
+    <div class="section-head"><div><p class="kicker">Start a project</p><h2>Tell us what you're building</h2><p class="muted">A few lines are enough. We reply within two working days, and the intro call is free.</p></div></div>
+    <form class="card form-card" action="/api/forms/hire" method="post" data-api>
+      <div class="grid grid-2" style="gap:16px">
+        <div class="field"><label for="h-name">Your name</label><input class="input" id="h-name" name="name" required maxlength="100" autocomplete="name"></div>
+        <div class="field"><label for="h-email">Work email</label><input class="input" id="h-email" name="email" type="email" required autocomplete="email"></div>
+        <div class="field"><label for="h-company">Company <span class="opt">(optional)</span></label><input class="input" id="h-company" name="company" maxlength="120" autocomplete="organization"></div>
+        <div class="field"><label for="h-service">What do you need?</label><select class="input" id="h-service" name="service">{serviceOptions.map(s => <option>{s}</option>)}</select></div>
+        <div class="field"><label for="h-budget">Budget</label><select class="input" id="h-budget" name="budget">{budgets.map(s => <option>{s}</option>)}</select></div>
+        <div class="field"><label for="h-timeline">Timeline</label><select class="input" id="h-timeline" name="timeline">{timelines.map(s => <option>{s}</option>)}</select></div>
+      </div>
+      <div class="field"><label for="h-msg">About the project</label><textarea class="input" id="h-msg" name="message" required minlength="20" maxlength="5000" placeholder="Goals, current stack, links, anything that helps us understand the work."></textarea></div>
+      <div><button class="btn btn-primary" type="submit">Send project details <Icon name="arrow" size={16} class="icon-arrow" /></button>
+      <FormGuard /></div>
+    </form>
   </section>
 </Page>

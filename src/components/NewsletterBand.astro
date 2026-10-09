@@ -1,6 +1,6 @@
 ---
 import Icon from './Icon.astro'
-import { CONTACT_EMAIL } from '../config/site'
+import FormGuard from './FormGuard.astro'
 interface Props { title?: string; text?: string }
 const { title = 'Get the best of Laravel & Vue, once a month.', text = 'One short email with new guides, release notes worth reading and hand-picked community links. No spam, unsubscribe any time.' } = Astro.props
 ---
@@ -9,10 +9,13 @@ const { title = 'Get the best of Laravel & Vue, once a month.', text = 'One shor
     <p class="kicker" style="color:var(--mint)">Newsletter</p>
     <h2 style="margin-top:14px">{title}</h2>
     <p>{text}</p>
-    <form class="inline-form" style="margin-top:28px" action="/page/newsletter" data-mailto={CONTACT_EMAIL} data-subject="Subscribe to the Laravel & VueJs newsletter">
+    <form class="nl-form" style="margin-top:28px" action="/api/forms/newsletter" method="post" data-api>
+      <div class="inline-form">
       <label class="sr-only" for="nl-email">Email address</label>
       <input class="input" id="nl-email" name="email" type="email" required placeholder="you@example.com" autocomplete="email" style="background:rgb(255 255 255 / .08);color:#fff;border-color:rgb(255 255 255 / .2)">
       <button class="btn btn-light" type="submit">Subscribe <Icon name="arrow" size={16} class="icon-arrow" /></button>
+      </div>
+      <FormGuard />
     </form>
     <div class="row" style="margin-top:18px">
       <a class="btn btn-sm" href="/feed.xml"><Icon name="rss" size={16} /> RSS feed</a>

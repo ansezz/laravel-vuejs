@@ -29,12 +29,25 @@ export function initUi() {
     map.forEach((_, id) => { const el = document.getElementById(id); el && io.observe(el) })
   }
 
-  // Newsletter forms: no backend yet, so compose a subscribe email to the contact address
-  document.querySelectorAll<HTMLFormElement>('form[data-mailto]').forEach(f => f.addEventListener('submit', e => {
-    e.preventDefault()
-    const email = String(new FormData(f).get('email') ?? '')
-    location.href = `mailto:${f.dataset.mailto}?subject=${encodeURIComponent(f.dataset.subject ?? 'Hello')}&body=${encodeURIComponent('Please subscribe this address: ' + email)}`
-  }))
+  // Forms posting to the Worker (/api/forms/*): send with fetch and show the result inline.
+  // Without JS they still work as normal POSTs (the Worker redirects to /thanks or /form-error).
+  document.querySelectorAll<HTMLFormElement>('form[data-api]').forEach(f => {
+    const ts = f.querySelector<HTMLInputElement>('input[name="ts"]'); if (ts) ts.value = String(Date.now())
+    const status = f.querySelector<HTMLElement>('.form-status')
+    const btn = f.querySelector<HTMLButtonElement>('button[type="submit"]')
+    f.addEventListener('submit', async e => {
+      e.preventDefault()
+      if (btn?.disabled) return
+      const say = (msg: string, kind: 'ok' | 'error' | 'busy') => { if (status) { status.textContent = msg; status.dataset.kind = kind } }
+      btn && (btn.disabled = true); f.setAttribute('aria-busy', 'true'); say('Sending…', 'busy')
+      try {
+        const res = await fetch(f.action, { method: 'POST', body: new FormData(f), headers: { Accept: 'application/json' } })
+        const out = await res.json().catch(() => ({ ok: false, error: 'Something went wrong. Please try again.' }))
+        if (out.ok) { f.reset(); f.classList.add('sent'); say(out.message, 'ok') } else say(out.error ?? 'Something went wrong. Please try again.', 'error')
+      } catch { say('Network error. Check your connection and try again.', 'error') }
+      finally { btn && (btn.disabled = false); f.removeAttribute('aria-busy') }
+    })
+  })
 
   document.querySelector<HTMLDetailsElement>('.mobile-nav')?.querySelectorAll('a').forEach(a => a.addEventListener('click', () => a.closest('details')?.removeAttribute('open')))
 }

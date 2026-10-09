@@ -456,3 +456,21 @@ mark { background: rgb(99 249 230 / .35); color: inherit; border-radius: 4px; pa
   .reveal { animation: reveal linear both; animation-timeline: view(); animation-range: entry 0% entry 40%; }
   @keyframes reveal { from { opacity: 0; transform: translateY(24px); } }
 }
+
+/* Forms wired to the Worker */
+.form-card { padding: clamp(22px, 4vw, 34px); gap: 18px; }
+.opt { color: var(--muted); font-weight: 400; }
+.hp { position: absolute !important; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: .93rem; color: var(--text-2); }
+.check input { margin-top: 3px; accent-color: var(--brand); width: 16px; height: 16px; }
+.form-status { margin: 12px 0 0; font-size: .93rem; font-weight: 550; min-height: 1.4em; }
+.form-status:empty { display: none; }
+.form-status[data-kind="busy"] { color: var(--muted); }
+.form-status[data-kind="ok"] { color: var(--success, #0f8a5f); }
+.form-status[data-kind="error"] { color: var(--danger, #c0362c); }
+:root[data-theme="dark"] .form-status[data-kind="ok"] { color: var(--mint); }
+:root[data-theme="dark"] .form-status[data-kind="error"] { color: #ff8a80; }
+.band .form-status[data-kind="ok"] { color: var(--mint); }
+.band .form-status[data-kind="error"] { color: #ffb4ab; }
+.band .form-status[data-kind="busy"] { color: rgb(255 255 255 / .75); }
+button[disabled] { opacity: .65; cursor: progress; }

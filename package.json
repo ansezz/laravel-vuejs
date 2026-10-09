@@ -17,7 +17,9 @@
     "deploy": "wrangler deploy",
     "check": "astro check",
     "check:links": "node scripts/check-links.mjs",
-    "lhci": "npx --yes @lhci/cli@0.15.x autorun"
+    "lhci": "npx --yes @lhci/cli@0.15.x autorun",
+    "check:worker": "tsc -p worker",
+    "db:migrate:local": "wrangler d1 migrations apply laravel-vuejs-forms --local"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.19",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
+    "@cloudflare/workers-types": "^5.20261009.1",
     "typescript": "^6.0.3",
     "wrangler": "^4.149.0"
   }

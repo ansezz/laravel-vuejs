@@ -1,7 +1,9 @@
 {
-  // Cloudflare Workers static assets: the site is fully static (astro build -> dist/), no Worker code.
+  // Cloudflare Worker + static assets: dist/ (astro build) is served as static files;
+  // worker/index.ts handles the form API, and redirects www to the apex.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "laravel-vuejs",
+  "main": "worker/index.ts",
   "compatibility_date": "2026-10-01",
   // Builds the site before deploy/preview (Cloudflare Workers Builds runs only the deploy command).
   "build": { "command": "npm run build" },
@@ -9,15 +11,31 @@
   "previews": {},
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     // dist/404.html is served (with a 404 status) for unknown URLs
     "not_found_handling": "404-page",
     // /posts serves dist/posts/index.html directly; /posts/ redirects to /posts (matches the canonical URLs)
-    "html_handling": "drop-trailing-slash"
-  }
-  // Uncomment once the laravel-vuejs.space zone is in the same Cloudflare account;
-  // `wrangler deploy` then creates the DNS records and certificates for these hostnames.
-  // "routes": [
-  //   { "pattern": "laravel-vuejs.space", "custom_domain": true },
-  //   { "pattern": "www.laravel-vuejs.space", "custom_domain": true }
-  // ]
+    "html_handling": "drop-trailing-slash",
+    // The Worker runs first so it can redirect www -> apex, answer /api/forms/* and add security/cache headers.
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "laravel-vuejs-forms",
+      "database_id": "8bd265cc-9a14-4b3d-8df5-1e55dfad7215",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "NOTIFY_TO": "contact@laravel-vuejs.space",
+    "MAIL_FROM": "Laravel & VueJs <forms@laravel-vuejs.space>"
+  },
+  // Secrets (set with `npx wrangler secret put <NAME>`): RESEND_API_KEY (required for email), IP_SALT (optional)
+  "observability": { "enabled": true },
+  // Custom domains: wrangler creates the DNS records and certificates. www is redirected to the apex by the Worker.
+  "routes": [
+    { "pattern": "laravel-vuejs.space", "custom_domain": true },
+    { "pattern": "www.laravel-vuejs.space", "custom_domain": true }
+  ]
 }

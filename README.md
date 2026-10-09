@@ -91,3 +91,18 @@ Bug reports, ideas and pull requests are welcome.
 ## License
 
 Open source under the [MIT license](https://opensource.org/licenses/MIT).
+
+## Forms backend (Cloudflare Worker + D1 + Resend)
+
+`worker/index.ts` runs in front of the static assets (`run_worker_first: true`) and:
+
+- redirects `www.laravel-vuejs.space` to the apex (301);
+- handles `POST /api/forms/{contact|hire|newsletter|job}`: validation, honeypot (`website`), time trap (`ts`), same-site origin check and a per-IP rate limit (5 per 10 minutes, IPs stored only as salted SHA-256 hashes);
+- stores submissions in D1 (`laravel-vuejs-forms`, schema in `migrations/`) and emails a notification to `contact@laravel-vuejs.space` through Resend;
+- adds the security and cache headers (the `_headers` file is not applied when a Worker runs first).
+
+Forms work without JavaScript (the Worker answers with a 303 to `/thanks` or `/form-error`); with JavaScript they post with `fetch` and show the result inline.
+
+Secrets (`npx wrangler secret put NAME`): `RESEND_API_KEY` (required for email; without it submissions are still stored, with `email_status = 'skipped: no RESEND_API_KEY'`), `IP_SALT` (optional).
+
+Local development: `npm run db:migrate:local && npx wrangler dev`. Read submissions: `npx wrangler d1 execute laravel-vuejs-forms --remote --command "select * from submissions order by id desc limit 20"`.
