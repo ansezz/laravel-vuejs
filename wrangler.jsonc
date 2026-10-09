@@ -11,8 +11,8 @@
     "directory": "./dist",
     // dist/404.html is served (with a 404 status) for unknown URLs
     "not_found_handling": "404-page",
-    // /posts and /posts/ both serve dist/posts/index.html
-    "html_handling": "auto-trailing-slash"
+    // /posts serves dist/posts/index.html directly; /posts/ redirects to /posts (matches the canonical URLs)
+    "html_handling": "drop-trailing-slash"
   }
   // Uncomment once the laravel-vuejs.space zone is in the same Cloudflare account;
   // `wrangler deploy` then creates the DNS records and certificates for these hostnames.
