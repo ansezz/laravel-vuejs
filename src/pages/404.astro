@@ -1,15 +1,32 @@
 ---
 import Base from '../layouts/Base.astro'
 import Icon from '../components/Icon.astro'
+import { allPosts } from '../lib/content'
+const latest = (await allPosts()).slice(0, 3)
 ---
-<Base title="Page not found" noindex>
-  <section class="hero" style="text-align:center">
+<Base title="Page not found" description="This page doesn't exist. Find what you need from the latest guides or search." noindex>
+  <section class="hero nf">
     <div class="hero-bg"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
-    <div class="container-narrow">
-      <p class="kicker">Error 404</p>
-      <h1 style="margin-top:16px"><span class="grad-text">Route [not.found]</span> is not defined.</h1>
-      <p class="lead" style="margin-inline:auto">The page you are looking for has moved or never existed. Try searching, or head back home.</p>
-      <div class="hero-cta" style="justify-content:center"><a class="btn btn-primary" href="/">Back home <Icon name="arrow" size={18} class="icon-arrow" /></a><a class="btn" href="/search"><Icon name="search" size={18} /> Search</a></div>
+    <div class="container-narrow" style="text-align:center">
+      <p class="nf-code grad-text" aria-hidden="true">404</p>
+      <h1>This page took a different route.</h1>
+      <p class="lead" style="margin-inline:auto">The link may be old, mistyped, or the page has moved since we rebuilt the site. Let's get you back on track.</p>
+      <form class="search-box" style="margin:32px auto 0" action="/search" method="get" role="search">
+        <Icon name="search" size={20} />
+        <label class="sr-only" for="nf-q">Search articles</label>
+        <input class="input" id="nf-q" name="q" type="search" placeholder="Search the guides…">
+      </form>
+      <div class="hero-cta" style="justify-content:center"><a class="btn btn-primary" href="/">Back to home <Icon name="arrow" size={18} class="icon-arrow" /></a><a class="btn" href="/posts">Browse all articles</a></div>
+      <div class="nf-links">
+        <p class="kicker">Popular right now</p>
+        <ul>{latest.map(p => <li><a class="link-arrow" href={p.url}>{p.title} <Icon name="arrow" size={15} /></a></li>)}</ul>
+      </div>
     </div>
   </section>
 </Base>
+<style>
+  .nf-code { font: 800 clamp(6rem, 22vw, 11rem)/.9 var(--font-sans); letter-spacing: -0.06em; margin: 0 0 8px; }
+  .nf h1 { font-size: clamp(1.9rem, 4.4vw, 3rem); letter-spacing: -0.035em; margin-top: 0; }
+  .nf-links { margin-top: 48px; }
+  .nf-links ul { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 10px; justify-items: center; }
+</style>

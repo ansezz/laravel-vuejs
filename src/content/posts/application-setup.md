@@ -32,7 +32,7 @@ The installer asks a few questions. Pick:
 - **Authentication:** Laravel's built-in authentication
 - **Testing framework:** Pest
 
-It then installs Composer and npm dependencies, creates a SQLite database and runs the first migrations.
+It then installs Composer and npm dependencies, creates a SQLite database and runs the first migrations. The Vue kit ships with **Inertia 3**, Vue 3, TypeScript, Tailwind CSS 4 and shadcn-vue.
 
 ## 3. Start the dev servers
 
@@ -209,6 +209,6 @@ php artisan test
 
 - Add a `show` page for a single post, with route model binding on `slug`.
 - Use [Inertia forms](https://inertiajs.com/forms) (`useForm`) to create and edit posts.
-- Run `npm run build` for production, and `npm run build:ssr` if you want Inertia server-side rendering.
+- Run `npm run build` for production. With Inertia 3, server-side rendering already works in `npm run dev`; build the SSR bundle with `npm run build:ssr` when you deploy.
 
 > Looking for the original Laravel 5 + Nuxt 2 setup of this site? It is in the repository's Git history, from before the Astro migration.

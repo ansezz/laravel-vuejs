@@ -7,7 +7,7 @@ const pages = ['/', '/posts', '/search', '/page/about-us', '/page/contact-us', '
 
 export const GET = async () => {
   const posts = await allPosts()
-  const urls = [
+  const urls: { loc: string; lastmod?: string }[] = [
     ...pages.map(p => ({ loc: SITE_URL + p })),
     ...posts.map(p => ({ loc: SITE_URL + p.url, lastmod: (p.updated ?? p.date).toISOString().slice(0, 10) })),
     ...categories.map(c => ({ loc: `${SITE_URL}/category/${c.slug}` })),

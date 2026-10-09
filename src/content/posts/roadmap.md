@@ -25,7 +25,7 @@ In 2026 we rebuilt the site from scratch. Here is where things stand.
 
 ## Next
 
-- [ ] **More tutorials:** Laravel 13, Vue 3.5 and 3.6, Inertia 2, testing with Pest
+- [ ] **More tutorials:** Laravel 13, Vue 3.5 and 3.6, Inertia 3, testing with Pest
 - [ ] **Newsletter:** a short monthly email with the best Laravel and Vue links
 - [ ] **Jobs board:** listings on the site, not only in the Facebook group
 - [ ] **Contributor guide:** a style guide and templates for new authors

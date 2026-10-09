@@ -10,7 +10,7 @@ const posts = await allPosts()
 const [lead, ...rest] = posts
 const count = (slug: string) => posts.filter(p => p.categories.some(c => c.slug === slug)).length
 const topicIcon: Record<string, string> = { laravel: 'layers', vuejs: 'code', jobs: 'briefcase', ebooks: 'book' }
-const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 2', 'TypeScript', 'Vite', 'Tailwind CSS 4', 'Pest', 'Nuxt 4', 'Pinia']
+const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 3', 'TypeScript', 'Vite 8', 'Tailwind CSS 4', 'Pest', 'Nuxt 4', 'Pinia']
 ---
 <Base description="Practical guides, tutorials and a friendly community for developers building modern apps with Laravel and Vue.">
   <section class="hero">
@@ -34,7 +34,7 @@ const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 2', 'TypeScript', '
         <div class="window-bar"><i></i><i></i><i></i>
           <div class="window-tabs"><span class="on">routes/web.php</span><span>Posts.vue</span></div>
         </div>
-<pre><code><span class="c">// Laravel 13 + Inertia 2</span>
+<pre><code><span class="c">// Laravel 13 + Inertia 3</span>
 <span class="t">Route</span>::<span class="f">get</span>(<span class="s">'/posts'</span>, <span class="k">fn</span> () =&gt; <span class="t">Inertia</span>::<span class="f">render</span>(<span class="s">'Posts'</span>, [
     <span class="s">'posts'</span> =&gt; <span class="t">Post</span>::<span class="f">latest</span>()-&gt;<span class="f">paginate</span>(),
 ]));

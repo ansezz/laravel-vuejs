@@ -16,7 +16,7 @@ This blog was first built on Laravel 5, Nova, GraphQL, Nuxt 2 and Apollo. A lot 
 
 ## The server side
 
-**Laravel 13** was released on March 17, 2026. It needs **PHP 8.3 to 8.5**. Laravel 12 (PHP 8.2 to 8.5) still gets security fixes until February 2027, but new projects should start on 13.
+**Laravel 13** was released on March 17, 2026. It needs **PHP 8.3 to 8.5**. Laravel 12 (PHP 8.2 to 8.5) stopped getting bug fixes in August 2026 and gets security fixes until February 2027, so new projects should start on 13.
 
 Your PHP install needs these extensions. Most PHP distributions ship them by default:
 
@@ -45,12 +45,13 @@ php -m          # lists the loaded extensions
 
 ## The front-end side
 
-- **Node.js**, a current LTS release (22 or 24), with npm, pnpm or Bun
+- **Node.js 22.12+ or 24 LTS**, with npm, pnpm or Bun
 - **Vue 3.5**, the current stable line. Vue 3.6, with the opt-in *Vapor mode* that skips the virtual DOM, is in release candidate as of October 2026.
-- **Vite**, which Laravel uses to build front-end assets
+- **Vite 8**, which Laravel uses to build front-end assets (it now bundles with Rolldown)
+- **Inertia 3**, the glue between Laravel and Vue in the official starter kits (Inertia 2 stopped getting bug fixes on September 26, 2026)
 
 ```bash
-node -v   # v22 or newer
+node -v   # v22.12+ or v24
 npm -v
 ```
 
@@ -62,7 +63,7 @@ Here is the stack this blog started with, next to what we would pick for a new p
 | --- | --- | --- |
 | Framework | Laravel 5.8 | Laravel 13 |
 | Admin panel | Nova | Nova 5 or Filament |
-| API | GraphQL with Lighthouse | Inertia 2 for app pages; JSON:API resources or Lighthouse for public APIs |
+| API | GraphQL with Lighthouse | Inertia 3 for app pages; JSON:API resources or Lighthouse for public APIs |
 | Front end | Nuxt 2, Vue 2, Options API | Vue 3.5 with `<script setup>` and TypeScript, via Inertia or Nuxt 4 |
 | State | Vuex | Pinia, or Inertia page props |
 | Styling | Bootstrap 3, Stylus | Tailwind CSS 4 |
@@ -73,4 +74,4 @@ Here is the stack this blog started with, next to what we would pick for a new p
 
 ## A good default
 
-If you are not sure where to start, use the official **Laravel + Vue starter kit**. You get Laravel 13, Inertia 2, Vue 3 with TypeScript, Tailwind and shadcn-vue, plus login, registration and email verification already wired up. Our [setup guide](/application-setup) walks you through it.
+If you are not sure where to start, use the official **Laravel + Vue starter kit**. You get Laravel 13, Inertia 3, Vue 3 with TypeScript, Tailwind and shadcn-vue, plus login, registration and email verification already wired up. Our [setup guide](/application-setup) walks you through it.

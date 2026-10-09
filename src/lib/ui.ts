@@ -5,7 +5,7 @@ export function initUi() {
     const next = root.dataset.theme === 'dark' ? 'light' : 'dark'
     const apply = () => { root.dataset.theme = next; try { localStorage.setItem('theme', next) } catch {} }
     const d = document as Document & { startViewTransition?: (cb: () => void) => unknown }
-    d.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches ? d.startViewTransition(apply) : apply()
+    typeof d.startViewTransition === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches ? d.startViewTransition(apply) : apply()
   }))
 
   const header = document.querySelector('.site-header')

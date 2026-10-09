@@ -1,7 +1,7 @@
 {
   "name": "laravel-vuejs",
   "version": "3.0.0",
-  "description": "Laravel & VueJs blog — static Astro build of laravel-vuejs.space",
+  "description": "Laravel & VueJs blog \u2014 static Astro build of laravel-vuejs.space",
   "author": "Anass EZ-ZOUAINE <ansezzouaine@gmail.com>",
   "private": true,
   "license": "MIT",
@@ -14,7 +14,10 @@
     "build": "astro build",
     "preview": "astro preview",
     "cf:dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "check": "astro check",
+    "check:links": "node scripts/check-links.mjs",
+    "lhci": "npx --yes @lhci/cli@0.15.x autorun"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.19",
@@ -23,6 +26,8 @@
     "astro": "^7.3.8"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "^6.0.3",
     "wrangler": "^4.149.0"
   }
 }
