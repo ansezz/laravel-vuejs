@@ -1,10 +1,37 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/JobsJobArchive.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "jobs-job-archive" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import JobsNav from '../../components/JobsNav.astro'
+import { GROUPS } from '../../config/site'
+const jobs = GROUPS[1]
+const roles = ['Laravel back-end developer', 'Vue / Nuxt front-end developer', 'Full-stack Laravel + Vue', 'Inertia & Livewire', 'API & integrations', 'Upgrades & maintenance']
 ---
-<Base seo={{}} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Laravel & Vue jobs" kicker="Jobs" heading="Find your next <span class='grad-text'>Laravel &amp; Vue</span> gig." lead="Freelance, contract and remote work from the Laravel & VueJs community. Posting is free, and so is applying." description="Freelance and remote Laravel and Vue jobs from the Laravel & VueJs community.">
+  <JobsNav slot="hero" />
+  <section class="container section-tight">
+    <div class="grid grid-2" style="gap:24px">
+      <a class="card tile reveal highlight" href={jobs.url} rel="noopener" target="_blank">
+        <span class="tile-icon"><Icon name="briefcase" size={22} /></span>
+        <h2 style="font-size:1.4rem">Browse jobs in the community group</h2>
+        <p>New Laravel and Vue jobs are posted every week in our {jobs.name} group on Facebook. Join to see every listing and get notified about new ones.</p>
+        <span class="btn btn-primary" style="align-self:flex-start;margin-top:8px">Open the jobs group <Icon name="arrow-up-right" size={16} /></span>
+      </a>
+      <a class="card tile reveal" href="/jobs/create-job">
+        <span class="tile-icon"><Icon name="sparkles" size={22} /></span>
+        <h2 style="font-size:1.4rem">Hiring? Post a job for free</h2>
+        <p>Reach thousands of Laravel and Vue developers. Share your listing in the group, or ask us to feature it across our channels.</p>
+        <span class="btn" style="align-self:flex-start;margin-top:8px">How to post a job <Icon name="arrow" size={16} class="icon-arrow" /></span>
+      </a>
+    </div>
+  </section>
+  <section class="container section-tight">
+    <div class="section-head"><div><p class="kicker">Popular roles</p><h2>What companies are looking for</h2></div></div>
+    <div class="stack" style="justify-content:flex-start">{roles.map(r => <span class="chip"><i></i>{r}</span>)}</div>
+    <div class="empty" style="margin-top:40px">
+      <div class="tile tile-icon" style="padding:0"><Icon name="layers" size={22} /></div>
+      <h3>An on-site jobs board is coming</h3>
+      <p>We are building searchable listings right here on laravel-vuejs.space. Until then, the community group is the best place to find and post jobs.</p>
+      <a class="btn" href="/page/newsletter">Get notified <Icon name="arrow" size={16} class="icon-arrow" /></a>
+    </div>
+  </section>
+</Page>

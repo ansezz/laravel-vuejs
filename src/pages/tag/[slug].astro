@@ -1,16 +1,11 @@
 ---
 import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/Tag.vue'
-import { allPosts, tags, pageState, paginate } from '../../lib/content'
-
-// pages/tag/_slug + middleware/tag.js (tagBySlug, postsByTag)
-export function getStaticPaths() {
-  return tags.map((tag) => ({ params: { slug: tag.slug }, props: { tag } }))
-}
-const { tag } = Astro.props
-const posts = (await allPosts()).filter(p => p.tags.some((t: any) => t.slug === tag.slug))
-const state = await pageState(Astro.url, { name: 'tag-slug', params: { slug: tag.slug } }, { tag: { tag, posts: paginate(posts, 12) } })
+import Archive from '../../components/Archive.astro'
+import { allPosts, tags, type Tag } from '../../lib/content'
+export const getStaticPaths = () => tags.map(tag => ({ params: { slug: tag.slug }, props: { tag } }))
+const { tag } = Astro.props as { tag: Tag }
+const posts = (await allPosts()).filter(p => p.tags.some(t => t.slug === tag.slug))
 ---
-<Base seo={{ title: tag.name, description: tag.name }} state={state}>
-  <Root client:load />
+<Base title={`Posts tagged ${tag.name}`} description={`Laravel & VueJs articles tagged ${tag.name}.`} noindex={posts.length === 0}>
+  <Archive kicker="Tag" title={`#${tag.name}`} lead={`${posts.length} ${posts.length === 1 ? 'article' : 'articles'} tagged ${tag.name}.`} posts={posts} crumbs={[{ label: 'Articles', href: '/posts' }, { label: tag.name }]} />
 </Base>

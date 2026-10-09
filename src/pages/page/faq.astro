@@ -1,10 +1,23 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/Faq.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-faq" })
+import Page from '../../layouts/Page.astro'
+import { CONTACT_EMAIL, GITHUB_URL } from '../../config/site'
+const faqs = [
+  { q: 'What is Laravel & VueJs?', a: `<p>An open source blog and community for developers who build with <strong>Laravel</strong> and <strong>Vue</strong>. We publish practical guides, share community content and help developers find work.</p>` },
+  { q: 'Is it free?', a: `<p>Yes. Every article is free to read, the community groups are free to join, and the site's code is open source under the MIT license.</p>` },
+  { q: 'Which versions do your guides cover?', a: `<p>New and updated guides target <strong>Laravel 13</strong> (PHP 8.3+) and <strong>Vue 3.5</strong>, with Inertia 2, Vite and TypeScript. Each article shows when it was last updated.</p>` },
+  { q: 'Did the site move?', a: `<p>Yes. Our home is now <strong>laravel-vuejs.space</strong>. Our previous domain no longer belongs to the project, so please update your bookmarks and links to the new address.</p>` },
+  { q: 'Can I write for the blog?', a: `<p>Please do. Articles are Markdown files in our <a href="${GITHUB_URL}">GitHub repository</a>. Open a pull request with your draft, or email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> with your idea first. <a href="/who-we-are#write-for-the-blog">Read more</a>.</p>` },
+  { q: 'How do I post a job?', a: `<p>Post it for free in our <a href="https://www.facebook.com/groups/Laravel.Vuejs.Jobs">Freelance &amp; Remote Jobs group</a>, or email us for a featured listing. See the <a href="/jobs/create-job">post a job</a> page.</p>` },
+  { q: 'Do you have user accounts?', a: `<p>Not at the moment. The new site is fully static and does not need an account: there is nothing to sign up for, and we do not store passwords. Comments use Disqus, which you load only if you want to.</p>` },
+  { q: 'Can you build my project?', a: `<p>Yes, we take on Laravel and Vue projects, upgrades and code reviews. Have a look at <a href="/page/hire-us">Hire us</a>.</p>` },
+  { q: 'I found a mistake. How do I report it?', a: `<p>Every article has a GitHub link to suggest an edit. You can also <a href="${GITHUB_URL}/issues">open an issue</a> or email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>` },
+]
+const jsonld = [{ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a.replace(/<[^>]+>/g, '') } })) }]
 ---
-<Base seo={{ title: "🚀 FAQ ", description: "FAQ page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="FAQ" kicker="Help" heading="Frequently asked questions" lead="Everything you might want to know about the blog, the community and working with us.">
+  <section class="container-narrow section-tight">
+    <div class="faq">{faqs.map((f, i) => <details open={i === 0}><summary>{f.q}</summary><div class="answer" set:html={f.a} /></details>)}</div>
+    <p class="muted" style="margin-top:32px;text-align:center">Still have a question? <a class="link-arrow" href="/page/contact-us">Contact us</a></p>
+  </section>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonld)} />
+</Page>

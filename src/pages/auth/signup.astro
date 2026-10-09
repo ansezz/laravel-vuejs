@@ -1,10 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/AuthSignup.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "auth-signup" })
+import AuthNotice from '../../components/AuthNotice.astro'
 ---
-<Base seo={{ title: "Create new account", description: "Create new account now", type: 'website' }} state={state}>
-  <Root client:load />
+<Base title="Account" description="Laravel & VueJs no longer needs an account: all articles are free to read." noindex>
+  <AuthNotice />
 </Base>

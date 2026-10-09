@@ -1,10 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/AuthNotification.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "auth-notification" })
+import AuthNotice from '../../components/AuthNotice.astro'
 ---
-<Base seo={{ title: "Notification", description: "Manage your notification settings", type: 'website' }} state={state}>
-  <Root client:load />
+<Base title="Account" description="Laravel & VueJs no longer needs an account: all articles are free to read." noindex>
+  <AuthNotice />
 </Base>

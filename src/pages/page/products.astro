@@ -1,10 +1,24 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/Products.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-products" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import { GITHUB_URL } from '../../config/site'
+const items = [
+  { icon: 'github', title: 'laravel-vuejs.space', tag: 'Astro · MIT', text: 'The source of this site: a fast static blog with Markdown posts, dark mode, search, feeds and Cloudflare deployment config.', href: GITHUB_URL },
+  { icon: 'layers', title: 'The original Laravel + Nuxt CMS', tag: 'Laravel · GraphQL · Nuxt 2', text: 'Our first platform, with Nova, Lighthouse GraphQL, Scout and Apollo. Browse it at commit 0b000da, the last version before the move to Astro.', href: `${GITHUB_URL}/tree/0b000da` },
+]
 ---
-<Base seo={{ title: "🚀 Products ", description: "Products page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Open source" kicker="Products" heading="Open source, <span class='grad-text'>by default</span>" lead="Everything we build for the community is free and open source. Use it, learn from it, and send a pull request.">
+  <section class="container section-tight">
+    <div class="grid grid-2">
+      {items.map(i => (
+        <a class="card tile reveal" href={i.href} rel="noopener" target="_blank">
+          <span class="tile-icon"><Icon name={i.icon} size={22} /></span>
+          <span class="count">{i.tag}</span>
+          <h2 style="font-size:1.3rem">{i.title}</h2>
+          <p>{i.text}</p>
+          <span class="link-arrow">View on GitHub <Icon name="arrow-up-right" size={16} /></span>
+        </a>
+      ))}
+    </div>
+  </section>
+</Page>

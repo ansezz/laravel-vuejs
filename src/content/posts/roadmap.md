@@ -1,37 +1,36 @@
 ---
 id: 1
-title: "Laravel + VueJs, NuxtJs + GraphQL: the roadmap"
-excerpt: "What is done and what is next for the back-end and the GraphQL API of the Laravel & VueJs CMS."
-image: /storage/posts/home3.jpg
+title: "The Laravel & VueJs roadmap"
+excerpt: "What we shipped with the move to laravel-vuejs.space, and what comes next: more tutorials, a newsletter, a better jobs board and an easier way to contribute."
 date: 2019-05-12T05:08:22Z
+updated: 2026-10-10T00:00:00Z
+snippet: "git log --oneline"
 featured: true
 categories: [vuejs]
-tags: [graphql, nuxtjs, roadmap]
+tags: [roadmap, community, open-source]
 ---
 
-<!-- Source: TODO.md (repository root). -->
+The first roadmap for this project was a checklist for a GraphQL API: single posts, featured posts, posts by category and tag, search, newsletter and auth. Most of those features shipped in the original Laravel + Nuxt version.
 
-## Back-End
+In 2026 we rebuilt the site from scratch. Here is where things stand.
 
-- [ ] NewsLetter
-- [ ] Website Setting
-- [ ] Post types ?
+## Shipped
 
-## API
+- [x] New home: **laravel-vuejs.space**
+- [x] Static site built with Astro, served from Cloudflare's edge
+- [x] A new design, with dark mode, readable typography and syntax-highlighted code
+- [x] Posts as Markdown files, so anyone can contribute with a pull request
+- [x] RSS feeds, sitemap and clean URLs
+- [x] Client-side search over every article
 
-- [x] Single post
-- [ ] Website Setting
-- [x] Featured posts
-- [ ] Post by category
-- [ ] Post by tag
-- [ ] Post by author
-- [ ] Posts with pagination and filter
-- [ ] Search
-- [ ] NewsLetter
-- [ ] Profile
-- [ ] Auth
-    - [ ] Login
-    - [ ] Logout
-    - [ ] Register
-    - [ ] Forget password
-    - [ ] reset password
+## Next
+
+- [ ] **More tutorials:** Laravel 13, Vue 3.5 and 3.6, Inertia 2, testing with Pest
+- [ ] **Newsletter:** a short monthly email with the best Laravel and Vue links
+- [ ] **Jobs board:** listings on the site, not only in the Facebook group
+- [ ] **Contributor guide:** a style guide and templates for new authors
+- [ ] **Series:** multi-part guides, from a first app to production
+
+## Have an idea?
+
+Open an issue on [GitHub](https://github.com/ansezz/laravel-vuejs/issues), or tell us in the [Facebook group](https://www.facebook.com/groups/LaravelVueJs/). The roadmap is shaped by what the community needs.

@@ -1,0 +1,11 @@
+---
+import PageHero from './PageHero.astro'
+import Icon from './Icon.astro'
+---
+<PageHero kicker="Accounts" title="No account needed" lead="The new laravel-vuejs.space is fully static: every article is free to read without signing in. Member accounts from the old site have been retired, and we no longer store any passwords." crumbs={[{ label: 'Account' }]}>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="/posts">Read the articles <Icon name="arrow" size={18} class="icon-arrow" /></a>
+    <a class="btn" href="/page/newsletter"><Icon name="mail" size={18} /> Get the newsletter</a>
+    <a class="btn btn-ghost" href="/page/faq">Why?</a>
+  </div>
+</PageHero>

@@ -1,10 +1,30 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/Courses.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-courses" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+const paths = [
+  { level: 'Start here', title: 'Laravel foundations', items: [
+    ['Laravel documentation', 'https://laravel.com/docs'], ['Laravel Bootcamp', 'https://bootcamp.laravel.com'], ['Laracasts: Laravel path', 'https://laracasts.com/path'], ['Our guide: what you need in 2026', '/requirements'] ] },
+  { level: 'Start here', title: 'Vue foundations', items: [
+    ['Vue.js guide', 'https://vuejs.org/guide/introduction.html'], ['Vue tutorial (interactive)', 'https://vuejs.org/tutorial/'], ['Vue Mastery', 'https://www.vuemastery.com'], ['Vue School', 'https://vueschool.io'] ] },
+  { level: 'Full stack', title: 'Laravel + Vue with Inertia', items: [
+    ['Inertia.js documentation', 'https://inertiajs.com'], ['Laravel starter kits', 'https://laravel.com/docs/starter-kits'], ['Our guide: set up Laravel 13 + Vue 3', '/application-setup'] ] },
+  { level: 'Going further', title: 'Testing, quality and production', items: [
+    ['Pest', 'https://pestphp.com'], ['Vitest', 'https://vitest.dev'], ['Laravel deployment', 'https://laravel.com/docs/deployment'], ['Nuxt', 'https://nuxt.com/docs'] ] },
+]
 ---
-<Base seo={{ title: "Best Courses", description: "Best Courses page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Learning paths" kicker="Learn" heading="Learning paths" lead="Our pick of the best free and paid resources to learn Laravel and Vue, in a sensible order. Our own long-form courses are on the roadmap.">
+  <section class="container section-tight">
+    <div class="grid grid-2">
+      {paths.map(p => (
+        <div class="card tile reveal">
+          <span class="chip chip-brand" style="align-self:flex-start">{p.level}</span>
+          <h2 style="font-size:1.3rem">{p.title}</h2>
+          <ul style="list-style:none;padding:0;margin:0;display:grid;gap:10px">
+            {p.items.map(([label, href]) => <li><a class="link-arrow" href={href} rel={href.startsWith('http') ? 'noopener' : undefined}>{label} <Icon name={href.startsWith('http') ? 'arrow-up-right' : 'arrow'} size={15} /></a></li>)}
+          </ul>
+        </div>
+      ))}
+    </div>
+    <p class="muted" style="margin-top:28px;font-size:.9rem">We are not affiliated with these sites; we simply like them. Want us to build a course on a topic? <a class="link-arrow" href="/page/contact-us">Tell us</a>.</p>
+  </section>
+</Page>

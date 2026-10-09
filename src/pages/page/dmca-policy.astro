@@ -1,10 +1,33 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/DmcaPolicy.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "page-dmca-policy" })
+import Page from '../../layouts/Page.astro'
+import { CONTACT_EMAIL, SITE_DOMAIN } from '../../config/site'
 ---
-<Base seo={{ title: "🚀 Dmca Policy ", description: "Dmca Policy page", type: 'website' }} state={state}>
-  <Root client:load />
-</Base>
+<Page title="DMCA policy" heading="DMCA &amp; copyright policy" kicker="Legal" lead="How to report content that you believe infringes your copyright, and how to respond to a report." updated="October 10, 2026" prose>
+  <p>We respect intellectual property and respond to clear notices of alleged copyright infringement on <strong>{SITE_DOMAIN}</strong>, in line with the U.S. Digital Millennium Copyright Act (DMCA).</p>
+  <h2>Reporting infringement</h2>
+  <p>Email <a href={`mailto:${CONTACT_EMAIL}?subject=DMCA%20notice`}>{CONTACT_EMAIL}</a> with the subject “DMCA notice” and include:</p>
+  <ol>
+    <li>Your physical or electronic signature, as the copyright owner or a person authorised to act for them.</li>
+    <li>A description of the copyrighted work you believe was infringed.</li>
+    <li>The exact URL(s) on the Site of the material you want removed.</li>
+    <li>Your name, postal address, telephone number and email address.</li>
+    <li>A statement that you believe in good faith that the use is not authorised by the copyright owner, its agent or the law.</li>
+    <li>A statement, under penalty of perjury, that the information in your notice is accurate and that you are authorised to act for the copyright owner.</li>
+  </ol>
+  <h2>What happens next</h2>
+  <ul>
+    <li>We review the notice and, if it is valid, remove or disable access to the material.</li>
+    <li>We let the author or contributor know, and share a copy of the notice with them.</li>
+    <li>Repeat infringers will have their contributions removed and may be blocked from contributing.</li>
+  </ul>
+  <h2>Counter-notice</h2>
+  <p>If you believe your material was removed by mistake, send a counter-notice to the same address with:</p>
+  <ol>
+    <li>Your physical or electronic signature.</li>
+    <li>The material that was removed and where it appeared before removal.</li>
+    <li>A statement, under penalty of perjury, that you believe in good faith that it was removed because of a mistake or misidentification.</li>
+    <li>Your name, address, telephone number and email, and a statement that you consent to the jurisdiction of the courts of your address and will accept service from the person who sent the original notice.</li>
+  </ol>
+  <p>Unless the original reporter tells us they have started legal action, we may restore the material 10 to 14 business days after receiving a valid counter-notice.</p>
+  <blockquote><p>Submitting a false or misleading notice or counter-notice may make you liable for damages. If you are unsure whether material infringes your rights, consider asking a lawyer first.</p></blockquote>
+</Page>

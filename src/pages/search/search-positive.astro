@@ -1,10 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/SearchPositive.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "search-search-positive" })
+import Search from '../../components/Search.astro'
 ---
-<Base seo={{}} state={state}>
-  <Root client:load />
+<Base title="Search" description="Search Laravel & VueJs guides and tutorials." noindex canonical="https://laravel-vuejs.space/search">
+  <Search />
 </Base>

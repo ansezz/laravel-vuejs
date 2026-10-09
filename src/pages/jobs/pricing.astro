@@ -1,10 +1,30 @@
 ---
-import Base from '../../layouts/Base.astro'
-import Root from '../../app/roots/JobsPricing.vue'
-import { pageState } from '../../lib/content'
-
-const state = await pageState(Astro.url, { name: "jobs-pricing" })
+import Page from '../../layouts/Page.astro'
+import Icon from '../../components/Icon.astro'
+import JobsNav from '../../components/JobsNav.astro'
+import { CONTACT_EMAIL, GROUPS } from '../../config/site'
+const plans = [
+  { name: 'Community', price: 'Free', note: 'For everyone', cta: ['Post in the group', GROUPS[1].url], highlight: false,
+    items: ['Post in the Freelance & Remote Jobs group', 'Seen by the whole community', 'Reply to candidates directly', 'Moderated against spam'] },
+  { name: 'Featured', price: 'On request', note: 'For companies that want reach', cta: ['Ask for rates', `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Featured job listing')}`], highlight: true,
+    items: ['Everything in Community', 'Shared on our page and channels', 'Included in the next newsletter', 'Help writing a listing that converts'] },
+  { name: 'Hiring partner', price: 'Custom', note: 'For ongoing hiring', cta: ['Contact us', '/page/contact-us'], highlight: false,
+    items: ['Several featured roles', 'Employer spotlight post', 'Talent-pool introductions', 'One point of contact'] },
+]
 ---
-<Base seo={{}} state={state}>
-  <Root client:load />
-</Base>
+<Page title="Job posting pricing" heading="Simple pricing for job posts" kicker="Jobs" lead="Posting a job is free. If you want more reach, we can feature your listing across our channels.">
+  <JobsNav slot="hero" />
+  <section class="container section-tight pricing">
+    <div class="grid grid-3">
+      {plans.map(p => (
+        <div class={`card tile reveal ${p.highlight ? 'highlight' : ''}`}>
+          {p.highlight && <span class="chip chip-brand" style="align-self:flex-start">Most popular</span>}
+          <h2 style="font-size:1.2rem">{p.name}</h2>
+          <div class="price">{p.price}</div><p>{p.note}</p>
+          <ul>{p.items.map(i => <li><Icon name="check" size={16} />{i}</li>)}</ul>
+          <a class={`btn ${p.highlight ? 'btn-primary' : ''}`} style="margin-top:auto;justify-content:center" href={p.cta[1]} rel={p.cta[1].startsWith('http') ? 'noopener' : undefined}>{p.cta[0]}</a>
+        </div>
+      ))}
+    </div>
+  </section>
+</Page>

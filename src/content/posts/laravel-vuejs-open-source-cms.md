@@ -1,53 +1,62 @@
 ---
 id: 5
-title: "Laravel & VueJs: an open source blog CMS"
-excerpt: "Laravel-VueJs is an open source CMS based on the latest technologies of Laravel and VueJs, using Laravel Nova, GraphQL, NuxtJs, Apollo and more."
-image: /storage/posts/home1.jpg
+title: "Laravel & VueJs: an open source community blog, rebuilt"
+excerpt: "Laravel & VueJs started as an open source CMS built with Laravel, Nova, GraphQL and Nuxt. Here is what it was, what it is now, and how you can help shape it."
 date: 2020-02-20T19:31:34Z
+updated: 2026-10-10T00:00:00Z
+snippet: "git clone ansezz/laravel-vuejs"
 featured: true
 categories: [laravel, vuejs]
-tags: [laravel, vuejs, graphql, apollo, nuxtjs, nova]
-source: https://github.com/ansezz/laravel-vuejs
+tags: [laravel, vuejs, open-source, astro]
 ---
 
-<!-- Source: the project README (repository root). -->
+Laravel & VueJs began as a side project with a simple idea: one place where developers who love **Laravel** on the back end and **Vue** on the front end can learn from each other. The code has always been open source, and the community around it has grown to thousands of developers.
 
-## Introduction
+This post explains where the project came from, how it is built today, and how you can take part.
 
-Laravel-VueJs is an open source CMS based on the latest technologies of Laravel and VueJs, using Laravel Nova, GraphQL, NuxtJs, Apollo and ...more
+## Where it started
 
-#Laravel #VueJS #GraphQL #Apollo #NuxtJs #Nova
+The first version was a full-stack CMS, and a showcase of what the two frameworks could do together:
 
-### Backend packages
+| Layer | Technology |
+| --- | --- |
+| Back end | Laravel, with Laravel Nova as the admin panel |
+| API | GraphQL through Lighthouse |
+| Search | Laravel Scout + Algolia |
+| Auth | Passport and Socialite |
+| Front end | Nuxt 2 (Vue 2), Apollo, Bootstrap |
 
-- Laravel
-- Laravel Nova
-- Lighthouse (Graphql Library)
-- Algolia
-- Laravel Cors
-- Laravel Enum
-- Larecipe
-- Passport
-- Scout
-- Socialite
-- Telescope
+It worked well, but running a PHP server, a database, a Node SSR server and a GraphQL API for what is mostly a reading experience was a lot of moving parts.
 
-... and more
+## What it is now
 
-### Frontend packages
+In 2026 the site moved to **laravel-vuejs.space** and was rebuilt as a static site:
 
-- VueJs
-- Nuxt
-- Apollo
-- Graphql
-- Font Awesome
-- Moment
-- Toast
-- Bootstrap
-- Disqus
-- Awesome swiper
+- **Astro** renders every page to plain HTML at build time.
+- Posts are **Markdown files** in the repository, so writing a post is a pull request.
+- The site is served from **Cloudflare's edge**, with almost no JavaScript.
+- Code samples are highlighted at build time, in light and dark themes.
 
-... and more
+The original Laravel + Nuxt code is still in the repository's Git history ([browse it at commit `0b000da`](https://github.com/ansezz/laravel-vuejs/tree/0b000da), the last version before the Astro migration), if you want to study a complete Laravel + GraphQL + Nuxt application.
+
+## Writing a post
+
+Every article lives in `src/content/posts`. A post is a Markdown file with a small front matter block:
+
+```md
+---
+id: 6
+title: "Typed props in Vue 3.5 with defineProps"
+excerpt: "A short, practical guide to typing component props."
+date: 2026-10-12T09:00:00Z
+categories: [vuejs]
+tags: [vuejs, typescript]
+---
+
+Your article, in Markdown. Code blocks are highlighted automatically.
+```
+
+Open a pull request with your file, and we will review it with you.
 
 ## Contributors
 
@@ -57,8 +66,4 @@ Laravel-VueJs is an open source CMS based on the latest technologies of Laravel 
 
 ## Contributing
 
-Do not hesitate to contribute to the project by adapting or adding features! Bug reports or pull requests are welcome.
-
-## License
-
-The project is open-sourced software licensed under the [MIT license](http://opensource.org/licenses/MIT).
+Bug reports, ideas and pull requests are welcome on [GitHub](https://github.com/ansezz/laravel-vuejs). The project is open source under the [MIT license](https://opensource.org/licenses/MIT).

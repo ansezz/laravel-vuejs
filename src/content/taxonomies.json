@@ -1,20 +1,100 @@
 {
   "categories": [
-    { "id": "1", "slug": "laravel", "name": "Laravel", "description": "Laravel" },
-    { "id": "2", "slug": "vuejs", "name": "VueJs", "description": "VueJs" },
-    { "id": "3", "slug": "jobs", "name": "Jobs", "description": "Jobs" },
-    { "id": "4", "slug": "ebooks", "name": "eBooks", "description": "eBooks" }
+    {
+      "id": "1",
+      "slug": "laravel",
+      "name": "Laravel",
+      "description": "Back-end development with Laravel: routing, Eloquent, queues, testing and deployment."
+    },
+    {
+      "id": "2",
+      "slug": "vuejs",
+      "name": "VueJs",
+      "description": "Front-end development with Vue 3: components, the Composition API, Inertia and Nuxt."
+    },
+    {
+      "id": "3",
+      "slug": "jobs",
+      "name": "Jobs",
+      "description": "Careers, freelancing and hiring in the Laravel and Vue ecosystem."
+    },
+    {
+      "id": "4",
+      "slug": "ebooks",
+      "name": "eBooks",
+      "description": "Long-form guides and books for Laravel and Vue developers."
+    }
   ],
   "tags": [
-    { "id": "1", "slug": "laravel", "name": "Laravel" },
-    { "id": "2", "slug": "vuejs", "name": "VueJs" },
-    { "id": "3", "slug": "graphql", "name": "GraphQL" },
-    { "id": "4", "slug": "apollo", "name": "Apollo" },
-    { "id": "5", "slug": "nuxtjs", "name": "NuxtJs" },
-    { "id": "6", "slug": "nova", "name": "Nova" },
-    { "id": "7", "slug": "php", "name": "PHP" },
-    { "id": "8", "slug": "community", "name": "Community" },
-    { "id": "9", "slug": "setup", "name": "Setup" },
-    { "id": "10", "slug": "roadmap", "name": "Roadmap" }
+    {
+      "id": "1",
+      "slug": "laravel",
+      "name": "Laravel"
+    },
+    {
+      "id": "2",
+      "slug": "vuejs",
+      "name": "VueJs"
+    },
+    {
+      "id": "3",
+      "slug": "php",
+      "name": "PHP"
+    },
+    {
+      "id": "4",
+      "slug": "inertia",
+      "name": "Inertia"
+    },
+    {
+      "id": "5",
+      "slug": "setup",
+      "name": "Setup"
+    },
+    {
+      "id": "6",
+      "slug": "tooling",
+      "name": "Tooling"
+    },
+    {
+      "id": "7",
+      "slug": "community",
+      "name": "Community"
+    },
+    {
+      "id": "8",
+      "slug": "open-source",
+      "name": "Open source"
+    },
+    {
+      "id": "9",
+      "slug": "astro",
+      "name": "Astro"
+    },
+    {
+      "id": "10",
+      "slug": "roadmap",
+      "name": "Roadmap"
+    },
+    {
+      "id": "11",
+      "slug": "graphql",
+      "name": "GraphQL"
+    },
+    {
+      "id": "12",
+      "slug": "nuxtjs",
+      "name": "NuxtJs"
+    },
+    {
+      "id": "13",
+      "slug": "apollo",
+      "name": "Apollo"
+    },
+    {
+      "id": "14",
+      "slug": "nova",
+      "name": "Nova"
+    }
   ]
 }
