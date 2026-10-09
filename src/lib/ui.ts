@@ -29,5 +29,12 @@ export function initUi() {
     map.forEach((_, id) => { const el = document.getElementById(id); el && io.observe(el) })
   }
 
+  // Newsletter forms: no backend yet, so compose a subscribe email to the contact address
+  document.querySelectorAll<HTMLFormElement>('form[data-mailto]').forEach(f => f.addEventListener('submit', e => {
+    e.preventDefault()
+    const email = String(new FormData(f).get('email') ?? '')
+    location.href = `mailto:${f.dataset.mailto}?subject=${encodeURIComponent(f.dataset.subject ?? 'Hello')}&body=${encodeURIComponent('Please subscribe this address: ' + email)}`
+  }))
+
   document.querySelector<HTMLDetailsElement>('.mobile-nav')?.querySelectorAll('a').forEach(a => a.addEventListener('click', () => a.closest('details')?.removeAttribute('open')))
 }

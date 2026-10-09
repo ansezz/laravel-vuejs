@@ -9,10 +9,9 @@ const { title = 'Get the best of Laravel & Vue, once a month.', text = 'One shor
     <p class="kicker" style="color:var(--mint)">Newsletter</p>
     <h2 style="margin-top:14px">{title}</h2>
     <p>{text}</p>
-    <form class="inline-form" style="margin-top:28px" action={`mailto:${CONTACT_EMAIL}`} method="get" enctype="text/plain" data-subscribe>
+    <form class="inline-form" style="margin-top:28px" action="/page/newsletter" data-mailto={CONTACT_EMAIL} data-subject="Subscribe to the Laravel & VueJs newsletter">
       <label class="sr-only" for="nl-email">Email address</label>
-      <input type="hidden" name="subject" value="Subscribe to the Laravel & VueJs newsletter">
-      <input class="input" id="nl-email" name="body" type="email" required placeholder="you@example.com" autocomplete="email" style="background:rgb(255 255 255 / .08);color:#fff;border-color:rgb(255 255 255 / .2)">
+      <input class="input" id="nl-email" name="email" type="email" required placeholder="you@example.com" autocomplete="email" style="background:rgb(255 255 255 / .08);color:#fff;border-color:rgb(255 255 255 / .2)">
       <button class="btn btn-light" type="submit">Subscribe <Icon name="arrow" size={16} class="icon-arrow" /></button>
     </form>
     <div class="row" style="margin-top:18px">
