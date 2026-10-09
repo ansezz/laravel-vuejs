@@ -67,7 +67,7 @@ The build is fully static, so it runs on Workers static assets with no Worker co
 
 ```bash
 npx wrangler login
-npm run deploy          # astro build && wrangler deploy
+npm run deploy          # wrangler deploy (runs `npm run build` first, see wrangler.jsonc)
 ```
 
 See the pull request that introduced this branch for the full checklist (custom domain, DNS, Disqus).

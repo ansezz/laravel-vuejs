@@ -3,6 +3,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "laravel-vuejs",
   "compatibility_date": "2026-10-01",
+  // Builds the site before deploy/preview (Cloudflare Workers Builds runs only the deploy command).
+  "build": { "command": "npm run build" },
+  // Required by `wrangler preview`, which Workers Builds runs for non-production branches.
+  "previews": {},
   "assets": {
     "directory": "./dist",
     // dist/404.html is served (with a 404 status) for unknown URLs
