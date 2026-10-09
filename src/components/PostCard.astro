@@ -2,11 +2,11 @@
 import Cover from './Cover.astro'
 import Icon from './Icon.astro'
 import { fmtDate, type Post } from '../lib/content'
-interface Props { post: Post; feature?: boolean; headingLevel?: 'h2' | 'h3' }
-const { post, feature = false, headingLevel: H = 'h3' } = Astro.props
+interface Props { post: Post; feature?: boolean; headingLevel?: 'h2' | 'h3'; eager?: boolean }
+const { post, feature = false, headingLevel: H = 'h3', eager = false } = Astro.props
 ---
 <article class={`card reveal ${feature ? 'card-feature' : ''}`}>
-  <Cover post={post} />
+  <Cover post={post} sizes={feature ? '(max-width: 860px) 100vw, 640px' : undefined} eager={eager} />
   <div class="card-body">
     <div class="card-cats">
       {post.categories.map(c => <a class="chip chip-brand" href={`/category/${c.slug}`}>{c.name}</a>)}

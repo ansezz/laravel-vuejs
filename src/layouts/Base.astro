@@ -16,7 +16,7 @@ interface Props {
   article?: { published: Date; modified?: Date; tags?: string[]; section?: string; author?: string }
   jsonld?: Record<string, unknown>[]
 }
-const { title, description = SITE_DESCRIPTION, image = '/og/default.png', type = 'website', noindex = false, article, jsonld = [] } = Astro.props
+const { title, description = SITE_DESCRIPTION, image = '/og/default.jpg', type = 'website', noindex = false, article, jsonld = [] } = Astro.props
 const path = Astro.url.pathname.replace(/\/$/, '') || '/'
 const canonical = Astro.props.canonical ?? SITE_URL + (path === '/' ? '/' : path)
 const fullTitle = title ? `${title} · ${SITE_NAME}` : `${SITE_NAME}: build modern apps with Laravel and Vue`

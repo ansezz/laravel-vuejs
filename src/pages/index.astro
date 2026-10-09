@@ -4,7 +4,11 @@ import PostCard from '../components/PostCard.astro'
 import Icon from '../components/Icon.astro'
 import NewsletterBand from '../components/NewsletterBand.astro'
 import { allPosts, categories } from '../lib/content'
+import Art from '../components/Art.astro'
 import { SOCIALS, GROUPS } from '../config/site'
+import { getArt, categoryArt } from '../lib/art'
+const hero = getArt('hero')!
+const jobsArt = categoryArt('jobs')!
 
 const posts = await allPosts()
 const [lead, ...rest] = posts
@@ -30,6 +34,10 @@ const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 3', 'TypeScript', '
           <span><Icon name="globe" size={16} /> 8 community channels</span>
         </div>
       </div>
+      <div class="showcase">
+      <Art src={hero} class="showcase-art" sizes="(max-width: 960px) 100vw, 640px" widths={[480, 720, 960, 1400]} eager />
+      <span class="float-chip chip-a" aria-hidden="true"><i class="dot"></i> 42 tests passed</span>
+      <span class="float-chip chip-b" aria-hidden="true"><b>SSR</b> Inertia 3 + Vue 3.5</span>
       <div class="window" aria-label="Code example: a Laravel route rendering a Vue page with Inertia">
         <div class="window-bar"><i></i><i></i><i></i>
           <div class="window-tabs"><span class="on">routes/web.php</span><span>Posts.vue</span></div>
@@ -48,7 +56,17 @@ const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 3', 'TypeScript', '
   &lt;<span class="t">PostCard</span> <span class="f">v-for</span>=<span class="s">"post in posts.data"</span> <span class="f">:post</span>=<span class="s">"post"</span> /&gt;
 &lt;/<span class="k">template</span>&gt;</code></pre>
       </div>
+      </div>
     </div>
+  </section>
+
+  <section class="container stats-wrap" aria-label="At a glance">
+    <dl class="stats reveal">
+      <div><dt>Since</dt><dd>2019</dd><dd class="sub">sharing Laravel &amp; Vue</dd></div>
+      <div><dt>Channels</dt><dd>8</dd><dd class="sub">groups, pages &amp; feeds</dd></div>
+      <div><dt>Guides</dt><dd>{posts.length}</dd><dd class="sub">updated for 2026</dd></div>
+      <div><dt>Cookies</dt><dd>0</dd><dd class="sub">cookieless analytics, no ads</dd></div>
+    </dl>
   </section>
 
   <section class="container section-tight" aria-labelledby="latest">
@@ -56,7 +74,7 @@ const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 3', 'TypeScript', '
       <div><p class="kicker">Latest</p><h2 id="latest">Fresh from the blog</h2></div>
       <a class="link-arrow" href="/posts">All articles <Icon name="arrow" size={16} /></a>
     </div>
-    {lead && <PostCard post={lead} feature />}
+    {lead && <PostCard post={lead} feature eager />}
     <div class="grid grid-2" style="margin-top:24px">
       {rest.map(p => <PostCard post={p} />)}
     </div>
@@ -68,8 +86,9 @@ const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 3', 'TypeScript', '
     </div>
     <div class="grid grid-4">
       {categories.map(c => (
-        <a class="card tile reveal" href={`/category/${c.slug}`}>
-          <span class="tile-icon"><Icon name={topicIcon[c.slug] ?? 'folder'} size={22} /></span>
+        <a class="card tile topic reveal" href={`/category/${c.slug}`}>
+          {categoryArt(c.slug) ? <div class="topic-art"><Art src={categoryArt(c.slug)!} sizes="(max-width: 640px) 100vw, (max-width: 1000px) 50vw, 300px" widths={[320, 480, 640]} /></div>
+            : <span class="tile-icon"><Icon name={topicIcon[c.slug] ?? 'folder'} size={22} /></span>}
           <h3>{c.name}</h3>
           <p>{c.description}</p>
           <span class="count">{count(c.slug) ? `${count(c.slug)} ${count(c.slug) === 1 ? 'article' : 'articles'}` : 'Coming soon'}</span>
@@ -83,14 +102,31 @@ const stack = ['Laravel 13', 'PHP 8.3+', 'Vue 3.5', 'Inertia 3', 'TypeScript', '
     <div class="stack">{stack.map(s => <span class="chip"><i></i>{s}</span>)}</div>
   </section>
 
+  <section class="container section-tight" aria-labelledby="jobs">
+    <div class="jobs-band reveal">
+      <div class="jobs-copy">
+        <p class="kicker" style="color:var(--mint)">Jobs</p>
+        <h2 id="jobs">Hiring Laravel or Vue developers?</h2>
+        <p>Post your role to a community that writes this stack every day. Free in the jobs group, or featured across our page, channels and newsletter. Every listing is reviewed by a human.</p>
+        <ul class="ticks">
+          <li><Icon name="check" size={16} /> Freelance, contract and full-time roles</li>
+          <li><Icon name="check" size={16} /> Remote-friendly, worldwide audience</li>
+          <li><Icon name="check" size={16} /> No recruiter spam, no fake listings</li>
+        </ul>
+        <div class="row"><a class="btn btn-light" href="/jobs/create-job">Post a job <Icon name="arrow" size={16} class="icon-arrow" /></a><a class="btn btn-ghost-light" href="/jobs/job-archive">Browse roles</a></div>
+      </div>
+      <div class="jobs-art"><Art src={jobsArt} sizes="(max-width: 860px) 100vw, 520px" widths={[480, 720, 1040]} /></div>
+    </div>
+  </section>
+
   <section class="container section-tight" aria-labelledby="community">
     <div class="section-head">
-      <div><p class="kicker">Community</p><h2 id="community">Learn together, ship together</h2><p>Ask questions, share what you are building and find your next gig. Thousands of Laravel and Vue developers are already there.</p></div>
+      <div><p class="kicker">Community</p><h2 id="community">Learn together, ship together</h2><p>Ask questions, share what you are building and find your next gig. Laravel and Vue developers from all over the world are already there.</p></div>
       <a class="link-arrow" href="/page/about-us">About the community <Icon name="arrow" size={16} /></a>
     </div>
-    <div class="grid grid-2" style="margin-bottom:24px">
+    <div class="grid grid-2 bento" style="margin-bottom:24px">
       {GROUPS.map(g => (
-        <a class="card tile reveal" href={g.url} rel="noopener" target="_blank">
+        <a class="card tile group-card reveal" href={g.url} rel="noopener" target="_blank">
           <span class="tile-icon"><Icon name={g.name.includes('Jobs') ? 'briefcase' : 'users'} size={22} /></span>
           <h3>{g.name} <span class="muted" style="font-weight:400">· Facebook group</span></h3>
           <p>{g.description}</p>

@@ -2,10 +2,11 @@
 import Base from '../../layouts/Base.astro'
 import Archive from '../../components/Archive.astro'
 import { allPosts, categories, type Category } from '../../lib/content'
+import { categoryArt } from '../../lib/art'
 export const getStaticPaths = () => categories.map(category => ({ params: { slug: category.slug }, props: { category } }))
 const { category } = Astro.props as { category: Category }
 const posts = (await allPosts()).filter(p => p.categories.some(c => c.slug === category.slug))
 ---
 <Base title={`${category.name} articles`} description={category.description}>
-  <Archive kicker="Category" title={category.name} lead={category.description} posts={posts} crumbs={[{ label: 'Articles', href: '/posts' }, { label: category.name }]} />
+  <Archive kicker="Category" title={category.name} lead={category.description} posts={posts} crumbs={[{ label: 'Articles', href: '/posts' }, { label: category.name }]} art={categoryArt(category.slug)} />
 </Base>

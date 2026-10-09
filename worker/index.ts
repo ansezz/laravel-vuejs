@@ -51,6 +51,9 @@ export default {
       url.hostname = APEX
       return Response.redirect(url.toString(), 301)
     }
+    // OG images moved from PNG to JPEG; keep old share-card URLs working.
+    const og = url.pathname.match(/^\/og\/([a-z0-9-]+)\.png$/)
+    if (og) return Response.redirect(new URL(`/og/${og[1]}.jpg`, url).toString(), 301)
     const match = url.pathname.match(/^\/api\/forms\/([a-z]+)\/?$/)
     const res = match ? await handleForm(match[1], request, env, ctx) : await env.ASSETS.fetch(request)
     return withHeaders(res, url)

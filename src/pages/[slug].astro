@@ -30,7 +30,7 @@ const share = [
 const jsonld = [{
   '@context': 'https://schema.org', '@type': 'BlogPosting', headline: post.title, description: post.excerpt,
   datePublished: post.date.toISOString(), dateModified: (post.updated ?? post.date).toISOString(),
-  url, mainEntityOfPage: url, image: `${SITE_URL}/og/${post.slug}.png`, keywords: post.tags.map(t => t.name).join(', '),
+  url, mainEntityOfPage: url, image: `${SITE_URL}/og/${post.slug}.jpg`, keywords: post.tags.map(t => t.name).join(', '),
   author: { '@type': 'Organization', name: post.author, url: SITE_URL + '/' }, publisher: { '@type': 'Organization', name: SITE_NAME, logo: { '@type': 'ImageObject', url: SITE_URL + '/icon.png' } },
 }, {
   '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [
@@ -39,8 +39,9 @@ const jsonld = [{
     { '@type': 'ListItem', position: 3, name: post.title, item: url }],
 }]
 ---
-<Base title={post.title} description={post.excerpt} type="article" image={`/og/${post.slug}.png`} jsonld={jsonld}
+<Base title={post.title} description={post.excerpt} type="article" image={`/og/${post.slug}.jpg`} jsonld={jsonld}
   article={{ published: post.date, modified: post.updated, tags: post.tags.map(t => t.name), section: post.categories[0]?.name }}>
+  <div class="read-progress" aria-hidden="true"></div>
   <article>
     <header class="page-hero post-hero">
       <div class="hero-bg"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
@@ -55,7 +56,7 @@ const jsonld = [{
           {post.updated && <span><Icon name="sparkles" size={15} />Updated <time datetime={post.updated.toISOString()}>{fmtDate(post.updated)}</time></span>}
           <span><Icon name="clock" size={15} />{post.readingMinutes} min read</span>
         </div>
-        <div class="post-cover"><Cover post={post} /></div>
+        <div class="post-cover"><Cover post={post} sizes="(max-width: 1240px) 100vw, 1180px" eager /></div>
       </div>
     </header>
 
