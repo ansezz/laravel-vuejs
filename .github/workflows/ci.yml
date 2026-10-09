@@ -26,6 +26,8 @@ jobs:
       - run: npm ci
       - name: Astro check (types + templates)
         run: npx astro check
+      - name: Type-check the Worker
+        run: npm run check:worker
       - name: Build
         run: npm run build
       - name: Internal link check
