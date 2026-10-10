@@ -1,0 +1,281 @@
+---
+import Base from '../../layouts/Base.astro'
+import PageHero from '../../components/PageHero.astro'
+import PackageInstall from '../../components/PackageInstall.astro'
+import {
+  AGENTS_DEFAULT,
+  COMPAT_ROWS,
+  ERA_ROWS,
+  FILE_ROWS,
+  RECIPE_JOBS,
+  SHIPPED_ROWS,
+  agentsMarkdown,
+  compatibilityMarkdown,
+  defaultJobIds,
+  eraChart,
+  recipeFromJobs,
+} from '../../data/dev-tools'
+
+const recipe = recipeFromJobs(defaultJobIds())
+const agents = agentsMarkdown(AGENTS_DEFAULT)
+const description = 'A stack recipe, a file map, October release notes, a 2019 to 2026 pick list, a compatibility card, and an AGENTS.md file for Laravel and Vue projects.'
+---
+<Base title="Tools" description={description}>
+  <PageHero
+    kicker="For developers and assistants"
+    title="Tools"
+    lead="Pick a stack, see where each file goes, read the October release notes, compare 2019 with 2026, and download a rules file an assistant can follow."
+    crumbs={[{ label: 'Tools' }]}
+  >
+    <div class="league-switch">
+      <a class="chip" href="#recipe">Stack recipe</a>
+      <a class="chip" href="#files">Where it goes</a>
+      <a class="chip" href="#shipped">What shipped</a>
+      <a class="chip" href="#now">Then and now</a>
+      <a class="chip" href="#compatibility">Compatibility</a>
+      <a class="chip" href="#agents">AGENTS.md</a>
+    </div>
+  </PageHero>
+
+  <section class="container section-tight tool-block" id="recipe">
+    <h2>Stack recipe</h2>
+    <p class="pkg-set-note">Tick the jobs. The commands use the same packages as the chart. They do not pin versions.</p>
+    <form class="tool-layout" data-recipe>
+      <fieldset class="tool-choices">
+        <legend class="sr-only">Jobs to install</legend>
+        {RECIPE_JOBS.map(job => (
+          <label class="tool-choice">
+            <input type="checkbox" data-job={job.id} checked={job.defaultOn} />
+            <span>
+              <strong>{job.label}</strong>
+              <span>{job.detail}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <div class="tool-output">
+        <h3>Composer</h3>
+        <div data-recipe-composer-wrap hidden={recipe.composer === null}>
+          <PackageInstall command={recipe.composer ?? ''} />
+        </div>
+        <p class="pkg-set-note" data-recipe-composer-empty hidden={recipe.composer !== null}>No PHP packages in this recipe.</p>
+        <h3>npm</h3>
+        <div data-recipe-npm-wrap hidden={recipe.npm === null}>
+          <PackageInstall command={recipe.npm ?? ''} />
+        </div>
+        <p class="pkg-set-note" data-recipe-npm-empty hidden={recipe.npm !== null}>No npm packages in this recipe.</p>
+        <h3>Check before you install</h3>
+        <ul class="tool-warnings" data-recipe-warnings hidden={recipe.warnings.length === 0}>
+          {recipe.warnings.map(warning => <li>{warning}</li>)}
+        </ul>
+        <p class="pkg-set-note" data-recipe-warnings-empty hidden={recipe.warnings.length > 0}>No mix-up in the current ticks.</p>
+        <h3>Markdown card</h3>
+        <div class="code pkg-install">
+          <div class="code-head">
+            <span class="code-lang">markdown</span>
+            <button type="button" class="copy-btn" aria-label="Copy Markdown card">
+              <svg class="i-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg class="i-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span class="copy-label">Copy</span>
+            </button>
+          </div>
+          <pre><code data-recipe-md>{recipe.markdown}</code></pre>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="container section-tight tool-block" id="files">
+    <h2>Where it goes</h2>
+    <p class="pkg-set-note">Paths the setup guide names for the official Vue starter kit. The app entry row is from the Inertia 3.9 article. Tailwind CSS 4 and shadcn-vue ship with that kit and are not in the download chart.</p>
+    <div class="tool-table-wrap">
+      <table class="tool-table">
+        <thead>
+          <tr>
+            <th scope="col">Thing</th>
+            <th scope="col">Path</th>
+            <th scope="col">Command</th>
+            <th scope="col">Rule</th>
+          </tr>
+        </thead>
+        <tbody>
+          {FILE_ROWS.map(row => (
+            <tr>
+              <th scope="row">{row.thing}</th>
+              <td>{row.path ? <span class="tool-chart">{row.path}</span> : <span class="pkg-set-note">Command only</span>}</td>
+              <td>{row.command ? <span class="tool-chart">{row.command}</span> : <span class="pkg-set-note">Edit the file</span>}</td>
+              <td>{row.rule} <a href={row.sourcePath}>Source</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="pkg-actions">
+      <a class="btn" href="/application-setup">Setup guide</a>
+      <a class="btn" href="/tools/files.md">Markdown for assistants</a>
+    </p>
+  </section>
+
+  <section class="container section-tight tool-block" id="shipped">
+    <h2>What shipped</h2>
+    <p class="pkg-set-note">New opt-in APIs from the two release articles published here on October 10, 2026. Laravel 13.35.0 was tagged on October 6. Inertia 3.9.0 came out on October 9, and 3.9.1 followed the same day. Install 3.9.1. The articles also list bug fixes.</p>
+    <div class="tool-table-wrap">
+      <table class="tool-table">
+        <thead>
+          <tr>
+            <th scope="col">Release</th>
+            <th scope="col">Change</th>
+            <th scope="col">Use</th>
+            <th scope="col">Watch</th>
+          </tr>
+        </thead>
+        <tbody>
+          {SHIPPED_ROWS.map(row => (
+            <tr>
+              <th scope="row">{row.release}</th>
+              <td>{row.change}</td>
+              <td>{row.use}</td>
+              <td>{row.watch} <a href={row.sourcePath}>Source</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="pkg-actions">
+      <a class="btn" href="/laravel-13-35-query-routes-markdown-responses">Laravel 13.35</a>
+      <a class="btn" href="/inertia-3-9-background-polling-navigate-type">Inertia 3.9</a>
+      <a class="btn" href="/tools/shipped.md">Markdown for assistants</a>
+    </p>
+  </section>
+
+  <section class="container section-tight tool-block" id="compatibility">
+    <h2>Compatibility</h2>
+    <p class="pkg-set-note">Copied from published articles on this site. Not a live compatibility API.</p>
+    <div class="tool-table-wrap">
+      <table class="tool-table">
+        <thead>
+          <tr>
+            <th scope="col">Pair</th>
+            <th scope="col">Use</th>
+            <th scope="col">Avoid</th>
+            <th scope="col">Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {COMPAT_ROWS.map(row => (
+            <tr>
+              <th scope="row">{row.pair}</th>
+              <td>{row.use}</td>
+              <td>{row.avoid}</td>
+              <td><a href={row.sourcePath}>{row.sourceTitle}</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="pkg-actions"><a class="btn" href="/tools/compatibility.md">Markdown for assistants</a></p>
+    <pre class="sr-only" data-compatibility-md>{compatibilityMarkdown()}</pre>
+  </section>
+
+  <section class="container section-tight tool-block" id="now">
+    <h2>Then and now</h2>
+    <p class="pkg-set-note">The 2019 stack next to the 2026 pick, from the requirements article. Chart links are packages we counted. Anything else has no download number.</p>
+    <div class="tool-table-wrap">
+      <table class="tool-table">
+        <thead>
+          <tr>
+            <th scope="col">Job</th>
+            <th scope="col">Then (2019)</th>
+            <th scope="col">Now (2026)</th>
+            <th scope="col">On the chart</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ERA_ROWS.map(row => (
+            <tr>
+              <th scope="row">{row.job}</th>
+              <td>{row.then}</td>
+              <td>{row.now}</td>
+              <td>
+                <span class="tool-chart">
+                  {eraChart(row).map(pkg => <a href={`/packages/${pkg.slug}`}>{pkg.name}</a>)}
+                  {row.absent && <span>{row.absent}</span>}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="pkg-set-note">A new project starts from the official Laravel and Vue starter kit. The setup guide walks through it.</p>
+    <p class="pkg-actions">
+      <a class="btn" href="/requirements">Requirements article</a>
+      <a class="btn" href="/application-setup">Setup guide</a>
+      <a class="btn" href="/tools/now.md">Markdown for assistants</a>
+    </p>
+  </section>
+
+  <section class="container section-tight tool-block" id="agents">
+    <h2>AGENTS.md</h2>
+    <p class="pkg-set-note">Pick the stack. Download a rules file, or fetch the default one.</p>
+    <form class="tool-layout" data-agents>
+      <fieldset class="tool-choices tool-selects">
+        <legend class="sr-only">Project choices</legend>
+        <label class="tool-select">
+          <span>Laravel</span>
+          <select data-choice="laravel">
+            <option value="13" selected={AGENTS_DEFAULT.laravel === '13'}>13</option>
+            <option value="12" selected={AGENTS_DEFAULT.laravel === '12'}>12</option>
+          </select>
+        </label>
+        <label class="tool-select">
+          <span>Vue</span>
+          <select data-choice="vue">
+            <option value="3.5" selected={AGENTS_DEFAULT.vue === '3.5'}>3.5 stable</option>
+            <option value="3.6" selected={AGENTS_DEFAULT.vue === '3.6'}>3.6</option>
+          </select>
+        </label>
+        <label class="tool-select">
+          <span>UI bridge</span>
+          <select data-choice="bridge">
+            <option value="inertia" selected={AGENTS_DEFAULT.bridge === 'inertia'}>Inertia</option>
+            <option value="livewire" selected={AGENTS_DEFAULT.bridge === 'livewire'}>Livewire</option>
+            <option value="api" selected={AGENTS_DEFAULT.bridge === 'api'}>API only</option>
+          </select>
+        </label>
+        <label class="tool-select">
+          <span>Tests</span>
+          <select data-choice="tests">
+            <option value="pest" selected={AGENTS_DEFAULT.tests === 'pest'}>Pest</option>
+            <option value="phpunit" selected={AGENTS_DEFAULT.tests === 'phpunit'}>PHPUnit</option>
+          </select>
+        </label>
+        <label class="tool-select">
+          <span>State</span>
+          <select data-choice="state">
+            <option value="pinia" selected={AGENTS_DEFAULT.state === 'pinia'}>Pinia</option>
+            <option value="props" selected={AGENTS_DEFAULT.state === 'props'}>Page props</option>
+            <option value="vuex" selected={AGENTS_DEFAULT.state === 'vuex'}>Vuex</option>
+          </select>
+        </label>
+      </fieldset>
+      <div class="tool-output">
+        <div class="code pkg-install">
+          <div class="code-head">
+            <span class="code-lang">markdown</span>
+            <button type="button" class="copy-btn" aria-label="Copy AGENTS.md">
+              <svg class="i-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg class="i-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span class="copy-label">Copy</span>
+            </button>
+          </div>
+          <pre><code data-agents-body>{agents}</code></pre>
+        </div>
+        <div class="pkg-actions">
+          <button class="btn btn-primary" type="button" data-agents-download>Download AGENTS.md</button>
+          <a class="btn" href="/tools/agents.md">Default file</a>
+        </div>
+      </div>
+    </form>
+  </section>
+</Base>

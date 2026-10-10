@@ -1,0 +1,60 @@
+---
+import PackageMeter from './PackageMeter.astro'
+import { ROLE_LABEL, ROLES, SNAPSHOT, formatCount, type PackageRole, type RankedPackage } from '../data/packages'
+
+interface Props {
+  id: string
+  title: string
+  metric: string
+  packages: RankedPackage[]
+  class?: string
+}
+const { id, title, metric, packages, class: className } = Astro.props
+const leader = packages[0]
+const roles = ROLES.filter((role): role is PackageRole => packages.some(pkg => pkg.role === role))
+---
+<section class:list={['league-block', className]} aria-labelledby={`${id}-league`}>
+  <div class="container">
+    <div class="league-head">
+      <div>
+        <h2 id={`${id}-league`}>{title}</h2>
+        <p>
+          {metric}. The full bar is {leader.name}. Every other bar is that package divided by it.
+          Snapshot <time datetime={SNAPSHOT.asOf}>{SNAPSHOT.asOf}</time>.
+        </p>
+      </div>
+      <p class="league-scale"><span class="pkg-count">{formatCount(leader.downloads)}</span> at rank 1</p>
+    </div>
+    <p class="league-filter-note">Filter by job. Rank stays the download rank.</p>
+    <div class="league-filters">
+      <input type="radio" name={`${id}-role`} id={`${id}-role-all`} value="all" checked />
+      <label class="chip" for={`${id}-role-all`}>All {packages.length}</label>
+      {roles.map(role => {
+        const count = packages.filter(pkg => pkg.role === role).length
+        return (
+          <>
+            <input type="radio" name={`${id}-role`} id={`${id}-role-${role}`} value={role} />
+            <label class="chip" for={`${id}-role-${role}`}>{ROLE_LABEL[role]} {count}</label>
+          </>
+        )
+      })}
+    </div>
+    <ol class="league">
+      {packages.map(pkg => (
+        <li data-role={pkg.role ?? 'none'}>
+          <a class="league-row" href={`/packages/${pkg.slug}`}>
+            <span class="league-rank">{pkg.rank}</span>
+            <span class="league-main">
+              <span class="league-name">
+                {pkg.name}
+                {pkg.role && <span class="role-tag">{ROLE_LABEL[pkg.role]}</span>}
+              </span>
+              <span class="league-desc">{pkg.description}</span>
+            </span>
+            <PackageMeter downloads={pkg.downloads} bar={pkg.bar} />
+          </a>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>

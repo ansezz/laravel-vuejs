@@ -1,0 +1,31 @@
+---
+import Base from '../../layouts/Base.astro'
+import PageHero from '../../components/PageHero.astro'
+import PackageLeague from '../../components/PackageLeague.astro'
+import { SNAPSHOT, leagues } from '../../data/packages'
+
+const { laravel, vue } = leagues()
+const description = `Laravel and Vue packages ranked by real registry downloads. Snapshot ${SNAPSHOT.asOf}.`
+---
+<Base title="Packages" description={description}>
+  <PageHero
+    kicker="Snapshot"
+    title="Install chart"
+    lead="Laravel and Vue packages developers choose, each league sorted by its own download count."
+    crumbs={[{ label: 'Packages' }]}
+  >
+    <p class="pkg-stamp">
+      Counted <time datetime={SNAPSHOT.asOf}>{SNAPSHOT.asOf}</time>.
+      Laravel uses {SNAPSHOT.laravelMetric}. Vue uses {SNAPSHOT.vueMetric}.
+      The two numbers are different units, so the leagues stay separate.
+    </p>
+    <div class="league-switch">
+      <a class="chip" href="#laravel">{laravel.length} Laravel packages</a>
+      <a class="chip" href="#vue">{vue.length} Vue packages</a>
+    </div>
+    <p class="pkg-stamp"><a href="/tools#recipe">Build an install recipe from this chart.</a></p>
+  </PageHero>
+
+  <PackageLeague id="laravel" title="Laravel" metric={SNAPSHOT.laravelMetric} packages={laravel} class="league-laravel" />
+  <PackageLeague id="vue" title="Vue" metric={SNAPSHOT.vueMetric} packages={vue} class="league-vue" />
+</Base>

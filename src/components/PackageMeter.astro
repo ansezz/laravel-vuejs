@@ -1,0 +1,10 @@
+---
+import { formatCount } from '../data/packages'
+
+interface Props { downloads: number; bar: number; layout?: 'row' | 'block' }
+const { downloads, bar, layout = 'row' } = Astro.props
+---
+<div class:list={['pkg-meter', layout === 'block' && 'block']}>
+  <span class="pkg-count" data-downloads={downloads}>{formatCount(downloads)}<span class="sr-only"> ({downloads})</span></span>
+  <span class="pkg-bar" style={`--w:${bar}`}><span></span></span>
+</div>
