@@ -4,14 +4,16 @@
 // - Redirects www.laravel-vuejs.space to the apex domain.
 // - Handles form posts at /api/forms/:form (contact, hire, newsletter, job):
 //   validates, filters spam (honeypot, time trap, origin check, per-IP rate limit),
-//   stores the submission in D1 and emails a notification through Resend.
+//   stores the submission in D1 and emails a notification through the Cloudflare Email Service
+//   send_email binding (EMAIL), recording the send status on the row.
 
 export interface Env {
   ASSETS: Fetcher
   DB: D1Database
+  EMAIL: SendEmail // send_email binding (Cloudflare Email Service)
   NOTIFY_TO: string
   MAIL_FROM: string
-  RESEND_API_KEY?: string // secret: `wrangler secret put RESEND_API_KEY`
+  MAIL_FROM_NAME: string
   IP_SALT?: string // optional secret used when hashing IPs
 }
 
@@ -163,22 +165,25 @@ function reply(request: Request, status: number, body: { ok: boolean; message?: 
 }
 
 async function notify(env: Env, form: Form, id: number, data: Record<string, string>) {
-  let status = 'skipped: no RESEND_API_KEY'
-  if (env.RESEND_API_KEY) {
-    const lines = Object.entries(data).map(([k, v]) => `${k}: ${v}`)
-    const subject = `[laravel-vuejs.space] ${FORMS[form].label}${data.name ? ` from ${data.name}` : ''}${form === 'job' ? `: ${data.role}` : ''}`
-    const html = `<h2 style="font-family:sans-serif">${esc(FORMS[form].label)} #${id}</h2><table style="font-family:sans-serif;border-collapse:collapse">${Object.entries(data)
-      .map(([k, v]) => `<tr><th style="text-align:left;vertical-align:top;padding:6px 12px 6px 0;color:#384457">${esc(k)}</th><td style="padding:6px 0;white-space:pre-wrap">${esc(v)}</td></tr>`).join('')}</table>`
-    try {
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': `submission-${id}` },
-        body: JSON.stringify({ from: env.MAIL_FROM, to: [env.NOTIFY_TO], reply_to: data.email, subject, text: `${FORMS[form].label} #${id}\n\n${lines.join('\n')}`, html }),
-      })
-      status = res.ok ? 'sent' : `failed: ${res.status} ${(await res.text()).slice(0, 200)}`
-    } catch (e) {
-      status = `failed: ${String(e).slice(0, 200)}`
-    }
+  const label = FORMS[form].label
+  const subject = `[laravel-vuejs.space] ${label}${data.name ? ` from ${data.name}` : ''}${form === 'job' ? `: ${data.role}` : ''}`
+  const text = `${label} #${id}\n\n${Object.entries(data).map(([k, v]) => `${k}: ${v}`).join('\n')}\n\nReply to this email to answer ${data.email}.`
+  const html = `<h2 style="font-family:sans-serif">${esc(label)} #${id}</h2><table style="font-family:sans-serif;border-collapse:collapse">${Object.entries(data)
+    .map(([k, v]) => `<tr><th style="text-align:left;vertical-align:top;padding:6px 12px 6px 0;color:#384457">${esc(k)}</th><td style="padding:6px 0;white-space:pre-wrap">${esc(v)}</td></tr>`).join('')}</table>
+<p style="font-family:sans-serif;color:#384457">Reply to this email to answer ${esc(data.email)}.</p>`
+  let status: string
+  try {
+    const res = await env.EMAIL.send({
+      from: { email: env.MAIL_FROM, name: env.MAIL_FROM_NAME },
+      to: env.NOTIFY_TO,
+      replyTo: data.name ? { email: data.email, name: data.name } : data.email,
+      subject, text, html,
+    })
+    status = `sent: ${res.messageId}`.slice(0, 300)
+  } catch (e) {
+    const err = e as { code?: string; message?: string }
+    status = `failed: ${err.code ?? 'error'} ${err.message ?? String(e)}`.slice(0, 300)
+    console.error('Email notification failed', id, status)
   }
   await env.DB.prepare('UPDATE submissions SET email_status = ?1 WHERE id = ?2').bind(status, id).run()
 }

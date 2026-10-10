@@ -29,9 +29,19 @@
   ],
   "vars": {
     "NOTIFY_TO": "contact@laravel-vuejs.space",
-    "MAIL_FROM": "Laravel & VueJs <forms@laravel-vuejs.space>"
+    "MAIL_FROM": "noreply@laravel-vuejs.space",
+    "MAIL_FROM_NAME": "Laravel-VueJs"
   },
-  // Secrets (set with `npx wrangler secret put <NAME>`): RESEND_API_KEY (required for email), IP_SALT (optional)
+  // Form notifications go out through Cloudflare Email Service (Email Sending is enabled for laravel-vuejs.space).
+  // The binding is locked to the one sender and the one destination it needs.
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["noreply@laravel-vuejs.space"],
+      "allowed_destination_addresses": ["contact@laravel-vuejs.space"]
+    }
+  ],
+  // Optional secret (set with `npx wrangler secret put IP_SALT`): salt used when hashing IPs for rate limiting.
   "observability": { "enabled": true },
   // Custom domains: wrangler creates the DNS records and certificates. www is redirected to the apex by the Worker.
   "routes": [
