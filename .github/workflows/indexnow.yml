@@ -1,0 +1,30 @@
+name: IndexNow
+
+# Tells IndexNow search engines (Bing, Yandex, Seznam, Naver, ...) about pages that changed, after Cloudflare deploys a push to master.
+# Manual run with "all" submits every URL in the sitemap.
+on:
+  push:
+    branches: [master]
+    paths: ['src/**', 'public/**']
+  workflow_dispatch:
+    inputs:
+      all:
+        description: 'Submit every URL in the sitemap'
+        type: boolean
+        default: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Wait for the Cloudflare deploy
+        if: github.event_name == 'push'
+        run: sleep 240
+      - name: Submit changed URLs
+        env:
+          ALL: ${{ inputs.all && '1' || '' }}
+        run: node scripts/indexnow.mjs
