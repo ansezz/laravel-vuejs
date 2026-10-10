@@ -1,0 +1,53 @@
+name: Publish scheduled posts
+
+# Posts with a future `date` are left out of production builds (see src/lib/content.ts).
+# Every day at 07:05 UTC (15:05 MYT), this checks whether a post's date has passed but the live site does not serve it
+# yet, and if so triggers a production rebuild on Cloudflare Workers Builds:
+#   - with the CF_DEPLOY_HOOK_URL secret set (Workers > laravel-vuejs > Settings > Builds > Deploy Hooks, branch master),
+#     it POSTs to that hook;
+#   - otherwise it pushes an empty commit to master, which Workers Builds deploys like any push.
+on:
+  schedule:
+    - cron: '5 7 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild production even if no scheduled post is waiting'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-scheduled
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Find posts that are due but not live
+        id: due
+        run: node scripts/scheduled-due.mjs
+      - name: Trigger the production rebuild
+        if: steps.due.outputs.missing != '' || inputs.force
+        env:
+          DEPLOY_HOOK: ${{ secrets.CF_DEPLOY_HOOK_URL }}
+          MISSING: ${{ steps.due.outputs.missing }}
+        run: |
+          if [ -n "$DEPLOY_HOOK" ]; then
+            curl -fsS -X POST "$DEPLOY_HOOK"
+            echo "Triggered the Workers Builds deploy hook for: ${MISSING:-forced rebuild}"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Publish scheduled posts: ${MISSING:-forced rebuild}"
+            git push origin HEAD:master
+          fi

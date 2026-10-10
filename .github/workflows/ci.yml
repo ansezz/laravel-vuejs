@@ -30,6 +30,9 @@ jobs:
         run: npm run check:worker
       - name: Build
         run: npm run build
+        env:
+          # PRs are previews: include future-dated (scheduled) posts so they get type, link and Lighthouse checks too.
+          SHOW_FUTURE_POSTS: ${{ github.event_name == 'pull_request' && '1' || '' }}
       - name: Internal link check
         run: npm run check:links
       - uses: actions/upload-artifact@v4
