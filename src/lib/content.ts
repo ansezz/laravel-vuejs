@@ -19,10 +19,23 @@ export type Post = {
 // ~230 words per minute for prose, code counted at roughly half speed
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length + (s.match(/```[\s\S]*?```/g) ?? []).join(' ').split(/\s+/).length * 0.5
 
+// Scheduled publishing: a post whose `date` is in the future is left out of the build (lists, feeds, sitemap,
+// search index and its own page) until a rebuild after that moment. The daily `publish-scheduled` workflow triggers it.
+// Future posts are included in Workers Builds previews (any branch other than master) and when SHOW_FUTURE_POSTS=1,
+// so they can be reviewed before they go live.
+export const BUILD_TIME = new Date()
+export const showFuturePosts = process.env.SHOW_FUTURE_POSTS === '1'
+  || (!!process.env.WORKERS_CI_BRANCH && process.env.WORKERS_CI_BRANCH !== 'master')
+export const isPublished = (date: Date) => showFuturePosts || date.getTime() <= BUILD_TIME.getTime()
+
 let cache: Post[] | undefined
 export async function allPosts(): Promise<Post[]> {
   if (cache) return cache
-  const entries = await getCollection('posts')
+  const all = await getCollection('posts')
+  const entries = all.filter(e => isPublished(e.data.date))
+  const hidden = all.length - entries.length
+  if (hidden) console.info(`[scheduled publishing] ${hidden} future-dated post(s) left out of this build: ${all.filter(e => !entries.includes(e)).map(e => `${e.id} (${e.data.date.toISOString()})`).join(', ')}`)
+  else if (showFuturePosts) console.info('[scheduled publishing] preview build: future-dated posts are included')
   cache = entries.map((entry) => {
     const d = entry.data
     return {
