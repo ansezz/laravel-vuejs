@@ -7,9 +7,10 @@ import { CONTACT_EMAIL } from '../config/site'
   <section class="container-narrow section-tight">
     <p class="lead" id="reason" hidden></p>
     <p>Go back, check the fields and try again. If it keeps failing, email us at <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.</p>
-    <div class="hero-cta"><button class="btn btn-primary" type="button" onclick="history.back()">Go back to the form</button><a class="btn" href="/">Home <Icon name="arrow" size={16} class="icon-arrow" /></a></div>
+    <div class="hero-cta"><button class="btn btn-primary" type="button" data-back>Go back to the form</button><a class="btn" href="/">Home <Icon name="arrow" size={16} class="icon-arrow" /></a></div>
   </section>
   <script is:inline>
     var r = new URLSearchParams(location.search).get('reason'); var el = document.getElementById('reason'); if (r && el) { el.textContent = r; el.hidden = false }
+    document.querySelector('[data-back]')?.addEventListener('click', function () { history.back() })
   </script>
 </Page>

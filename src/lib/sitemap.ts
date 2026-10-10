@@ -7,7 +7,7 @@ type Url = { loc: string; lastmod?: Date }
 export const LEGAL_UPDATED = new Date('2026-10-10T00:00:00Z')
 const PAGES: [string, Date?][] = [
   ['/page/about-us'], ['/page/contact-us'], ['/page/hire-us'], ['/page/newsletter'], ['/page/faq'], ['/page/courses'], ['/page/products'],
-  ['/page/privacy-policy', LEGAL_UPDATED], ['/page/terms-and-conditions', LEGAL_UPDATED], ['/page/dmca-policy', LEGAL_UPDATED],
+  ['/page/privacy-policy', LEGAL_UPDATED], ['/page/terms-and-conditions', LEGAL_UPDATED], ['/page/dmca-policy', LEGAL_UPDATED], ['/page/accessibility', LEGAL_UPDATED],
   ['/jobs/job-archive'], ['/jobs/create-job'], ['/jobs/pricing'], ['/jobs/companies'], ['/search'],
 ]
 const newest = (posts: Post[]) => posts.reduce<Date | undefined>((m, p) => { const d = p.updated ?? p.date; return !m || d > m ? d : m }, undefined)

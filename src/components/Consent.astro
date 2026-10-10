@@ -1,0 +1,9 @@
+---
+// Newsletter consent (GDPR/PDPA): an unticked, required checkbox. The Worker rejects newsletter posts without it.
+interface Props { id: string }
+const { id } = Astro.props
+---
+<label class="consent" for={id}>
+  <input type="checkbox" id={id} name="consent" value="yes" required>
+  <span>I agree to receive the monthly Laravel &amp; VueJs newsletter by email. I can unsubscribe at any time. See the <a href="/page/privacy-policy#newsletter">privacy policy</a>.</span>
+</label>

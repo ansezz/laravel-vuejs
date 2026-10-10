@@ -17,7 +17,7 @@ const topics = ['General question', 'Advertising', 'Write for the blog', 'Hire u
         <div class="field"><label for="c-msg">Message</label><textarea class="input" id="c-msg" name="message" required minlength="10" maxlength="5000" placeholder="How can we help?"></textarea></div>
         <div><button class="btn btn-primary" type="submit">Send message <Icon name="arrow" size={16} class="icon-arrow" /></button>
         <FormGuard />
-        <p class="form-note">We reply from {CONTACT_EMAIL}, usually within two working days. See our <a class="link-arrow" href="/page/privacy-policy">privacy policy</a>.</p></div>
+        <p class="form-note">We reply from {CONTACT_EMAIL}, usually within two working days. We use your details only to reply and keep them for up to 12 months. See our <a class="link-arrow" href="/page/privacy-policy#forms">privacy policy</a>.</p></div>
       </form>
       <div class="grid" style="gap:16px;align-content:start">
         <a class="card social-card" href={`mailto:${CONTACT_EMAIL}`}><span class="tile-icon"><Icon name="mail" size={20} /></span><span><strong>Email</strong><small>{CONTACT_EMAIL}</small></span><Icon name="arrow-up-right" size={18} class="go" /></a>

@@ -1,30 +1,90 @@
 ---
 import Page from '../../layouts/Page.astro'
-import { CONTACT_EMAIL, SITE_DOMAIN } from '../../config/site'
+import { CONTACT_EMAIL, SITE_DOMAIN, AUTHOR } from '../../config/site'
+const mail = `mailto:${CONTACT_EMAIL}`
+// Legal review note (not shown): written to cover GDPR/UK GDPR, Malaysia PDPA 2010 (as amended 2024), Morocco Law 09-08
+// and CCPA/CPRA. Items a lawyer should confirm are listed in docs/LEGAL-REVIEW.md.
 ---
-<Page title="Privacy policy" kicker="Legal" lead="What we collect, why, and the choices you have. Short version: very little, and we never sell it." updated="October 10, 2026" prose>
-  <p>This policy explains how the Laravel & VueJs project (“we”, “us”) handles personal information on <strong>{SITE_DOMAIN}</strong> (the “Site”).</p>
-  <h2>What we collect</h2>
+<Page title="Privacy policy" description="What laravel-vuejs.space collects, why, the legal basis, how long it is kept, who processes it and how to use your privacy rights." kicker="Legal" lead="What we collect, why, how long we keep it and the rights you have. Short version: very little, no ads, no tracking cookies, and we never sell it." updated="October 10, 2026" prose>
+  <h2 id="summary">At a glance</h2>
   <ul>
-    <li><strong>No accounts.</strong> The Site is static. There is no sign-up, and we do not store passwords or profiles.</li>
-    <li><strong>Server logs.</strong> Our hosting provider, Cloudflare, processes technical data such as IP addresses and browser information to deliver and protect the Site. See <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</li>
-    <li><strong>Forms.</strong> When you use the contact, hire-us, newsletter or job form, we store what you type (such as your name, email address and message), the time, and a one-way hash of your IP address used only to block spam. We use it only to answer you, publish the job you sent, or send the newsletter. Submissions are stored in Cloudflare D1 and we get an email notification through Cloudflare Email Service.</li>
-    <li><strong>Your preferences.</strong> Your light or dark theme choice is saved in your browser's local storage. It never leaves your device.</li>
+    <li><strong>No accounts, no ads, no tracking cookies.</strong> Reading the Site sets no cookies.</li>
+    <li><strong>Forms:</strong> what you type into the contact, hire-us, job or newsletter form is stored so we can answer you, and deleted after 12 months (newsletter: until you unsubscribe).</li>
+    <li><strong>Analytics:</strong> cookieless Cloudflare Web Analytics, counted in aggregate.</li>
+    <li><strong>Comments:</strong> Disqus loads only if you click “Load comments”.</li>
+    <li><strong>Your rights:</strong> email <a href={mail}>{CONTACT_EMAIL}</a> to access, correct, delete or export your data, or to object.</li>
   </ul>
-  <h2>Comments</h2>
-  <p>Comments are provided by Disqus and are only loaded when you click “Load comments”. Once loaded, Disqus may set cookies and process data under the <a href="https://disqus.com/privacy-policy/">Disqus privacy policy</a>.</p>
-  <h2>Analytics</h2>
-  <p>We use <a href="https://www.cloudflare.com/web-analytics/">Cloudflare Web Analytics</a> to count page views and measure page speed. It is cookieless: it does not set cookies, use local storage or fingerprint you, and it does not follow you across other sites. It collects things like the page you visited, the referring page, your browser and country, and loading times, in aggregate. See <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</p>
-  <h2>Advertising</h2>
-  <p>We do not show ads or use advertising trackers. If that ever changes, we will update this page first and, where the law requires it, ask for your consent.</p>
-  <h2>Social networks</h2>
-  <p>Share buttons are plain links: nothing is sent to a social network until you click one. Our pages and groups on Facebook, X, LinkedIn, Instagram, Telegram and Pinterest are governed by those platforms' own policies.</p>
-  <h2>How long we keep data</h2>
-  <p>We keep form submissions for up to 12 months, unless a job post needs them for longer while it is live, and newsletter addresses until you unsubscribe. Email <a href="mailto:contact@laravel-vuejs.space">contact@laravel-vuejs.space</a> to have your data deleted sooner.</p>
-  <h2>Your rights</h2>
-  <p>Depending on where you live (for example under the GDPR or California law), you can ask to access, correct or delete the personal information we hold about you, or object to its use. We do not sell personal information. To make a request, email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.</p>
-  <h2>Children</h2>
-  <p>The Site is meant for developers and is not directed at children under 13. We do not knowingly collect their personal information.</p>
-  <h2>Changes</h2>
-  <p>We may update this policy. The date at the top shows the latest version.</p>
+
+  <h2 id="who-we-are">Who is responsible</h2>
+  <p>{SITE_DOMAIN} (the “Site”) is run by {AUTHOR.name} for the Laravel &amp; VueJs community project (“we”, “us”). We are the data controller (or “data user” under Malaysian law, “responsable du traitement” under Moroccan law) for the personal data described here. Contact for all privacy matters: <a href={mail}>{CONTACT_EMAIL}</a>.</p>
+
+  <h2 id="what-we-collect">What we collect, why, and on what legal basis</h2>
+  <table>
+    <thead><tr><th scope="col">What</th><th scope="col">Why</th><th scope="col">Legal basis (GDPR)</th><th scope="col">Kept for</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#forms">Contact and hire-us forms</a>: name, email, optional company, topic/service, budget, timeline, message</td><td>To read and reply to your message or project request</td><td>Steps you ask for before a contract, and our legitimate interest in answering messages (Art. 6(1)(b) and (f))</td><td>12 months</td></tr>
+      <tr><td><a href="#forms">Job form</a>: name, email, company, company URL, role details, apply link</td><td>To review, publish and manage the listing, and to contact you about it</td><td>Performance of the service you request (Art. 6(1)(b))</td><td>12 months</td></tr>
+      <tr><td><a href="#newsletter">Newsletter</a>: email address, date of sign-up, your consent</td><td>To send the monthly newsletter</td><td>Your consent (Art. 6(1)(a)), which you can withdraw at any time</td><td>Until you unsubscribe, then 30 days</td></tr>
+      <tr><td>Spam protection for every form: a one-way hash of your IP address, your browser's user-agent string</td><td>Rate limiting and blocking abuse</td><td>Legitimate interest in keeping the forms usable (Art. 6(1)(f))</td><td>30 days, then removed from the record</td></tr>
+      <tr><td><a href="#analytics">Analytics</a>: page, referrer, browser, country, load times (aggregated)</td><td>To see which articles help and keep the Site fast</td><td>Legitimate interest (Art. 6(1)(f))</td><td>Cloudflare's retention for aggregated analytics</td></tr>
+      <tr><td><a href="#hosting">Delivery and security logs</a>: IP address, request details</td><td>To deliver the Site and protect it from attacks</td><td>Legitimate interest (Art. 6(1)(f))</td><td>Cloudflare's log retention</td></tr>
+    </tbody>
+  </table>
+  <p>We do not use your data for automated decisions or profiling, and we never sell it or share it for cross-context behavioural advertising. Giving us data is voluntary, but without an email address we cannot reply or send the newsletter.</p>
+
+  <h2 id="forms">Forms</h2>
+  <p>When you send a form, the Site's server (a Cloudflare Worker) checks it for spam and stores it in a <strong>Cloudflare D1</strong> database. It then emails a copy to our inbox through <strong>Cloudflare Email Service</strong>; mail to {CONTACT_EMAIL} is forwarded by <strong>Cloudflare Email Routing</strong> to a mailbox hosted by <strong>Microsoft (Outlook.com)</strong>, where we read and answer it. Only the project maintainer has access. A daily job removes the IP hash and user agent after 30 days and deletes submissions after 12 months; we delete earlier on request. If we publish a job you sent, the published listing stays online while it is relevant.</p>
+
+  <h2 id="newsletter">Newsletter</h2>
+  <p>We add your address only after you tick the consent box. Each issue will include an unsubscribe link, and you can also unsubscribe at any time by emailing <a href={mail}>{CONTACT_EMAIL}</a>. We keep a record of when you subscribed (proof of consent) and delete your address 30 days after you unsubscribe.</p>
+
+  <h2 id="comments">Comments (Disqus)</h2>
+  <p>Comments are provided by Disqus, Inc. Nothing from Disqus loads until you click “Load comments” on an article; that click is your choice to connect to Disqus. From then on, Disqus may set cookies, receive your IP address and browser details, and process your data as an independent controller under the <a href="https://disqus.com/privacy-policy/">Disqus privacy policy</a>. Disqus is based in the United States.</p>
+
+  <h2 id="analytics">Analytics</h2>
+  <p>We use <a href="https://www.cloudflare.com/web-analytics/">Cloudflare Web Analytics</a>. It is cookieless: it does not set cookies, use local storage or fingerprint you, and does not track you across other sites. It reports things like the page you visited, the referring page, your browser, your country and page load times, in aggregate. See <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</p>
+
+  <h2 id="hosting">Hosting and security</h2>
+  <p>The Site is hosted on <strong>Cloudflare</strong> (Workers, static assets and D1). To deliver pages and protect the Site, Cloudflare processes technical data such as IP addresses and request headers on our behalf. Pages are served over HTTPS only, with strict security headers.</p>
+
+  <h2 id="cookies">Cookies and local storage</h2>
+  <p>The Site itself sets <strong>no cookies</strong>, so there is no cookie banner. It stores one item in your browser's local storage: your light or dark <em>theme</em> choice, which never leaves your device and which you can clear in your browser settings. Disqus may set cookies, but only after you choose to load comments (see above). Share buttons are plain links: nothing is sent to a social network until you click one.</p>
+
+  <h2 id="recipients">Who processes your data</h2>
+  <ul>
+    <li><strong>Cloudflare, Inc.</strong> (hosting, database, email sending and routing, analytics, security) as our processor, under the <a href="https://www.cloudflare.com/cloudflare-customer-dpa/">Cloudflare Data Processing Addendum</a>.</li>
+    <li><strong>Microsoft Corporation</strong> (the Outlook.com mailbox our contact address forwards to).</li>
+    <li><strong>Disqus, Inc.</strong>, only if you load comments, as an independent controller.</li>
+    <li>Authorities, if the law requires us to disclose data.</li>
+  </ul>
+  <p>Our pages and groups on Facebook, X, LinkedIn, Instagram, Telegram and Pinterest are governed by those platforms' own policies.</p>
+
+  <h2 id="transfers">International transfers</h2>
+  <p>We run the project from Malaysia, and our providers process data in the United States and other countries. Where data leaves the EU/EEA, the UK, Malaysia or Morocco, we rely on the safeguards our providers offer, such as the EU Standard Contractual Clauses and certifications under the EU-U.S. Data Privacy Framework where they apply.</p>
+
+  <h2 id="security">How we protect it</h2>
+  <p>Access to submissions is limited to the maintainer's Cloudflare account. Data is encrypted in transit (HTTPS) and at rest by our providers, IP addresses are stored only as salted one-way hashes, and we keep as little as we can for as short as we can.</p>
+
+  <h2 id="your-rights">Your rights</h2>
+  <p>Wherever you live, you can ask us to:</p>
+  <ul>
+    <li><strong>access</strong> the personal data we hold about you and get a copy (in a portable format where applicable);</li>
+    <li><strong>correct</strong> it, or <strong>delete</strong> it;</li>
+    <li><strong>restrict</strong> or <strong>object</strong> to how we use it, including for direct marketing;</li>
+    <li><strong>withdraw consent</strong> (for example to the newsletter) at any time, without affecting what we did before.</li>
+  </ul>
+  <p>Depending on your location, specific laws also give you these rights:</p>
+  <ul>
+    <li><strong>EU/EEA and UK (GDPR, UK GDPR):</strong> all of the above, plus the right to lodge a complaint with your local data protection authority.</li>
+    <li><strong>Malaysia (Personal Data Protection Act 2010):</strong> the rights of access, correction, data portability and to withdraw consent or prevent processing likely to cause damage or distress, and to prevent processing for direct marketing. You may complain to the Personal Data Protection Commissioner (JPDP).</li>
+    <li><strong>Morocco (Law 09-08):</strong> the rights of access, rectification and objection, including objecting free of charge to direct marketing. You may complain to the CNDP (Commission Nationale de contrôle de la protection des Données à caractère Personnel).</li>
+    <li><strong>California (CCPA/CPRA) and other U.S. states:</strong> the right to know, delete and correct personal information, and not to be discriminated against for exercising these rights. We do not sell or share personal information, and we do not use sensitive personal information. You can use an authorised agent.</li>
+  </ul>
+  <p><strong>How to make a request:</strong> email <a href={`${mail}?subject=Privacy%20request`}>{CONTACT_EMAIL}</a> from the address you used with us (so we can verify it's you). We reply within 30 days, free of charge.</p>
+
+  <h2 id="children">Children</h2>
+  <p>The Site is meant for developers and is not directed at children under 16. We do not knowingly collect their personal data; if you think a child has sent us data, email us and we will delete it.</p>
+
+  <h2 id="changes">Changes</h2>
+  <p>When we change this policy we update the date at the top, and for significant changes we will say so on the Site (and in the newsletter, if you subscribe).</p>
 </Page>
