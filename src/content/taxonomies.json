@@ -95,6 +95,11 @@
       "id": "14",
       "slug": "nova",
       "name": "Nova"
+    },
+    {
+      "id": "15",
+      "slug": "upgrade",
+      "name": "Upgrade"
     }
   ]
 }
