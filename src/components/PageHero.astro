@@ -1,12 +1,12 @@
 ---
-interface Props { kicker?: string; title: string; lead?: string; crumbs?: { label: string; href?: string }[] }
+interface Props { kicker?: string; title: string; lead?: string; crumbs?: { label: string; href?: string }[]; class?: string }
 import { SITE_URL } from '../config/site'
-const { kicker, title, lead, crumbs = [] } = Astro.props
+const { kicker, title, lead, crumbs = [], class: className } = Astro.props
 const here = SITE_URL + (Astro.url.pathname.replace(/\/$/, '') || '/')
 const breadcrumbs = crumbs.length ? { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [{ label: 'Home', href: '/' }, ...crumbs]
   .map((c, i) => ({ '@type': 'ListItem', position: i + 1, name: c.label.replace(/&amp;/g, '&'), item: c.href ? SITE_URL + (c.href === '/' ? '/' : c.href) : here })) } : null
 ---
-<section class="page-hero">
+<section class:list={['page-hero', className]}>
   <div class="hero-bg"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
   <div class="container">
     {crumbs.length > 0 && (

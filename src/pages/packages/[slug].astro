@@ -1,0 +1,115 @@
+---
+import Base from '../../layouts/Base.astro'
+import PageHero from '../../components/PageHero.astro'
+import PackageMeter from '../../components/PackageMeter.astro'
+import PackageInstall from '../../components/PackageInstall.astro'
+import { ROLE_LABEL, SNAPSHOT, formatCount, leagues, sameJob, setsFor, type RankedPackage } from '../../data/packages'
+import { allPosts, clip, fmtDate } from '../../lib/content'
+import { postsForPackage } from '../../lib/package-mentions'
+
+export function getStaticPaths() {
+  const chart = leagues()
+  return (['laravel', 'vue'] as const).flatMap(ecosystem => chart[ecosystem].map(pkg => ({
+    params: { slug: pkg.slug },
+    props: { pkg },
+  })))
+}
+
+interface Props { pkg: RankedPackage }
+const { pkg } = Astro.props
+const chart = leagues()[pkg.ecosystem]
+const sets = setsFor(pkg, chart)
+const jobPeers = sets.length ? [] : sameJob(pkg, chart)
+const articles = postsForPackage(pkg.name, (await allPosts()).map(post => ({
+  title: post.title,
+  url: post.url,
+  text: `${post.excerpt}\n${post.entry.body ?? ''}`,
+  date: post.date,
+})))
+const leagueName = pkg.ecosystem === 'laravel' ? 'Laravel' : 'Vue'
+const metric = pkg.ecosystem === 'laravel' ? SNAPSHOT.laravelMetric : SNAPSHOT.vueMetric
+const registryLabel = pkg.ecosystem === 'laravel' ? 'Packagist' : 'npm'
+---
+<Base title={pkg.name} description={clip(pkg.description, 155)}>
+  <div class={pkg.ecosystem === 'laravel' ? 'league-laravel' : 'league-vue'}>
+  <PageHero
+    class="pkg-hero"
+    kicker={`${leagueName} league`}
+    title={pkg.name}
+    lead={pkg.description}
+    crumbs={[{ label: 'Packages', href: '/packages' }, { label: pkg.name }]}
+  >
+    <p class="pkg-stamp">
+      Rank {pkg.rank} of {pkg.total}. {metric}.
+      {pkg.role && <>Job: {ROLE_LABEL[pkg.role]}. </>}
+      Snapshot <time datetime={SNAPSHOT.asOf}>{SNAPSHOT.asOf}</time>.
+    </p>
+    <PackageMeter downloads={pkg.downloads} bar={pkg.bar} layout="block" />
+  </PageHero>
+
+  <section class="container section-tight pkg-detail">
+    <h2>Install</h2>
+    <PackageInstall command={pkg.install} />
+    <div class="pkg-actions">
+      <a class="btn btn-primary" href={pkg.registryUrl} rel="noopener" target="_blank">Open on {registryLabel}</a>
+      {pkg.repositoryUrl && <a class="btn" href={pkg.repositoryUrl} rel="noopener" target="_blank">Source repository</a>}
+    </div>
+
+    {sets.length > 0 && (
+      <>
+        <h2>Install with</h2>
+        {sets.map(({ set, command, others }) => (
+          <div class="pkg-set">
+            <h3>{set.title}</h3>
+            <p class="pkg-set-note">One command for this set. It includes {pkg.name}.</p>
+            <PackageInstall command={command} />
+            <ul class="pkg-peers">
+              {others.map(peer => (
+                <li>
+                  <a class="pkg-peer" href={`/packages/${peer.slug}`}>
+                    <span class="league-rank">{peer.rank}</span>
+                    <span class="league-name">{peer.name}</span>
+                    <span class="pkg-count" data-downloads={peer.downloads}>{formatCount(peer.downloads)}<span class="sr-only"> ({peer.downloads})</span></span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </>
+    )}
+
+    {jobPeers.length > 0 && (
+      <>
+        <h2>Same job</h2>
+        <p class="pkg-set-note">Other {ROLE_LABEL[pkg.role!]} packages, still in download order.</p>
+        <ul class="pkg-peers">
+          {jobPeers.map(peer => (
+            <li>
+              <a class="pkg-peer" href={`/packages/${peer.slug}`}>
+                <span class="league-rank">{peer.rank}</span>
+                <span class="league-name">{peer.name}</span>
+                <span class="pkg-count" data-downloads={peer.downloads}>{formatCount(peer.downloads)}<span class="sr-only"> ({peer.downloads})</span></span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </>
+    )}
+
+    {articles.length > 0 && (
+      <>
+        <h2>On this site</h2>
+        <ul class="pkg-articles">
+          {articles.map(article => (
+            <li>
+              <a href={article.url}>{article.title}</a>
+              <time datetime={article.date.toISOString()}>{fmtDate(article.date)}</time>
+            </li>
+          ))}
+        </ul>
+      </>
+    )}
+  </section>
+  </div>
+</Base>
