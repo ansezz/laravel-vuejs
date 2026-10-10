@@ -1,6 +1,7 @@
 ---
 id: 9
 title: "Inertia 3.9: pause polling in background tabs and detect back-button visits"
+seoTitle: "Inertia 3.9: background-tab polling and back-button visits"
 excerpt: "Inertia 3.9 adds a background option for usePoll, a type field on the navigate event so you can refresh stale pages after the back button, and 3.9.1 ships two security hardening fixes. Here is what changed, with Vue 3 examples."
 date: 2026-10-10T03:25:00Z
 snippet: "usePoll(5000, {}, { background: 'pause' })"

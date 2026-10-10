@@ -570,3 +570,9 @@ button[disabled] { opacity: .65; cursor: progress; }
 .archive-art { margin-top: 32px; aspect-ratio: 21 / 6; border-radius: var(--radius-lg); overflow: hidden; background: #0d0b1f; border: 1px solid var(--border); box-shadow: var(--shadow-lg); }
 .archive-art img { object-position: 50% 55%; }
 @media (max-width: 640px) { .archive-art { aspect-ratio: 16 / 8; } }
+
+/* Archive pagination */
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 40px }
+.pagination ol { display: flex; gap: 6px; list-style: none; margin: 0; padding: 0 }
+.pagination ol a, .pagination ol span { display: grid; place-items: center; min-width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border-strong); text-decoration: none; color: inherit; font-weight: 600 }
+.pagination ol [aria-current] { background: var(--brand); border-color: transparent; color: var(--brand-ink) }

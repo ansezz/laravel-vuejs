@@ -51,3 +51,9 @@ jobs:
             git commit --allow-empty -m "Publish scheduled posts: ${MISSING:-forced rebuild}"
             git push origin HEAD:master
           fi
+      - name: Tell IndexNow about the new posts
+        if: steps.due.outputs.missing != ''
+        continue-on-error: true
+        env:
+          WAIT_FOR: ${{ steps.due.outputs.missing }}
+        run: node scripts/indexnow.mjs

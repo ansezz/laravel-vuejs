@@ -11,7 +11,7 @@ export const tagBySlug = (slug: string) => tags.find(t => t.slug === slug) ?? { 
 
 export type Post = {
   entry: CollectionEntry<'posts'>
-  id: number; slug: string; url: string; title: string; excerpt: string
+  id: number; slug: string; url: string; title: string; excerpt: string; description: string; seoTitle?: string
   date: Date; updated?: Date; featured: boolean; author: string
   categories: Category[]; tags: Tag[]; readingMinutes: number; hue: number; snippet: string
 }
@@ -40,7 +40,7 @@ export async function allPosts(): Promise<Post[]> {
   cache = entries.map((entry) => {
     const d = entry.data
     return {
-      entry, id: d.id, slug: entry.id, url: `/${entry.id}`, title: d.title, excerpt: d.excerpt,
+      entry, id: d.id, slug: entry.id, url: `/${entry.id}`, title: d.title, excerpt: d.excerpt, seoTitle: d.seoTitle, description: d.description ?? clip(d.excerpt, 155),
       date: d.date, updated: d.updated, featured: d.featured, author: d.author,
       categories: d.categories.map(categoryBySlug), tags: d.tags.map(tagBySlug),
       readingMinutes: Math.max(1, Math.round(words(entry.body ?? '') / 230)), snippet: d.snippet ?? `cat ${entry.id}.md`,
@@ -68,6 +68,13 @@ export function enhanceHtml(html: string) {
       `<div class="code"><div class="code-head"><span class="code-lang">${LANG[lang] ?? lang}</span><button type="button" class="copy-btn" aria-label="Copy code">${COPY_SVG}<span class="copy-label">Copy</span></button></div>${pre}</div>`)
     .replace(/<(h[23]) id="([^"]+)">([\s\S]*?)<\/\1>/g, (_, tag, id, inner) =>
       `<${tag} id="${id}">${inner}<a class="anchor" href="#${id}" aria-label="Link to this section">#</a></${tag}>`)
+}
+// Trim text to at most n characters on a word boundary, for meta descriptions.
+export function clip(text: string, n: number) {
+  const t = text.replace(/\s+/g, ' ').trim()
+  if (t.length <= n) return t
+  const cut = t.slice(0, n - 1)
+  return cut.slice(0, cut.lastIndexOf(' ')).replace(/[\s,;:.\-–—]+$/, '') + '…'
 }
 export const absolute = (path: string) => SITE_URL + (path === '/' ? '/' : path.replace(/\/$/, ''))
 export const fmtDate = (d: Date) => d.toLocaleDateString('en', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })

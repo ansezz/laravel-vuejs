@@ -5,7 +5,7 @@ import FormGuard from '../../components/FormGuard.astro'
 import { CONTACT_EMAIL, GROUPS, GITHUB_URL } from '../../config/site'
 const topics = ['General question', 'Advertising', 'Write for the blog', 'Hire us', 'Report a problem', 'Copyright (DMCA)']
 ---
-<Page title="Contact us" kicker="Contact" heading="Let's talk." lead="Questions, ideas, partnerships or feedback: we read every message.">
+<Page title="Contact us" description="Questions, ideas, partnerships or feedback for the Laravel & VueJs team? Send us a message and we read and reply to every one." kicker="Contact" heading="Let's talk." lead="Questions, ideas, partnerships or feedback: we read every message.">
   <section class="container section-tight">
     <div class="grid" style="grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:32px">
       <form class="card" style="padding:28px;gap:18px" id="contact-form" action="/api/forms/contact" method="post" data-api>

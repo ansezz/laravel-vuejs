@@ -2,8 +2,9 @@
 import Base from '../../layouts/Base.astro'
 import Archive from '../../components/Archive.astro'
 import { allPosts } from '../../lib/content'
-const posts = await allPosts()
+import { pageOf } from '../../lib/paginate'
+const page = pageOf(await allPosts(), 1)
 ---
-<Base title="All articles" description="Every Laravel and Vue guide, tutorial and community post on Laravel & VueJs.">
-  <Archive kicker="The blog" title="All articles" lead="Guides, tutorials and notes on building with Laravel and Vue. Newest first." posts={posts} crumbs={[{ label: 'Articles' }]} />
+<Base title="All articles" description="Every Laravel and Vue guide, tutorial, release note and community post on Laravel & VueJs, newest first." next={page.next}>
+  <Archive kicker="The blog" title="All articles" lead="Guides, tutorials and notes on building with Laravel and Vue. Newest first." posts={page.items} page={page} crumbs={[{ label: 'Articles' }]} />
 </Base>

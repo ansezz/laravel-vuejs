@@ -51,3 +51,24 @@ export const FOOTER = [
     { label: 'Privacy policy', href: '/page/privacy-policy' }, { label: 'Terms', href: '/page/terms-and-conditions' },
     { label: 'DMCA policy', href: '/page/dmca-policy' }, { label: 'RSS feed', href: '/feed.xml' } ] },
 ] as const
+
+// Default author for posts. Keep to facts we can back up (no invented credentials).
+export const AUTHOR = {
+  name: 'Anass Ez-zouaine', slug: 'anass-ez-zouaine', url: '/author/anass-ez-zouaine',
+  role: 'Founder and maintainer of Laravel & VueJs',
+  sameAs: ['https://github.com/ansezz'],
+} as const
+
+// Search-engine verification. Paste the token (only the content="..." value) and redeploy.
+// Google Search Console: Settings > Ownership verification > HTML tag. Bing Webmaster Tools: Add site > HTML Meta Tag.
+// Leave empty to skip the tag (DNS verification through Cloudflare works too).
+export const GOOGLE_SITE_VERIFICATION = ''
+export const BING_SITE_VERIFICATION = ''
+
+// IndexNow (Bing, Yandex, Seznam, Naver...): this key is public by design and is served at /<key>.txt.
+export const INDEXNOW_KEY = '6e60e68e8d8b23b36f7e72a51241af0e'
+
+// AI and search crawlers that robots.txt explicitly welcomes.
+export const AI_CRAWLERS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-User', 'Claude-SearchBot', 'anthropic-ai',
+  'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Applebot', 'Applebot-Extended', 'CCBot', 'Amazonbot', 'meta-externalagent',
+  'DuckAssistBot', 'MistralAI-User', 'cohere-ai', 'YouBot'] as const

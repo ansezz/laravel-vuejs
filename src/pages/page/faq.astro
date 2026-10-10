@@ -14,7 +14,7 @@ const faqs = [
 ]
 const jsonld = [{ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a.replace(/<[^>]+>/g, '') } })) }]
 ---
-<Page title="FAQ" kicker="Help" heading="Frequently asked questions" lead="Everything you might want to know about the blog, the community and working with us.">
+<Page title="FAQ: blog, community and jobs" description="Answers about Laravel & VueJs: what we cover, which Laravel and Vue versions, writing for the blog, posting jobs and hiring us." kicker="Help" heading="Frequently asked questions" lead="Everything you might want to know about the blog, the community and working with us.">
   <section class="container-narrow section-tight">
     <div class="faq">{faqs.map((f, i) => <details open={i === 0}><summary>{f.q}</summary><div class="answer" set:html={f.a} /></details>)}</div>
     <p class="muted" style="margin-top:32px;text-align:center">Still have a question? <a class="link-arrow" href="/page/contact-us">Contact us</a></p>

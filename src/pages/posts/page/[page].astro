@@ -1,0 +1,15 @@
+---
+import Base from '../../../layouts/Base.astro'
+import Archive from '../../../components/Archive.astro'
+import { allPosts } from '../../../lib/content'
+import { pageOf, PAGE_SIZE } from '../../../lib/paginate'
+export async function getStaticPaths() {
+  const pages = Math.ceil((await allPosts()).length / PAGE_SIZE)
+  return Array.from({ length: Math.max(0, pages - 1) }, (_, i) => ({ params: { page: String(i + 2) } }))
+}
+const n = Number(Astro.params.page)
+const page = pageOf(await allPosts(), n)
+---
+<Base title={`All articles, page ${n}`} description={`Laravel and Vue guides, tutorials and community posts on Laravel & VueJs, page ${n} of ${page.pages}.`} prev={page.prev} next={page.next}>
+  <Archive kicker="The blog" title={`All articles <span class="muted">· page ${n}</span>`} posts={page.items} page={page} crumbs={[{ label: 'Articles', href: '/posts' }, { label: `Page ${n}` }]} />
+</Base>

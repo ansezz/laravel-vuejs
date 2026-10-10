@@ -77,6 +77,23 @@ A post whose `date` is in the future is left out of production builds: it does n
 
 Future posts are included in Workers Builds previews (every branch except `master`), in PR CI and in local builds run with `SHOW_FUTURE_POSTS=1`, so they can be reviewed. Set `date` to the exact moment the post should go live, in UTC (for example `2026-10-13T07:00:00Z` = 15:00 MYT). It then appears with the next daily run.
 
+## SEO and AI search
+
+- **Titles and descriptions:** `<title>` stays within ~60 characters (the site name is added only when it fits; posts can set `seoTitle`). Meta descriptions default to the excerpt trimmed to 155 characters; posts can set `description`.
+- **Structured data:** one JSON-LD `@graph` per page: `Organization` and `WebSite` (with a `SearchAction` for `/search?q=`) everywhere, `TechArticle`/`BlogPosting` + `Person` + `BreadcrumbList` on posts, `BreadcrumbList` on listing pages, `FAQPage` on the FAQ, `ProfilePage` on the author page.
+- **Sitemaps:** `/sitemap.xml` is a sitemap index pointing at `/sitemap-pages.xml`, `/sitemap-posts.xml` and `/sitemap-taxonomies.xml`, with `lastmod` where we know it (legal pages use `LEGAL_UPDATED` in `src/lib/sitemap.ts`; bump it when you edit them).
+- **Feeds:** `/feed.xml` (also `/feed/posts.xml`, `/feed/categories.xml`, `/feed/tags.xml`).
+- **AI search / GEO:** `/llms.txt` (index), `/llms-full.txt` (full text of every article) and `/<slug>.md` (each post as clean Markdown; the Worker sends a `Link: rel="canonical"` header to the HTML page). `robots.txt` explicitly allows the main AI crawlers (`AI_CRAWLERS` in `src/config/site.ts`).
+- **Author page:** `/author/anass-ez-zouaine` (E-E-A-T: who writes, how articles are tested and corrected). Keep it to verifiable facts.
+- **Pagination:** `/posts` shows 12 articles; older ones move to `/posts/page/2`, `/posts/page/3`, ... with `rel=prev/next`.
+- **IndexNow:** the key is `INDEXNOW_KEY` in `src/config/site.ts`, served at `/<key>.txt`. `.github/workflows/indexnow.yml` submits recently changed URLs after each deploy of master (run it manually with *all* to submit the whole sitemap), and the scheduled-publishing job pings new posts on their release day.
+
+### Search Console and Bing Webmaster Tools (owner to-do)
+
+1. **Google Search Console:** add the property. Easiest is a *Domain* property verified with a DNS TXT record in Cloudflare. For a URL-prefix property, choose *HTML tag* and paste only the `content` value into `GOOGLE_SITE_VERIFICATION` in `src/config/site.ts`, then push.
+2. **Bing Webmaster Tools:** import the site from Search Console, or choose *HTML Meta Tag* and paste the value into `BING_SITE_VERIFICATION`.
+3. In both, submit `https://laravel-vuejs.space/sitemap.xml`.
+
 ## Deploying
 
 Pushes to `master` are deployed by Cloudflare Workers Builds; pull requests get a preview URL. Manual deploy:

@@ -116,6 +116,13 @@ function withHeaders(res: Response, url: URL) {
   h.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
   if (res.ok && url.pathname.startsWith('/_astro/')) h.set('Cache-Control', 'public, max-age=31536000, immutable')
   else if (res.ok && /^\/(og|images)\//.test(url.pathname)) h.set('Cache-Control', 'public, max-age=604800')
+  // Markdown copies of posts: right MIME type, and a canonical Link header so search engines credit the HTML page.
+  const md = url.pathname.match(/^\/([a-z0-9-]+)\.md$/)
+  if (res.ok && md) {
+    h.set('Content-Type', 'text/markdown; charset=utf-8')
+    h.set('Link', `<https://${APEX}/${md[1]}>; rel="canonical"`)
+  }
+  if (res.ok && /^\/llms(-full)?\.txt$/.test(url.pathname)) h.set('Content-Type', 'text/plain; charset=utf-8')
   // Keep workers.dev production and preview URLs out of search results (laravel-vuejs.space is canonical).
   if (url.hostname.endsWith('.workers.dev')) h.set('X-Robots-Tag', 'noindex')
   return out
