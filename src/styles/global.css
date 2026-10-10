@@ -576,3 +576,9 @@ button[disabled] { opacity: .65; cursor: progress; }
 .pagination ol { display: flex; gap: 6px; list-style: none; margin: 0; padding: 0 }
 .pagination ol a, .pagination ol span { display: grid; place-items: center; min-width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border-strong); text-decoration: none; color: inherit; font-weight: 600 }
 .pagination ol [aria-current] { background: var(--brand); border-color: transparent; color: var(--brand-ink) }
+
+/* Consent checkbox (newsletter) */
+.consent { display: flex; gap: 10px; align-items: flex-start; font-size: .88rem; line-height: 1.5; color: var(--muted); text-align: left }
+.consent input { flex: none; width: 18px; height: 18px; margin-top: 2px; accent-color: var(--brand) }
+.consent a { color: inherit; text-decoration: underline }
+.band .consent { color: rgb(255 255 255 / .82); margin-top: 14px; max-width: 560px; margin-inline: auto }

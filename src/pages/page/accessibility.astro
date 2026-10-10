@@ -1,0 +1,27 @@
+---
+import Page from '../../layouts/Page.astro'
+import { CONTACT_EMAIL, GITHUB_URL } from '../../config/site'
+---
+<Page title="Accessibility statement" description="Our accessibility goal for laravel-vuejs.space (WCAG 2.2 level AA), how we test it, known limitations and how to report a barrier." heading="Accessibility statement" kicker="Legal" lead="We want every developer to be able to read, search and use this Site, whatever device or assistive technology they use." updated="October 10, 2026" prose>
+  <h2>Our goal</h2>
+  <p>We aim to meet the <a href="https://www.w3.org/TR/WCAG22/">Web Content Accessibility Guidelines (WCAG) 2.2</a> at level <strong>AA</strong>. We believe the Site is largely conformant, but we have not had a formal third-party audit, so we do not claim full conformance.</p>
+  <h2>What we do</h2>
+  <ul>
+    <li>Semantic HTML with landmarks, one <code>h1</code> per page and a logical heading order, and breadcrumbs on inner pages.</li>
+    <li>Everything works with a keyboard, with a visible focus outline.</li>
+    <li>Text and controls meet AA colour-contrast ratios in both the light and dark themes.</li>
+    <li>Animations respect your <em>reduce motion</em> setting, and the layout reflows down to 320&nbsp;px wide and to 200% zoom.</li>
+    <li>Images have text alternatives (decorative artwork is hidden from screen readers), and form fields have visible labels and announce their status.</li>
+    <li>Code blocks can be copied with one keyboard-accessible button.</li>
+  </ul>
+  <h2>How we test</h2>
+  <p>Key pages are checked with automated tools (<a href="https://github.com/dequelabs/axe-core">axe-core</a> and Lighthouse, also in our CI on every change) and by hand with a keyboard and screen-reader spot checks. Automated tools catch only part of the issues, which is why your feedback matters.</p>
+  <h2>Known limitations</h2>
+  <ul>
+    <li><strong>Comments</strong> are provided by Disqus, a third party. We cannot guarantee the accessibility of its widget.</li>
+    <li><strong>Older articles</strong> may contain code screenshots or long tables; we are improving them as we update each post.</li>
+    <li><strong>Diagrams</strong> come with a text explanation in the article; tell us if one is missing.</li>
+  </ul>
+  <h2>Report a barrier</h2>
+  <p>If something on the Site is hard or impossible to use, email <a href={`mailto:${CONTACT_EMAIL}?subject=Accessibility`}>{CONTACT_EMAIL}</a> or <a href={`${GITHUB_URL}/issues`}>open a GitHub issue</a>. Tell us the page, what you were trying to do and the browser or assistive technology you use. We aim to reply within 5 working days and to fix confirmed issues promptly, or give you the content in another format meanwhile.</p>
+</Page>

@@ -1,0 +1,7 @@
+# Security contact for laravel-vuejs.space (RFC 9116)
+Contact: mailto:contact@laravel-vuejs.space
+Contact: https://github.com/ansezz/laravel-vuejs/security/advisories/new
+Expires: 2027-10-10T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://laravel-vuejs.space/.well-known/security.txt
+Policy: https://github.com/ansezz/laravel-vuejs/security/policy

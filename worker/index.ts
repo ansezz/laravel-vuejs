@@ -35,7 +35,7 @@ const FORMS: Record<Form, { label: string; fields: Record<string, Field> }> = {
       budget: { max: 60 }, timeline: { max: 60 }, message: { max: 5000, required: true, min: 20 },
     },
   },
-  newsletter: { label: 'Newsletter signup', fields: { email: { max: 200, required: true } } },
+  newsletter: { label: 'Newsletter signup', fields: { email: { max: 200, required: true }, consent: { max: 3, required: true } } },
   job: {
     label: 'Job submission',
     fields: {
@@ -57,8 +57,20 @@ export default {
     const og = url.pathname.match(/^\/og\/([a-z0-9-]+)\.png$/)
     if (og) return Response.redirect(new URL(`/og/${og[1]}.jpg`, url).toString(), 301)
     const match = url.pathname.match(/^\/api\/forms\/([a-z]+)\/?$/)
-    const res = match ? await handleForm(match[1], request, env, ctx) : await env.ASSETS.fetch(request)
+    if (url.pathname === '/_csp.json') return new Response('Not found', { status: 404 })
+    const [res] = await Promise.all([match ? handleForm(match[1], request, env, ctx) : env.ASSETS.fetch(request), loadHashes(env, url)])
     return withHeaders(res, url)
+  },
+
+  // Daily data retention (privacy policy): drop IP hashes and user agents after 30 days, delete submissions after
+  // 12 months, and forget unsubscribed newsletter addresses 30 days after they unsubscribe.
+  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+    const r = await env.DB.batch([
+      env.DB.prepare(`UPDATE submissions SET ip_hash = '', user_agent = NULL WHERE ip_hash != '' AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`),
+      env.DB.prepare(`DELETE FROM submissions WHERE created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-12 months')`),
+      env.DB.prepare(`DELETE FROM subscribers WHERE unsubscribed_at IS NOT NULL AND unsubscribed_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')`),
+    ])
+    console.log(`[retention] anonymised ${r[0].meta.changes}, deleted ${r[1].meta.changes} submission(s) and ${r[2].meta.changes} unsubscribed address(es)`)
   },
 } satisfies ExportedHandler<Env>
 
@@ -108,12 +120,38 @@ async function handleForm(name: string, request: Request, env: Env, ctx: Executi
 }
 
 // Static asset headers (the _headers file is not applied when the Worker runs first, so they live here).
+// Security headers. The CSP allows our own files, the exact inline scripts of this build (hashes from dist/_csp.json,
+// written by scripts/csp.mjs), Cloudflare Web Analytics, and Disqus (loaded only after a click). Inline style
+// attributes are used throughout the markup, so styles keep 'unsafe-inline'.
+const PERMISSIONS_POLICY = 'accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), usb=(), browsing-topics=()'
+const csp = (hashes: string[]) => [
+  "default-src 'self'",
+  `script-src 'self' ${hashes.join(' ')} https://static.cloudflareinsights.com https://*.disqus.com https://*.disquscdn.com`,
+  "style-src 'self' 'unsafe-inline' https://*.disquscdn.com",
+  "img-src 'self' data: https:",
+  "font-src 'self'",
+  "connect-src 'self' https://cloudflareinsights.com https://*.disqus.com",
+  'frame-src https://disqus.com https://*.disqus.com',
+  "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'", "manifest-src 'self'", 'upgrade-insecure-requests',
+].join('; ')
+let scriptHashes: string[] = []
+let hashesLoaded: Promise<void> | undefined
+function loadHashes(env: Env, url: URL) {
+  hashesLoaded ??= env.ASSETS.fetch(new URL('/_csp.json', url)).then(r => r.ok ? r.json<{ scriptHashes: string[] }>() : { scriptHashes: [] })
+    .then(j => { scriptHashes = j.scriptHashes }).catch(() => { hashesLoaded = undefined })
+  return hashesLoaded
+}
+
 function withHeaders(res: Response, url: URL) {
   const out = new Response(res.body, res)
   const h = out.headers
   h.set('X-Content-Type-Options', 'nosniff')
   h.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  h.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  h.set('Permissions-Policy', PERMISSIONS_POLICY)
+  h.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains')
+  h.set('Cross-Origin-Opener-Policy', 'same-origin')
+  h.set('X-Frame-Options', 'DENY')
+  if ((h.get('Content-Type') ?? '').includes('text/html')) h.set('Content-Security-Policy', csp(scriptHashes))
   if (res.ok && url.pathname.startsWith('/_astro/')) h.set('Cache-Control', 'public, max-age=31536000, immutable')
   else if (res.ok && /^\/(og|images)\//.test(url.pathname)) h.set('Cache-Control', 'public, max-age=604800')
   // Markdown copies of posts: right MIME type, and a canonical Link header so search engines credit the HTML page.
@@ -134,7 +172,7 @@ function validate(form: Form, input: FormData) {
   for (const [key, rule] of Object.entries(FORMS[form].fields)) {
     const value = String(input.get(key) ?? '').replace(/\r\n/g, '\n').trim()
     const label = key.replace('_', ' ')
-    if (rule.required && !value) { errors.push(`Please fill in your ${label}.`); continue }
+    if (rule.required && !value) { errors.push(key === 'consent' ? 'Please tick the box to agree to receive the newsletter.' : `Please fill in your ${label}.`); continue }
     if (value.length > rule.max) errors.push(`The ${label} is too long (max ${rule.max} characters).`)
     else if (rule.min && value && value.length < rule.min) errors.push(`The ${label} is a bit short; add a few more details.`)
     if (value) data[key] = value

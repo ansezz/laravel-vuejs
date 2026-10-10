@@ -43,6 +43,8 @@
   ],
   // Optional secret (set with `npx wrangler secret put IP_SALT`): salt used when hashing IPs for rate limiting.
   "observability": { "enabled": true },
+  // Daily data-retention job (worker/index.ts `scheduled`): see "How long we keep data" in the privacy policy.
+  "triggers": { "crons": ["17 3 * * *"] },
   // Custom domains: wrangler creates the DNS records and certificates. www is redirected to the apex by the Worker.
   // Keep *.workers.dev and per-PR preview URLs on (with custom-domain routes, wrangler would otherwise turn them off).
   // The Worker sends X-Robots-Tag: noindex on *.workers.dev, so only laravel-vuejs.space is indexed.

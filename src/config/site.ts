@@ -49,7 +49,7 @@ export const FOOTER = [
     { label: 'Contact', href: '/page/contact-us' }, { label: 'Write for us', href: '/who-we-are#write-for-the-blog' } ] },
   { title: 'Legal', links: [
     { label: 'Privacy policy', href: '/page/privacy-policy' }, { label: 'Terms', href: '/page/terms-and-conditions' },
-    { label: 'DMCA policy', href: '/page/dmca-policy' }, { label: 'RSS feed', href: '/feed.xml' } ] },
+    { label: 'DMCA policy', href: '/page/dmca-policy' }, { label: 'Accessibility', href: '/page/accessibility' }, { label: 'RSS feed', href: '/feed.xml' } ] },
 ] as const
 
 // Default author for posts. Keep to facts we can back up (no invented credentials).
