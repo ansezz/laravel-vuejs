@@ -6,6 +6,6 @@ export const getStaticPaths = () => tags.map(tag => ({ params: { slug: tag.slug 
 const { tag } = Astro.props as { tag: Tag }
 const posts = (await allPosts()).filter(p => p.tags.some(t => t.slug === tag.slug))
 ---
-<Base title={`Posts tagged ${tag.name}`} description={`Laravel & VueJs articles tagged ${tag.name}.`} noindex={posts.length === 0}>
+<Base title={`Posts tagged ${tag.name}`} description={`Laravel and Vue tutorials, guides and notes tagged ${tag.name} on Laravel & VueJs: ${posts.length} article${posts.length === 1 ? '' : 's'}, newest first.`} noindex={posts.length === 0}>
   <Archive kicker="Tag" title={`#${tag.name}`} lead={`${posts.length} ${posts.length === 1 ? 'article' : 'articles'} tagged ${tag.name}.`} posts={posts} crumbs={[{ label: 'Articles', href: '/posts' }, { label: tag.name }]} />
 </Base>

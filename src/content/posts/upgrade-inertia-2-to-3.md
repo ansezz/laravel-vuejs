@@ -1,6 +1,7 @@
 ---
 id: 7
 title: "Upgrade a Laravel 13 + Vue app from Inertia 2 to Inertia 3: the practical checklist"
+seoTitle: "Upgrade Inertia 2 to 3 in Laravel 13 + Vue: the checklist"
 excerpt: "Inertia 2 stopped getting bug fixes on September 26, 2026. Here is the step-by-step upgrade we tested on a real Laravel 13 + Vue app: dependencies, the new Vite plugin, renamed APIs, Axios, SSR and a final audit."
 date: 2026-10-13T07:00:00Z
 snippet: "npm i @inertiajs/vue3@^3"

@@ -16,13 +16,13 @@
       "id": "3",
       "slug": "jobs",
       "name": "Jobs",
-      "description": "Careers, freelancing and hiring in the Laravel and Vue ecosystem."
+      "description": "Careers, freelancing and hiring in the Laravel and Vue ecosystem: finding work, pricing and remote jobs."
     },
     {
       "id": "4",
       "slug": "ebooks",
       "name": "eBooks",
-      "description": "Long-form guides and books for Laravel and Vue developers."
+      "description": "Long-form guides and books for Laravel and Vue developers, from first app to production-ready architecture."
     }
   ],
   "tags": [

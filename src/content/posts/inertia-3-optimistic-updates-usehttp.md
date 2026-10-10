@@ -1,6 +1,7 @@
 ---
 id: 8
 title: "Optimistic updates and useHttp in Inertia 3 with Vue: a like button and a live search"
+seoTitle: "Inertia 3 optimistic updates and useHttp with Vue"
 excerpt: "Build two everyday features with Inertia 3's new tools: a like button that updates instantly and rolls back on failure, and a debounced live search with useHttp. Laravel 13 back end, typed Vue 3 front end, tests included."
 date: 2026-10-15T07:00:00Z
 snippet: "router.optimistic(...)"

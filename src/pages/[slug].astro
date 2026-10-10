@@ -5,7 +5,7 @@ import PostCard from '../components/PostCard.astro'
 import Icon from '../components/Icon.astro'
 import NewsletterBand from '../components/NewsletterBand.astro'
 import { allPosts, related, enhanceHtml, fmtDate, absolute, type Post } from '../lib/content'
-import { SITE_NAME, SITE_URL, DISQUS_SHORTNAME, GITHUB_URL } from '../config/site'
+import { SITE_NAME, SITE_URL, DISQUS_SHORTNAME, GITHUB_URL, AUTHOR } from '../config/site'
 
 export async function getStaticPaths() {
   const posts = await allPosts()
@@ -27,20 +27,32 @@ const share = [
   { id: 'whatsapp', label: 'Share on WhatsApp', href: `https://wa.me/?text=${enc(post.title + ' ' + url)}` },
   { id: 'mail', label: 'Share by email', href: `mailto:?subject=${enc(post.title)}&body=${enc(url)}` },
 ]
+// Tutorials are TechArticles; community and project posts are BlogPostings. Author and publisher point at the
+// Person on /author/... and the site-wide Organization (both defined once, referenced by @id).
+const isCommunity = post.tags.some(t => ['community', 'roadmap', 'open-source'].includes(t.slug))
+const authorRef = post.author === AUTHOR.name ? { '@id': SITE_URL + AUTHOR.url + '#person' } : { '@type': 'Person', name: post.author }
+const words = (post.entry.body ?? '').split(/\s+/).filter(Boolean).length
 const jsonld = [{
-  '@context': 'https://schema.org', '@type': 'BlogPosting', headline: post.title, description: post.excerpt,
+  '@type': isCommunity ? 'BlogPosting' : 'TechArticle', '@id': url + '#article', headline: post.title, description: post.description,
   datePublished: post.date.toISOString(), dateModified: (post.updated ?? post.date).toISOString(),
-  url, mainEntityOfPage: url, image: `${SITE_URL}/og/${post.slug}.jpg`, keywords: post.tags.map(t => t.name).join(', '),
-  author: { '@type': 'Organization', name: post.author, url: SITE_URL + '/' }, publisher: { '@type': 'Organization', name: SITE_NAME, logo: { '@type': 'ImageObject', url: SITE_URL + '/icon.png' } },
+  url, mainEntityOfPage: { '@id': url }, isPartOf: { '@id': SITE_URL + '/#website' }, inLanguage: 'en',
+  image: { '@type': 'ImageObject', url: `${SITE_URL}/og/${post.slug}.jpg`, width: 1200, height: 630 },
+  keywords: post.tags.map(t => t.name).join(', '), articleSection: post.categories.map(c => c.name), wordCount: words,
+  ...(isCommunity ? {} : { proficiencyLevel: 'Intermediate' }),
+  author: authorRef, publisher: { '@id': SITE_URL + '/#organization' },
 }, {
-  '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [
+  '@type': 'Person', '@id': SITE_URL + AUTHOR.url + '#person', name: AUTHOR.name, url: SITE_URL + AUTHOR.url, jobTitle: AUTHOR.role,
+  worksFor: { '@id': SITE_URL + '/#organization' }, sameAs: AUTHOR.sameAs,
+}, {
+  '@type': 'BreadcrumbList', itemListElement: [
     { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL + '/' },
     { '@type': 'ListItem', position: 2, name: 'Articles', item: SITE_URL + '/posts' },
-    { '@type': 'ListItem', position: 3, name: post.title, item: url }],
+    ...(post.categories[0] ? [{ '@type': 'ListItem', position: 3, name: post.categories[0].name, item: `${SITE_URL}/category/${post.categories[0].slug}` }] : []),
+    { '@type': 'ListItem', position: post.categories[0] ? 4 : 3, name: post.title, item: url }],
 }]
 ---
-<Base title={post.title} description={post.excerpt} type="article" image={`/og/${post.slug}.jpg`} jsonld={jsonld}
-  article={{ published: post.date, modified: post.updated, tags: post.tags.map(t => t.name), section: post.categories[0]?.name }}>
+<Base title={post.seoTitle ?? post.title} description={post.description} type="article" image={`/og/${post.slug}.jpg`} imageAlt={`${post.title}: cover card`} jsonld={jsonld} markdown={`/${post.slug}.md`}
+  article={{ published: post.date, modified: post.updated, tags: post.tags.map(t => t.name), section: post.categories[0]?.name, author: post.author }}>
   <div class="read-progress" aria-hidden="true"></div>
   <article>
     <header class="page-hero post-hero">
@@ -51,7 +63,7 @@ const jsonld = [{
         <h1 style="margin-top:22px">{post.title}</h1>
         <p class="lead">{post.excerpt}</p>
         <div class="post-meta">
-          <span><span class="avatar" aria-hidden="true">LV</span> {post.author}</span>
+          <span><span class="avatar" aria-hidden="true">{post.author === AUTHOR.name ? "AE" : "LV"}</span> {post.author === AUTHOR.name ? <a href={AUTHOR.url} rel="author">{post.author}</a> : post.author}</span>
           <span><Icon name="calendar" size={15} /><time datetime={post.date.toISOString()}>{fmtDate(post.date)}</time></span>
           {post.updated && <span><Icon name="sparkles" size={15} />Updated <time datetime={post.updated.toISOString()}>{fmtDate(post.updated)}</time></span>}
           <span><Icon name="clock" size={15} />{post.readingMinutes} min read</span>
@@ -70,7 +82,7 @@ const jsonld = [{
           <div class="share">
             <span>Share</span>
             {share.map(s => <a class="icon-btn" href={s.href} target="_blank" rel="noopener" aria-label={s.label}><Icon name={s.id} size={18} /></a>)}
-            <a class="icon-btn" href={`${GITHUB_URL}/edit/master/src/content/posts/${post.slug}.md`} target="_blank" rel="noopener" aria-label="Suggest an edit on GitHub"><Icon name="github" size={18} /></a>
+            <a class="icon-btn" href={`${GITHUB_URL}/edit/master/${post.entry.filePath ?? `src/content/posts/${post.slug}.md`}`} target="_blank" rel="noopener" aria-label="Suggest an edit on GitHub"><Icon name="github" size={18} /></a>
           </div>
           {(newer || older) && (
             <nav class="pager" aria-label="More articles">
@@ -80,8 +92,8 @@ const jsonld = [{
           )}
           <section class="comments" aria-label="Comments">
             <div id="disqus_thread"></div>
-            <button class="btn" type="button" data-comments><Icon name="message" size={18} /> Load comments</button>
-            <p class="form-note">Comments are powered by Disqus and only load when you click.</p>
+            <button class="btn" type="button" data-comments data-shortname={DISQUS_SHORTNAME} data-url={url} data-id={String(post.id)} data-title={post.title}><Icon name="message" size={18} /> Load comments</button>
+            <p class="form-note">Comments are powered by Disqus. Nothing loads until you click: clicking connects you to Disqus, which may set cookies and process your data under the <a href="https://help.disqus.com/en/articles/1717103-disqus-privacy-policy" target="_blank" rel="noopener">Disqus privacy policy</a>. See <a href="/page/privacy-policy#comments">our privacy policy</a>.</p>
           </section>
         </footer>
       </div>
@@ -105,12 +117,15 @@ const jsonld = [{
   </section>
   <NewsletterBand />
 
-  <script is:inline define:vars={{ shortname: DISQUS_SHORTNAME, url, id: String(post.id), title: post.title }}>
-    document.querySelector('[data-comments]')?.addEventListener('click', function () {
-      this.remove()
-      window.disqus_config = function () { this.page.url = url; this.page.identifier = id; this.page.title = title }
-      var s = document.createElement('script'); s.src = 'https://' + shortname + '.disqus.com/embed.js'
-      s.setAttribute('data-timestamp', String(+new Date())); document.body.appendChild(s)
+  <script>
+    // Disqus loads only after an explicit click (consent), never on page load.
+    const btn = document.querySelector<HTMLButtonElement>('[data-comments]')
+    btn?.addEventListener('click', () => {
+      const { shortname, url, id, title } = btn.dataset
+      btn.remove()
+      Object.assign(window, { disqus_config: function (this: { page: Record<string, string | undefined> }) { this.page.url = url; this.page.identifier = id; this.page.title = title } })
+      const s = document.createElement('script'); s.src = `https://${shortname}.disqus.com/embed.js`
+      s.setAttribute('data-timestamp', String(Date.now())); document.body.appendChild(s)
     }, { once: true })
   </script>
 </Base>

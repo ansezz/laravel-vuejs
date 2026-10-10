@@ -1,0 +1,44 @@
+---
+import Base from '../../layouts/Base.astro'
+import PageHero from '../../components/PageHero.astro'
+import PostCard from '../../components/PostCard.astro'
+import Icon from '../../components/Icon.astro'
+import { allPosts } from '../../lib/content'
+import { AUTHOR, SITE_URL, GITHUB_URL, CONTACT_EMAIL } from '../../config/site'
+// Author page (E-E-A-T): who writes here, what they have actually built, and how articles are checked.
+// Keep it to verifiable facts: no invented titles, employers or certifications.
+const posts = (await allPosts()).filter(p => p.author === AUTHOR.name)
+const jsonld = [{
+  '@type': 'ProfilePage', '@id': SITE_URL + AUTHOR.url, url: SITE_URL + AUTHOR.url, name: `${AUTHOR.name}, author at Laravel & VueJs`,
+  mainEntity: { '@id': SITE_URL + AUTHOR.url + '#person' }, isPartOf: { '@id': SITE_URL + '/#website' },
+}, {
+  '@type': 'Person', '@id': SITE_URL + AUTHOR.url + '#person', name: AUTHOR.name, url: SITE_URL + AUTHOR.url, jobTitle: AUTHOR.role,
+  worksFor: { '@id': SITE_URL + '/#organization' }, sameAs: AUTHOR.sameAs, knowsAbout: ['Laravel', 'PHP', 'Vue.js', 'Inertia.js', 'TypeScript', 'Vite'],
+}]
+---
+<Base title={`${AUTHOR.name}, author`} description={`${AUTHOR.name} founded and maintains Laravel & VueJs. How the articles are written, tested and corrected, plus every post by ${AUTHOR.name.split(' ')[0]}.`} jsonld={jsonld}>
+  <PageHero kicker="Author" title={AUTHOR.name} lead={`${AUTHOR.role}, writing for the Laravel & VueJs team.`} crumbs={[{ label: AUTHOR.name }]}>
+    <div class="card-cats" style="margin-top:24px">
+      {AUTHOR.sameAs.map(u => <a class="chip" href={u} rel="me noopener" target="_blank"><Icon name="github" size={14} /> {u.replace('https://', '')}</a>)}
+      <a class="chip" href={`mailto:${CONTACT_EMAIL}`}><Icon name="mail" size={14} /> {CONTACT_EMAIL}</a>
+    </div>
+  </PageHero>
+  <section class="container-narrow section-tight">
+    <div class="prose">
+      <h2>About</h2>
+      <p>Anass started Laravel &amp; VueJs as a place to share good Laravel and Vue content, grew it into a community with Facebook groups, a Telegram channel and a free jobs group, and built the project's first site as an open source Laravel, GraphQL and Nuxt CMS. Today he maintains the site (now an <a href={GITHUB_URL}>open source Astro project</a>) and writes most of its guides.</p>
+      <h2>How articles are written and checked</h2>
+      <ul>
+        <li><strong>Tested versions, stated up front.</strong> Each tutorial says which Laravel, PHP, Vue and Inertia versions it was checked against.</li>
+        <li><strong>Code is run, not just written.</strong> Examples are tried in a real Laravel + Vue app before they are published.</li>
+        <li><strong>Sources are linked.</strong> Claims about releases and APIs point to the official docs, changelogs or pull requests.</li>
+        <li><strong>Dates are honest.</strong> Posts show when they were published and when they were last updated.</li>
+        <li><strong>Corrections are public.</strong> Every article has a "suggest an edit" link to its file on GitHub. Found a mistake? <a href={`${GITHUB_URL}/issues`}>Open an issue</a> or email <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.</li>
+      </ul>
+    </div>
+  </section>
+  <section class="container section-tight" aria-labelledby="by-author">
+    <div class="section-head"><div><p class="kicker">Articles</p><h2 id="by-author">Written by {AUTHOR.name}</h2></div></div>
+    <div class="grid grid-3">{posts.map(p => <PostCard post={p} />)}</div>
+  </section>
+</Base>

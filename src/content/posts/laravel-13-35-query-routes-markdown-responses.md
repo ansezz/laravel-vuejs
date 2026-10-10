@@ -1,6 +1,7 @@
 ---
 id: 10
 title: "Laravel 13.35: QUERY routes, Markdown responses and model defaults()"
+seoTitle: "Laravel 13.35: QUERY routes, Markdown responses, defaults()"
 excerpt: "Laravel 13.35 adds Route::query() for the new HTTP QUERY method, response()->markdown(), Schedule::alwaysOnOneServer(), percentage memory limits for queue workers, array-based fake assertions and an opt-in defaults() method for Eloquent models. Before and after code for each."
 date: 2026-10-10T03:28:00Z
 snippet: "Route::query('/products/search', ...)"

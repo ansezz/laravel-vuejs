@@ -6,8 +6,9 @@ import NewsletterBand from './NewsletterBand.astro'
 import Art from './Art.astro'
 import type { ImageMetadata } from 'astro'
 import { categories, type Post } from '../lib/content'
-interface Props { kicker: string; title: string; lead?: string; posts: Post[]; crumbs?: { label: string; href?: string }[]; art?: ImageMetadata }
-const { kicker, title, lead, posts, crumbs, art } = Astro.props
+import { pageUrl } from '../lib/paginate'
+interface Props { kicker: string; title: string; lead?: string; posts: Post[]; crumbs?: { label: string; href?: string }[]; art?: ImageMetadata; page?: { current: number; pages: number; prev?: string; next?: string } }
+const { kicker, title, lead, posts, crumbs, art, page } = Astro.props
 const path = Astro.url.pathname.replace(/\/$/, '')
 ---
 <PageHero kicker={kicker} title={title} lead={lead} crumbs={crumbs}>
@@ -18,9 +19,16 @@ const path = Astro.url.pathname.replace(/\/$/, '')
   {art && <div class="archive-art"><Art src={art} sizes="(max-width: 1240px) 100vw, 1180px" widths={[640, 960, 1280, 1600]} eager /></div>}
 </PageHero>
 <section class="container section-tight">
-  {posts.length ? (
+  {posts.length ? (<>
     <div class="grid grid-3">{posts.map(p => <PostCard post={p} headingLevel="h2" />)}</div>
-  ) : (
+    {page && page.pages > 1 && (
+      <nav class="pagination" aria-label="Pagination">
+        {page.prev ? <a class="btn btn-sm" href={page.prev} rel="prev"><Icon name="arrow-left" size={14} /> Newer</a> : <span />}
+        <ol>{Array.from({ length: page.pages }, (_, i) => i + 1).map(n => <li>{n === page.current ? <span aria-current="page">{n}</span> : <a href={pageUrl(n)}>{n}</a>}</li>)}</ol>
+        {page.next ? <a class="btn btn-sm" href={page.next} rel="next">Older <Icon name="arrow" size={14} /></a> : <span />}
+      </nav>
+    )}
+  </>) : (
     <div class="empty">
       <div class="tile tile-icon" style="padding:0"><Icon name="sparkles" size={22} /></div>
       <h3>Nothing here yet</h3>
