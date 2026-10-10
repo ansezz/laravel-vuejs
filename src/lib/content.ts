@@ -24,8 +24,9 @@ const words = (s: string) => s.split(/\s+/).filter(Boolean).length + (s.match(/`
 // Future posts are included in Workers Builds previews (any branch other than master) and when SHOW_FUTURE_POSTS=1,
 // so they can be reviewed before they go live.
 export const BUILD_TIME = new Date()
-export const showFuturePosts = process.env.SHOW_FUTURE_POSTS === '1'
-  || (!!process.env.WORKERS_CI_BRANCH && process.env.WORKERS_CI_BRANCH !== 'master')
+const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {}
+export const showFuturePosts = env.SHOW_FUTURE_POSTS === '1'
+  || (!!env.WORKERS_CI_BRANCH && env.WORKERS_CI_BRANCH !== 'master')
 export const isPublished = (date: Date) => showFuturePosts || date.getTime() <= BUILD_TIME.getTime()
 
 let cache: Post[] | undefined
