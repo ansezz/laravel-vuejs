@@ -71,6 +71,12 @@ Your article. `{{CONTACT_EMAIL}}` becomes the contact address from src/config/si
 
 Then regenerate the Open Graph images (see the top of `scripts/og.mjs`).
 
+### Scheduled publishing
+
+A post whose `date` is in the future is left out of production builds: it does not appear in lists, feeds, the sitemap or the search index, and it has no page. You can merge it early. Every day at 07:05 UTC (15:05 MYT), the `Publish scheduled posts` workflow checks whether a post's date has passed and the live site still lacks it. If so, it triggers a production rebuild. It uses the `CF_DEPLOY_HOOK_URL` repo secret (a Workers Builds deploy hook for `master`) when that is set, and otherwise pushes an empty commit to `master`. You can also run the workflow by hand (Actions, then Run workflow, with `force` to rebuild anyway).
+
+Future posts are included in Workers Builds previews (every branch except `master`), in PR CI and in local builds run with `SHOW_FUTURE_POSTS=1`, so they can be reviewed. Set `date` to the exact moment the post should go live, in UTC (for example `2026-10-13T07:00:00Z` = 15:00 MYT). It then appears with the next daily run.
+
 ## Deploying
 
 Pushes to `master` are deployed by Cloudflare Workers Builds; pull requests get a preview URL. Manual deploy:
