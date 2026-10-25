@@ -1,0 +1,304 @@
+---
+id: 169
+title: "You patched PHP. Now patch Node: the October 2026 Node.js security release for Laravel + Vite apps"
+seoTitle: "Node.js Oct 2026 security release for Laravel"
+excerpt: "Node.js 22.23.4, 24.22.1 and 26.12.1 fix four High CVEs, including a Brotli RCE. npm audit will not catch them. How to update Vite, SSR, Sail and CI."
+date: 2026-10-25T12:00:00Z
+snippet: "node -v"
+categories: [laravel]
+tags: [node, vite, release, upgrade]
+---
+You patched PHP on October 21. The `node` binary that runs Vite, npm, and Inertia SSR is a separate install, and Node.js shipped its own security releases the same day. The highest severity is **High**, including a Brotli decoder bug that can become remote code execution.
+
+<TLDR
+  audience="Laravel + Vue teams who run Node for Vite, npm, Inertia SSR, Sail, or CI asset builds"
+  learn={['What the four High CVEs actually change', 'Which Node versions are patched', 'Where a Laravel app hides a second Node binary', 'How to update nvm, fnm, Docker, GitHub Actions, Sail, Forge and Coolify, then restart SSR']}
+  applies="Node.js 22.23.4, 24.22.1 and 26.12.1, from the 21 Oct 2026 security release"
+>
+
+- Install **Node.js 22.23.4, 24.22.1, or 26.12.1**. Stay on the major you already run. 20.x and older got no build.
+- Four High issues: DNS names cut at a NUL byte, two TLS hostname bypasses, and a Brotli out-of-bounds write in `node:zlib` that can crash, leak memory, or run code.
+- `npm audit` and `composer audit` read lockfiles. They do not inspect the Node binary. `node -v` does.
+- After the new binary is on `PATH`, rebuild assets and restart every long-running Node process (Inertia SSR, Supervisor, PM2).
+
+</TLDR>
+
+## PHP, in sixty seconds
+
+On **October 21, 2026** PHP released **8.5.12, 8.4.27, 8.3.36, and 8.2.35**. Two bugs, both **CVSS v4.0 9.2**, both unauthenticated remote code execution: **CVE-2026-109618** and **CVE-2026-109619**. PHP-FPM is in scope. Updating Laravel with Composer does not patch the PHP binary.
+
+If `php -v` on the server is still older than those releases, do that first. The steps for apt, Docker, Forge, Vapor, Laravel Cloud, and Coolify are in the [PHP critical security release](/php-critical-security-release-october-2026). Restart FPM, Octane, Horizon, and queue workers after the PHP upgrade.
+
+Then come back here. A patched PHP-FPM pool and an old `node` on the same box is a half-finished evening.
+
+## What the October 21 release fixes
+
+The [Node.js security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) covers the **26.x, 24.x, and 22.x** lines. Highest severity on each line is **High**. These are the builds:
+
+| Line | Patched release | What to do if you are on it |
+|---|---|---|
+| 22.x (LTS) | **22.23.4** | Install 22.23.4. Three of the four High bugs affect 22. |
+| 24.x (LTS) | **24.22.1** | Install 24.22.1. All four High bugs affect 24. |
+| 26.x (Current) | **26.12.1** | Install 26.12.1 if you already run 26. |
+| 20.x and older, plus odd majors such as 23 and 25 | No release | The [release schedule](https://nodejs.org/en/about/previous-releases) marks those lines EOL. Move to 22.23.4 or 24.22.1. |
+
+Production apps should stay on an LTS line (22 or 24). Jumping from 22 to 26 is a major upgrade, not the security fix. If you are already on 26, 26.12.1 is the patched Current build.
+
+The release also refreshes libraries that ship inside Node: **c-ares** on 22, 24, and 26; the **CA certificate bundle** on those three lines because of the eMudhra intermediate CA compromise; **OpenSSL** on 22 and 24; **SQLite** on 22; **Undici** on 22, 24, and 26. Installing the Node version above is how you pick those up.
+
+<Callout type="gotcha" title="npm audit cannot see this">
+
+`npm audit` reads `package-lock.json`. `composer audit` reads `composer.lock`. The bugs below are in the Node binary. A clean audit and a vulnerable `node -v` fit in the same terminal.
+
+</Callout>
+
+### The four High CVEs
+
+| CVE | Severity | Lines | What goes wrong |
+|---|---|---|---|
+| CVE-2026-105482 | High | 22, 24, 26 | `dns.resolve*()` and `dns.reverse()` cut a hostname at a NUL byte and return records for the shorter name, with no error. |
+| CVE-2026-105483 | High | 24, 26 | A TLS hostname written with fullwidth digits is not treated as an IP, so a DNS name on the certificate can authenticate an IP the cert was not issued for. |
+| CVE-2026-106069 | High | 22, 24, 26 | A leading-zero IPv4 literal can be checked against a different address than the one the socket connected to. |
+| CVE-2026-111497 | High | 22, 24, 26 | Malformed Brotli written to `node:zlib` can write past an internal buffer: crash, memory disclosure, or remote code execution. |
+
+**CVE-2026-105482 (DNS NUL).** A hostname that contains a NUL byte is passed to c-ares as a C string, so resolution stops at the byte. `dns.resolve()` of a name that looks like `attacker.example` plus a NUL plus `.trusted.example` can come back with records for `attacker.example` and no error. An earlier fix covered `dns.lookup()` and the host option on net and TLS sockets. This release covers the `dns.resolve*` family and `dns.reverse()`. An allowlist that checks the original string, then resolves it, can act on a different name than the one it allowed.
+
+**CVE-2026-105483 (fullwidth digits).** `tls.checkServerIdentity()` did not treat a host written with fullwidth digits as an IP address, even when that text normalizes to a normal IPv4 address. The check then compared DNS names and the Common Name. A certificate with a DNS name such as a numeric-looking wildcard could be accepted for an IP it was not issued for. This is a regression after an earlier IP-check fix. It affects **24 and 26 only**. Node 22 still needs 22.23.4 for the other three High bugs.
+
+**CVE-2026-106069 (leading-zero IPv4).** The certificate check follows WHATWG URL rules, which read a leading-zero octet as octal (`0127.0.0.1` becomes `87.0.0.1`). The connection itself goes through the operating system resolver, which on some platforms (the advisory names macOS) reads the same text as decimal (`127.0.0.1`). Node can then accept a certificate for a different IP than the one on the socket. Affects 22, 24, and 26.
+
+**CVE-2026-111497 (Brotli).** The Brotli decoder bundled with Node can write past an internal buffer when the input is malformed. One invalid block switch is reported as "need more input" instead of a hard format error, so the streaming decoder keeps appending into an eight-byte buffer. Whoever can supply Brotli bytes that your process decompresses with `node:zlib` can corrupt memory. That can crash the process, disclose memory, or run code. Affects 22, 24, and 26.
+
+Vite's own CSS and JS output is not Brotli-decoding untrusted request bodies. The bug matters when a Node process you run decompresses data an attacker can influence: an upload, a proxy, a fetch that inflates a body, an SSR server that pulls remote content through a library using `node:zlib`. The TLS and DNS bugs matter for any of those processes that also open outbound connections.
+
+### Medium and low
+
+Same release, shorter list. Still fixed only by the new binary.
+
+| CVE | Severity | Lines | Short version |
+|---|---|---|---|
+| CVE-2026-105481 | Medium | 22, 24, 26 | A keep-alive socket can treat bytes that arrived before the new request as that request's response. Leftover from an earlier fix. |
+| CVE-2026-106072 | Medium | 22, 24, 26 | Non-canonical IPv4 spellings (hex, a single integer, short forms) can match a DNS name on a certificate and authenticate an IP endpoint. |
+| CVE-2026-106074 | Medium | 22, 24, 26 | Entropy caches for `crypto.randomUUID()`, `crypto.randomUUIDv7()`, and `crypto.randomInt()` can be saved into a startup snapshot or a single-file executable, so every process repeats the same values until the cache refills. |
+| CVE-2026-106070 | Low | 26 | After a ZIP header check fails, `zlib.ZipFile` can return bytes from the start of the archive. |
+| CVE-2026-106071 | Low | 26 | A wildcard `--allow-fs-read` or `--allow-fs-write` can also allow the path without the wildcard suffix, in a narrow permission-tree layout. |
+| CVE-2026-106073 | Low | 22, 24, 26 | `fs.realpathSync()` skips the permission-model read checks. An earlier fix covered `fs.realpathSync.native()` only. |
+
+The snapshot bug matters if you build a Node SEA or pass `--build-snapshot` and those crypto helpers ran while the snapshot was created. Rebuild the snapshot on the patched Node. The permission-model bugs matter if you start Node with `--permission`. A normal Laravel + Vite deploy does neither. The keep-alive and non-canonical IP bugs are the medium issues that can show up in an HTTP client.
+
+## Where Node lives in a Laravel app
+
+PHP answers the HTTP request. Node usually shows up in two other places, and they are often different binaries.
+
+| | Build time | Run time |
+|---|---|---|
+| What it does | `npm ci`, Vite, `npm run build` or `npm run build:ssr` | Inertia SSR, and any small Node service you keep up next to PHP |
+| Typical homes | Your laptop, GitHub Actions, Sail, a Docker build stage, Forge's deploy user, a Coolify build container | Supervisor or PM2 running `php artisan inertia:start-ssr`, a container that stays up |
+| What an old binary exposes | npm's HTTPS to the registry, and whatever the build script decompresses or resolves | TLS and DNS on outbound calls, Brotli if that process inflates untrusted bytes, plus a process that keeps the old binary in memory until you restart it |
+| What a PHP patch changes | Nothing | Nothing |
+
+`npm run dev` on your laptop and `npm run build` in CI do not share a Node install. Sail's `laravel.test` container does not use the Node from `nvm` on the host. The SSR daemon started last week is still the binary that was on `PATH` when Supervisor spawned it.
+
+<Callout type="heads-up" title="engines.node is a note, not an upgrade">
+
+`"engines": { "node": "22.23.4" }` in `package.json`, and a `.nvmrc` with the same number, tell tools which version you want. They do not replace the binary on the server. `node -v` in that environment does.
+
+</Callout>
+
+## Find every Node you run
+
+Run the check in each place that actually executes Node. Skip the lines for tools you do not use.
+
+```bash title="terminal"
+node -v && which node
+./vendor/bin/sail node -v
+docker compose exec app node -v
+```
+
+You want **v22.23.4**, **v24.22.1**, or **v26.12.1**. Anything on 22.x below 22.23.4, on 24.x below 24.22.1, or on 26.x below 26.12.1 does not include this fix.
+
+Also open the last GitHub Actions run and read the Node version the setup step installed, SSH to the Forge server as the user the deploy script runs as, and open a shell in the Coolify container. Three older 22.x builds and one v22.23.4 means you found one of the four.
+
+<TryIt title="Check this machine">
+
+```bash
+node -v && which node
+```
+
+Then run the same command where the assets are built and where SSR stays up. The laptop is the easy one to fix and the easy one to mistake for the server.
+
+</TryIt>
+
+## Update the binary
+
+Pick the patched release on your current major: **22.23.4**, **24.22.1**, or **26.12.1**. Update every install you found above. Then do the [restart](#restart-runtime-node) before you call it done.
+
+### nvm and fnm
+
+```bash title="terminal"
+nvm install 22.23.4
+nvm alias default 22.23.4
+nvm use 22.23.4
+node -v
+```
+
+fnm is the same shape:
+
+```bash title="terminal"
+fnm install 22.23.4
+fnm default 22.23.4
+fnm use 22.23.4
+node -v
+```
+
+Swap in `24.22.1` or `26.12.1` if that is your line. Put the version in `.nvmrc` so the next shell follows it.
+
+Volta: `volta install node@22.23.4`, then `volta pin node@22.23.4` in the repo. asdf: `asdf install nodejs 22.23.4` and `asdf set nodejs 22.23.4` so `.tool-versions` records it. Both still need `node -v` afterwards.
+
+### Docker
+
+Pin the patched tag on the stage that runs npm, and on any runtime stage that still contains Node for SSR:
+
+```dockerfile title="Dockerfile"
+FROM node:22.23.4-bookworm AS assets
+```
+
+A floating tag such as `node:22` moves when you pull. A pin such as `node:22.21.0` stays vulnerable until you change it. Rebuild without a cached base layer:
+
+```bash title="terminal"
+docker build --pull --no-cache -t my-app .
+docker compose up -d --force-recreate
+docker compose exec app node -v
+```
+
+Use `node:24.22.1` or `node:26.12.1` if that is the line. Alpine tags follow the same version number.
+
+### GitHub Actions
+
+`npm audit` in the workflow does not bump Node. The version is the `node-version` input of `actions/setup-node`:
+
+```yaml title=".github/workflows/deploy.yml"
+- uses: actions/setup-node@v7
+  with:
+    node-version: 22.23.4
+```
+
+If the workflow says `node-version: 22` or `node-version-file: .nvmrc`, the job installs whatever that major or file currently resolves to. Re-run the workflow after `.nvmrc` is updated and read the version in the setup step. A pin like `22.20.0` stays on 22.20.0 until the file changes. The action's own major (`@v4`, `@v7`) is not the security fix.
+
+### Laravel Sail
+
+`./vendor/bin/sail npm` runs inside `laravel.test`. The Node from nvm on your laptop is a different binary. Check the one Sail uses:
+
+```bash title="terminal"
+./vendor/bin/sail node -v
+```
+
+Current Sail PHP 8.4 and 8.5 Dockerfiles install Node from NodeSource with `ARG NODE_VERSION=24` and `setup_$NODE_VERSION.x`, which is a **major**, not a patch. A rebuild installs whatever patch NodeSource is publishing for that major. If you have published the runtime (`sail artisan sail:publish`), the copy in `docker/` is the one that builds. Set `NODE_VERSION` to 22, 24, or 26, then:
+
+```bash title="terminal"
+./vendor/bin/sail build --no-cache
+./vendor/bin/sail down
+./vendor/bin/sail up -d
+./vendor/bin/sail node -v
+```
+
+You want that command to print v22.23.4, v24.22.1, or v26.12.1. If the rebuild is still on an older patch, NodeSource has not shipped it yet. Rebuild again once it has, or install the patched binary in that Dockerfile yourself.
+
+### Laravel Forge
+
+Forge runs `npm ci` and `npm run build` on the server, as the deploy user, with whatever `node` is on that user's `PATH`. SSH in and run `node -v` and `which node` as that user. Update the Node version installed on the server (Forge's Node install, or nvm if the deploy script loads it). A `.nvmrc` only helps when the deploy script actually runs `nvm use`.
+
+Redeploy so the asset build runs on the new binary. If a daemon runs Inertia SSR, restart that daemon after the binary is updated. The [deploy guide](/deploy-laravel-vue) is the build and the process that has to stay up.
+
+### Coolify
+
+The build container and the running container can disagree. Open a shell in both and run `node -v`.
+
+Nixpacks picks a Node **major** from `NIXPACKS_NODE_VERSION`, from `engines.node`, or from `.nvmrc`. Set that to 22, 24, or 26, redeploy, and read `node -v` in the build log. Nixpacks does not take a patch number, so `22` might still be an older 22.x until the Nixpacks image you use has caught up.
+
+When the log is still behind 22.23.4, 24.22.1, or 26.12.1, build from a Dockerfile that pins `node:22.23.4` (or the matching line) and redeploy with the build cache off, the same way you would pull a patched PHP base image. Recreate the container so a long-running SSR process starts on the new binary.
+
+## Restart runtime Node
+
+The new binary does nothing for a process that already started. Inertia SSR is a Node process Supervisor or PM2 keeps alive. `npm run build` writes `public/build`. It does not restart that process, and it does not refresh `bootstrap/ssr`. Use `npm run build:ssr` when you ship SSR, then restart.
+
+If you start SSR yourself:
+
+```bash title="terminal"
+php artisan inertia:stop-ssr
+php artisan inertia:start-ssr
+php artisan inertia:check-ssr
+```
+
+If Supervisor owns it, restart the program name you configured (the [deploy guide](/deploy-laravel-vue) uses the same `inertia:start-ssr` command):
+
+```bash title="terminal"
+sudo supervisorctl restart inertia-ssr
+php artisan inertia:check-ssr
+```
+
+PM2 is the same idea. Restarting is enough when the process looks up `node` or `php` on `PATH`. It is not enough when the PM2 config stores an absolute path under `~/.nvm/versions/node/` that still points at the previous install. Point that path at the patched install, then restart:
+
+```bash title="terminal"
+pm2 restart inertia-ssr
+pm2 show inertia-ssr
+```
+
+In the `pm2 show` output, the interpreter or script path should be the new version. `inertia:check-ssr` confirms the SSR server answers. The [SSR guide](/inertia-ssr) covers the build and the `window` crashes. This page is only the binary and the restart.
+
+Development does not need `inertia:start-ssr`. `npm run dev` server-renders through the Vite plugin, using whichever `node` is on your PATH. Fix that one with nvm or fnm.
+
+## Who should treat this as urgent
+
+| Your setup | What to do |
+|---|---|
+| Inertia SSR, PM2, or any Node process that stays up in production | Same night as the PHP patch. New binary, rebuild with `npm run build:ssr` if you use SSR, restart the process, `inertia:check-ssr`. |
+| That process decompresses untrusted bytes with `node:zlib`, or connects out to a host a request can influence | Highest urgency of this release. The Brotli bug is the remote-code-execution case. The TLS and DNS bugs are the outbound case. |
+| Node runs only at build time (Vite in CI, Forge, Coolify, Sail) and production is PHP plus static assets | Update before the next deploy. A visitor is not hitting that Node. The next `npm ci` is. |
+| `node -v` is already 22.23.4, 24.22.1, or 26.12.1, and SSR was restarted after the upgrade | Done. |
+| Node 20 or any line the schedule marks EOL | No patched build. Move to 22.23.4 or 24.22.1, then restart. |
+| You ship a Node SEA or a `--build-snapshot` binary that called `crypto.randomUUID()` while it was built | Update Node and rebuild the snapshot. Until you do, processes from that snapshot can repeat UUIDs and `randomInt()` values. |
+
+A weekend Vite site with no SSR is not the same incident as the PHP RCEs. It is still this week's upgrade. The SSR process on a box you already patched for PHP is the one to finish tonight.
+
+## One checklist for PHP and Node
+
+- **PHP.** `php -v` on the server shows 8.5.12, 8.4.27, 8.3.36, or 8.2.35, or your distro's patched package. FPM, Octane, Horizon, and queue workers were restarted. Steps: [PHP critical security release](/php-critical-security-release-october-2026).
+- **Every Node.** `node -v` on the laptop, in CI, in Sail, in the Docker image, and on the Forge or Coolify host shows v22.23.4, v24.22.1, or v26.12.1.
+- **Same major**, unless the old major is EOL.
+- **Build.** `npm ci` and `npm run build` (or `npm run build:ssr`) ran on that binary.
+- **Restart.** Supervisor, PM2, and `inertia:start-ssr` came back after the new binary was on `PATH`. `php artisan inertia:check-ssr` answers if you use SSR.
+- **Audits.** Run `composer audit` and `npm audit` for packages. They are the lockfile check. `node -v` is the binary check. You want both.
+
+## Recap
+
+- October 21, 2026: Node.js 22.23.4, 24.22.1, and 26.12.1. Highest severity High on each line.
+- Four High CVEs: DNS NUL truncation, fullwidth-digit TLS (24 and 26), leading-zero IP TLS, and a Brotli out-of-bounds write that can lead to remote code execution.
+- `npm audit` and `composer audit` will not report them. Install the binary, in every environment that runs Node.
+- Rebuild assets, restart Inertia SSR, and pair it with the [PHP update](/php-critical-security-release-october-2026) from the same day.
+
+## FAQ
+
+<FAQ items={[
+  { q: "Will npm audit or composer audit report these CVEs?", a: "No. Both commands read lockfiles. These bugs are in the Node binary. Check `node -v` and install 22.23.4, 24.22.1, or 26.12.1." },
+  { q: "We only use Node to compile Vite assets. Is production exposed?", a: "Production PHP is a separate question, covered by the PHP release. The Node risk in a build-only app is the CI and deploy build: registry TLS, and anything the build script resolves or decompresses. Update that binary before the next deploy. If Inertia SSR is running, treat it as production Node and restart it." },
+  { q: "We are on Node 22. Does the fullwidth-digit TLS bug affect us?", a: "That one (CVE-2026-105483) affects 24 and 26. Node 22 is still affected by the DNS NUL bug, the leading-zero TLS bug, and the Brotli bug. Install 22.23.4." },
+  { q: "Forge still has Node 20. Is there a 20.x patch in this release?", a: "No. The release ships 22.23.4, 24.22.1, and 26.12.1. Node 20 is end of life on the Node.js release schedule. Move the server to 22.23.4 or 24.22.1 and redeploy." },
+  { q: "I updated Node but the SSR process still looks old. What did I miss?", a: "A long-running process keeps the binary it started with. Restart Supervisor or PM2, and check for an absolute path to an old nvm install. Then run `php artisan inertia:check-ssr`. `npm run build` does not restart SSR, and it does not refresh `bootstrap/ssr`." },
+]} />
+
+## Next steps
+
+- [PHP critical security release: update to 8.5.12, 8.4.27, 8.3.36, or 8.2.35](/php-critical-security-release-october-2026)
+- [Server-render a Laravel and Vue Inertia app](/inertia-ssr)
+- [Deploy Laravel and Vue](/deploy-laravel-vue)
+- [Node.js security releases, 21 October 2026](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+
+## Sources
+
+- [Node.js: Wednesday, October 21, 2026 Security Releases](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+- [Node.js release schedule (22 and 24 LTS, 26 Current, 20 and older EOL)](https://nodejs.org/en/about/previous-releases)
+- [Node.js security policy](https://nodejs.org/en/security/)
+- [Nixpacks Node provider: major version via NIXPACKS_NODE_VERSION, engines, or .nvmrc](https://nixpacks.com/docs/providers/node)
+- [Laravel Sail PHP 8.4 runtime Dockerfile (`ARG NODE_VERSION=24`)](https://github.com/laravel/sail/blob/1.x/runtimes/8.4/Dockerfile)
+- [Laravel Sail PHP 8.5 runtime Dockerfile (same Node major)](https://github.com/laravel/sail/blob/1.x/runtimes/8.5/Dockerfile)

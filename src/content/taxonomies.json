@@ -145,6 +145,16 @@
       "id": "24",
       "slug": "passport",
       "name": "Passport"
+    },
+    {
+      "id": "25",
+      "slug": "node",
+      "name": "Node.js"
+    },
+    {
+      "id": "26",
+      "slug": "vite",
+      "name": "Vite"
     }
   ]
 }
