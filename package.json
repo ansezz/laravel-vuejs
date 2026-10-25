@@ -38,11 +38,11 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
-    "@cloudflare/workers-types": "^5.20261009.1",
+    "@cloudflare/workers-types": "^5.20261022.1",
     "shiki": "^4.5.0",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2",
     "typescript": "^6.0.3",
-    "wrangler": "^4.149.0"
+    "wrangler": "^4.152.0"
   }
 }
