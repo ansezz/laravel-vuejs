@@ -1,0 +1,15 @@
+flowchart LR
+  A["`**Post::with('comments')**
+  1 query for posts
+  1 query for comments`"] --> B{"`**comments()**
+  has **chaperone()**?`"}
+  B -- "no" --> C["`**$comment->post**
+  lazy loads the post again
+  1 query per comment`"]
+  C --> D["`**5 posts, 20 comments**
+  22 queries`"]
+  B -- "yes" --> E["`**setRelation('post', $post)**
+  on every comment,
+  same instance, no SQL`"]
+  E --> F["`**5 posts, 20 comments**
+  2 queries`"]
