@@ -1,0 +1,320 @@
+---
+id: 170
+title: "This week in Laravel & Inertia: Markdown mail fix, Oct 26, 2026"
+seoTitle: "This week in Laravel & Inertia: mail fix (Oct 26, 2026)"
+excerpt: "Laravel 12.70.1 patches Markdown mail escaping, Inertia Laravel 3.5.2 keeps your Vary header, and AI SDK 0.11.3 adds conversation pages."
+date: 2026-10-26T00:30:00Z
+snippet: "composer update laravel/framework inertiajs/inertia-laravel"
+categories: [laravel, vuejs]
+tags: [laravel, inertia, release]
+---
+A new user signs up with the name `Taylor](https://evil.test)`. Your welcome email says "Hi Taylor", and the link under that name now goes to a site you've never seen.
+
+That one is fixed on Laravel 12 this week. So is a CDN serving your French page to German visitors, and a CSV export that turned into a redirect. Here's everything that shipped in the Laravel and Inertia world since last Monday, in one short read.
+
+<TLDR
+  audience="Laravel + Vue developers on Laravel 12, on Inertia 3 behind a CDN, or on laravel/ai 0.x"
+  learn={['Why Laravel 12 apps that send Markdown mail should update today', 'What Inertia Laravel 3.5.2 fixes for CDNs, downloads and SSR tests', 'How to page through a stored AI conversation on laravel/ai 0.x']}
+  tested="Laravel 12.70.0 → 12.70.1 and 13.38 · inertia-laravel 3.5.1 → 3.5.2 · laravel/ai 0.11.3 · PHP 8.4 · Pest 4 (11 tests / 30 assertions on 12.70.1; the mail and Inertia tests fail on 12.70.0 and 3.5.1)"
+  applies="The SSR cache fix (#924), OpenRouter reranking and audio, and the token-count fixes were checked against their PRs, not run"
+>
+
+- **Laravel 12.70.1** is a security fix for Markdown mail. With secured encoding on, user input could still close a Markdown link and point it somewhere else. Laravel 13 got the same fix in **13.36.0**.
+- **Inertia Laravel 3.5.2** adds `X-Inertia` to your `Vary` header instead of replacing it, stops turning streamed downloads and `"0"` bodies into redirects, and resets the cached SSR page between requests.
+- **laravel/ai 0.11.3** backports the 100 MB remote file limit (`ai.remote_files.max_size`, in KB), conversation pagination, ownership and pending-approval checks, and OpenRouter reranking and audio to the 0.x line.
+
+</TLDR>
+
+## The week at a glance
+
+| Package | Version | Released (UTC) | Should you hurry? |
+|---|---|---|---|
+| `laravel/framework` (12.x line) | 12.70.1 | Oct 21 | Yes, if you send Markdown mail with user input |
+| `inertiajs/inertia-laravel` | 3.5.2 | Oct 21 | Yes, if a CDN caches your pages or you return downloads |
+| `laravel/ai` (0.x line) | 0.11.3 | Oct 19 | Yes, if you accept remote files on 0.x |
+
+<Callout type="heads-up" title="On Laravel 13 already?">
+
+The Markdown mail fix ([#61755](https://github.com/laravel/framework/pull/61755)) shipped in **Laravel 13.36.0** on October 13. If you're on 13.36 or later, you have it. The newest 13.x release has its own post: [Laravel 13.38: no more stale reads after a write](/laravel-13-38-stale-reads-write-pdo-health).
+
+</Callout>
+
+## Laravel 12.70.1: Markdown mail escaping fix
+
+Markdown mail has an opt-in mode called secured encoding. You turn it on with `Markdown::withSecuredEncoding()`, and every `{{ $value }}` in a Markdown mail view gets its Markdown characters escaped, so user input stays text.
+
+It escaped `[` but not `]` or `\`. So a value could close the link it sat in and open a new one. 12.70.1 escapes both, the same change Laravel 13 got in 13.36.0.
+
+Here's a normal welcome mail with the user's name inside a link:
+
+```blade title="resources/views/mail/welcome.blade.php"
+<x-mail::message>
+Hi [{{ $name }}](https://shop.test/account)
+
+Thanks for signing up.
+</x-mail::message>
+```
+
+| Name the user typed | Link on 12.70.0 | Link on 12.70.1 |
+|---|---|---|
+| `Taylor` | `https://shop.test/account` | `https://shop.test/account` |
+| `Taylor](https://evil.test)` | **`https://evil.test`** | `https://shop.test/account`, text shown as typed |
+| `Taylor\](https://evil.test)` | `https://shop.test/account` | `https://shop.test/account`, text shown as typed |
+
+We rendered that mailable on both versions with secured encoding on. Only 12.70.1 kept the link where you put it.
+
+```bash
+composer update laravel/framework
+php artisan --version   # Laravel Framework 12.70.1
+php artisan view:clear
+```
+
+<Callout type="gotcha" title="The fix only helps if secured encoding is on">
+
+Secured encoding is off by default. With it off, a name like `Taylor](https://evil.test)` still turns into a link on every version, because Markdown mail treats your data as Markdown. If user input ends up in Markdown mail, turn it on once in `AppServiceProvider::boot()`. HTML in the input is still escaped either way.
+
+</Callout>
+
+```php title="app/Providers/AppServiceProvider.php" {9}
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Mail\Markdown;
+use Illuminate\Support\ServiceProvider;
+
+class AppServiceProvider extends ServiceProvider
+{
+    public function boot(): void
+    {
+        Markdown::withSecuredEncoding();
+    }
+}
+```
+
+<TryIt title="Prove it in your own test suite">
+
+```php title="tests/Feature/WelcomeMailTest.php"
+use App\Mail\Welcome;
+use Illuminate\Mail\Markdown;
+
+test('a name cannot rewrite the link in the welcome mail', function (string $name) {
+    Markdown::withSecuredEncoding();
+
+    expect((new Welcome($name))->render())
+        ->toContain('href="https://shop.test/account"')
+        ->not->toContain('href="https://evil.test');
+})->with([
+    'closing bracket' => 'Taylor](https://evil.test)',
+    'escaped bracket' => 'Taylor\](https://evil.test)',
+]);
+```
+
+On 12.70.0 the first case fails. On 12.70.1 and 13.36+ both pass.
+
+</TryIt>
+
+## Inertia Laravel 3.5.2: Vary, downloads and SSR
+
+Three bug fixes in the server adapter. No changes on the Vue side.
+
+### Your Vary header survives Inertia
+
+Inertia adds `Vary: X-Inertia` so a cache never serves the JSON page to a full page load, or the other way round. Until 3.5.2 it **set** the header, which wiped any `Vary` your app had already added.
+
+That hurts on localized pages. You add `Vary: Accept-Language`, Inertia overwrites it, and your CDN caches one language for everyone. Now Inertia appends:
+
+```php title="app/Http/Controllers/PricingController.php"
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+
+public function __invoke(Request $request)
+{
+    return Inertia::render('Pricing')
+        ->toResponse($request)
+        ->setVary('Accept-Language');
+}
+```
+
+| Version | `Vary` header sent |
+|---|---|
+| 3.5.1 | `X-Inertia` |
+| 3.5.2 | `Accept-Language, X-Inertia` |
+
+This matters when the header is set inside Inertia's middleware: in the controller, or in a middleware that runs after `HandleInertiaRequests`. A middleware that wraps Inertia's was never overwritten. `X-Inertia` is not added twice if you already set it.
+
+<Callout type="tip" title="Purge the CDN once">
+
+After you deploy 3.5.2, purge the cached pages that should vary by language or another header. Entries cached before the update were stored without that header in `Vary`.
+
+</Callout>
+
+### Downloads and "0" no longer become redirects
+
+On an Inertia request, an empty `200` response is turned into a redirect back (the `onEmptyResponse` hook). The check used PHP's `empty()`, which also matched two responses that aren't empty:
+
+- a streamed or file download (`response()->streamDownload()`, `response()->download()`, `Storage::download()`), whose content is `false`
+- a body of `"0"`
+
+Both came back as a `302`. Now only a body that is exactly `''` counts as empty.
+
+<CodeCompare before="3.5.1: a 302 back to /orders" after="3.5.2: the CSV">
+
+```php title="routes/web.php"
+Route::get('/orders/export', fn () => response()->streamDownload(
+    fn () => print('id,total'), 'orders.csv'
+));
+// GET /orders/export with X-Inertia: true → 302 Found
+```
+
+```php title="routes/web.php"
+Route::get('/orders/export', fn () => response()->streamDownload(
+    fn () => print('id,total'), 'orders.csv'
+));
+// GET /orders/export with X-Inertia: true → 200, orders.csv
+```
+
+</CodeCompare>
+
+Controllers that return nothing still redirect back, as before.
+
+### SSR tests render the right page
+
+The SSR state cached the first server-rendered response so the head and body don't call the SSR server twice. It never cleared that cache when the page changed. In feature or browser tests that make several requests in one test, every later page got the first page's HTML. 3.5.2 resets it when the page changes. In production each request is fresh, so this mostly fixes confusing tests. More on SSR in [Server-render a Laravel and Vue Inertia app](/inertia-ssr).
+
+```bash
+composer update inertiajs/inertia-laravel
+composer show inertiajs/inertia-laravel | grep versions   # * v3.5.2
+```
+
+## laravel/ai 0.11.3: backports for the 0.x line
+
+The 0.x line still gets fixes while 1.x moves on. If you haven't moved to 1.x yet, this release brings a lot of what 1.x users already have.
+
+### A 100 MB limit on remote files
+
+`Image::fromUrl()`, `Document::fromUrl()` and the other remote files used to download the whole file with no limit, so a huge file filled worker memory. Now the download stops at 100 MB and throws an `InvalidArgumentException` that names the limit. A file whose `Content-Length` is too big fails before the body downloads.
+
+The key is the same as on 1.3, `ai.remote_files.max_size`, in kilobytes. It isn't in the published config, so add it yourself:
+
+```php title="config/ai.php"
+'remote_files' => [
+    'max_size' => 25 * 1024, // kilobytes, so 25 MB
+],
+```
+
+The full story, with the 1.x details, is in [Laravel AI SDK 1.3: typed structured output and file limits](/laravel-ai-sdk-1-3-typed-structured-output-file-limits).
+
+### Page through a stored conversation
+
+The conversation store could hand the model its latest messages, but without IDs, timestamps or tool state. To show a chat history you had to query the `ConversationMessage` model yourself.
+
+0.11.3 adds three opt-in contracts, and the default database store implements all of them:
+
+| Contract | Method | Gives you |
+|---|---|---|
+| `PaginatesConversations` | `paginateConversationMessages($id, perPage: 15)` | A cursor paginator of `StoredMessage`, newest first |
+| `VerifiesConversationOwnership` | `conversationBelongsTo($id, $type, $key)` | `true` if the conversation is that participant's |
+| `ResolvesPendingApprovals` | `pendingApprovalsFor($id)` | The tool calls a paused turn is waiting on, as `PendingApproval` |
+
+The paginator uses a cursor, not page numbers, because a chat grows while you read it. It plugs straight into Inertia's infinite scroll:
+
+```php title="app/Http/Controllers/ChatController.php"
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Laravel\Ai\Contracts\ConversationStore;
+
+public function show(Request $request, string $conversation, ConversationStore $store)
+{
+    $user = $request->user();
+
+    abort_unless($store->conversationBelongsTo($conversation, $user->getMorphClass(), $user->getKey()), 404);
+
+    return Inertia::render('Chat/Show', [
+        'messages' => Inertia::scroll(fn () => $store->paginateConversationMessages($conversation, perPage: 20)),
+    ]);
+}
+```
+
+```vue title="resources/js/pages/Chat/Show.vue"
+<script setup lang="ts">
+import { InfiniteScroll } from '@inertiajs/vue3'
+
+defineProps<{
+    messages: { data: { id: string; role: string; content: string }[] }
+}>()
+</script>
+
+<template>
+    <InfiniteScroll data="messages" reverse>
+        <p v-for="message in messages.data" :key="message.id" :class="message.role">
+            {{ message.content }}
+        </p>
+    </InfiniteScroll>
+</template>
+```
+
+In our test, another user got a `404`, and the owner got the newest messages first with a `nextPage` cursor in `scrollProps`. Each `StoredMessage` also has `created_at`, `usage`, `meta`, `tool_calls`, `tool_results` and `attachments`.
+
+<Callout type="gotcha" title="Custom conversation stores">
+
+The contracts are opt-in. If you bound your own `ConversationStore`, these methods don't exist until you implement the contracts. Check with `instanceof PaginatesConversations` before you call them.
+
+</Callout>
+
+If you build tool approval flows, `pendingApprovalsFor()` gives a reloaded page the same calls the paused response had. The flow itself is in [Approve an AI SDK tool before it runs](/laravel-ai-tool-approval-vue).
+
+### Everything else in 0.11.3
+
+| Change | PR | Who it affects |
+|---|---|---|
+| Streamed answers keep their sources in `meta.citations` | #991 | You stream with web search and reload the conversation later |
+| Streamed text is joined per step, not per message ID | #987 | Anthropic answers with citations were stored as one paragraph per fragment |
+| OpenRouter reranking (default model `cohere/rerank-v3.5`) | #999 | You rerank and want to use OpenRouter |
+| OpenRouter audio input | #998, #1126 | You send audio attachments through OpenRouter |
+| Token counts: cached tokens left out on Groq and OpenAI-compatible, cumulative usage on Anthropic, Cohere Bedrock embeddings | #909, #996, #914 | You track usage or cost |
+| OpenAI image edits accept every storable image type | #893 | You edit images on OpenAI |
+| Gemini file import, xAI and OpenRouter document file names, MCP structured output slashes | #821, #1001, #997 | Those providers or MCP tools |
+
+```bash
+composer update laravel/ai
+composer show laravel/ai | grep versions   # * v0.11.3
+```
+
+## Upgrade notes
+
+- **Laravel 12:** update to 12.70.1, then turn on `Markdown::withSecuredEncoding()` if user input reaches Markdown mail. Run `php artisan view:clear` after the update.
+- **Inertia Laravel:** no code changes. Purge CDN pages that should vary by another header, and check any code that relied on downloads redirecting (it shouldn't have).
+- **laravel/ai 0.x:** remote files over 100 MB now throw. Set `ai.remote_files.max_size` (kilobytes) if you need more. The new conversation contracts are opt-in.
+- Then run your tests. Nothing else breaks this week.
+
+## Recap
+
+- **Laravel 12.70.1** escapes `]` and `\` in secured Markdown mail, so user input can't move your links. 13.x has had it since 13.36.0.
+- **Inertia Laravel 3.5.2** appends to `Vary`, lets downloads and `"0"` through, and resets the cached SSR page.
+- **laravel/ai 0.11.3** gives 0.x the 100 MB remote file limit, conversation pagination with an ownership check, and OpenRouter reranking and audio.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'I never called Markdown::withSecuredEncoding(). Does 12.70.1 matter to me?', a: 'The fix is inside secured encoding, so on its own it changes nothing for you. Without secured encoding, user input in Markdown mail can still form links on every version. Update, and turn it on if user data reaches Markdown mail.' },
+  { q: 'Which Laravel 13 version has the Markdown mail fix?', a: 'Laravel 13.36.0, released on October 13, 2026 (PR #61755). 12.70.1 is the backport of that PR.' },
+  { q: 'Why did my Inertia CSV export redirect back instead of downloading?', a: 'Before inertia-laravel 3.5.2, a streamed or file download on an Inertia request counted as an empty response and was turned into a redirect back. Update to 3.5.2.' },
+  { q: 'Should I move from laravel/ai 0.x to 1.x?', a: 'When you can. 0.x still gets backports like these, but typed structured output and newer features are 1.x only. Both support Laravel 12 and 13.' },
+  { q: 'Is the remote file limit the same on 0.x and 1.x?', a: 'Yes. Same key, `ai.remote_files.max_size`, in kilobytes, with a default of 102400 (100 MB).' },
+]} />
+
+## Next steps
+
+- [Laravel AI SDK 1.3: typed structured output and file limits](/laravel-ai-sdk-1-3-typed-structured-output-file-limits), the 1.x side of the file limit.
+- [Continue an AI SDK conversation you own](/laravel-ai-conversation-vue)
+- [Laravel 13.36: validation rule builders, Vitess olap() and sticky queue flushes](/laravel-13-36-validation-builders-olap-sticky-queues), where the mail fix first shipped.
+- [Laravel docs: Markdown mailables](https://laravel.com/docs/12.x/mail#markdown-mailables)
+
+## Sources
+
+- [Laravel v12.70.1 release](https://github.com/laravel/framework/releases/tag/v12.70.1): [PR #62027 (12.x backport)](https://github.com/laravel/framework/pull/62027), [PR #61755 (13.x original)](https://github.com/laravel/framework/pull/61755), [Laravel v13.36.0 release](https://github.com/laravel/framework/releases/tag/v13.36.0)
+- [Inertia Laravel v3.5.2 release](https://github.com/inertiajs/inertia-laravel/releases/tag/v3.5.2): [PR #920 (Vary)](https://github.com/inertiajs/inertia-laravel/pull/920), [PR #919 (empty responses)](https://github.com/inertiajs/inertia-laravel/pull/919), [PR #924 (SSR state)](https://github.com/inertiajs/inertia-laravel/pull/924)
+- [Inertia docs: infinite scroll](https://inertiajs.com/docs/v3/data-props/infinite-scroll)
+- [laravel/ai v0.11.3 release](https://github.com/laravel/ai/releases/tag/v0.11.3): [PR #1151 (remote file limit)](https://github.com/laravel/ai/pull/1151), [PR #990 (pagination)](https://github.com/laravel/ai/pull/990), [PR #991 (streamed sources)](https://github.com/laravel/ai/pull/991), [PR #992 (pending approvals)](https://github.com/laravel/ai/pull/992), [PR #993 (ownership)](https://github.com/laravel/ai/pull/993), [PR #999 (OpenRouter reranking)](https://github.com/laravel/ai/pull/999), [PR #998](https://github.com/laravel/ai/pull/998) and [PR #1126](https://github.com/laravel/ai/pull/1126) (OpenRouter audio)
+- [Laravel AI SDK docs: conversations](https://laravel.com/docs/13.x/ai-sdk#remembering-conversations)

@@ -594,6 +594,7 @@ export const SHIPPED_SOURCES: readonly { path: string; label: string; date: stri
   { path: "/laravel-13-37-numeric-strict-queue-jxl", label: "Laravel 13.37", date: "October 16, 2026" },
   { path: "/this-week-in-laravel-inertia-2026-10-19", label: "Wayfinder 0.1.23 (weekly roundup)", date: "October 16, 2026" },
   { path: "/laravel-ai-sdk-1-3-typed-structured-output-file-limits", label: "Laravel AI SDK 1.3", date: "October 19, 2026" },
+  { path: "/this-week-in-laravel-inertia-2026-10-26", label: "Laravel AI SDK 0.11.3 (weekly roundup)", date: "October 19, 2026" },
   { path: "/laravel-13-38-stale-reads-write-pdo-health", label: "Laravel 13.38", date: "October 20, 2026" },
 ];
 
@@ -741,6 +742,15 @@ export const SHIPPED_ROWS: readonly ShippedRow[] = [
     watch:
       "Breaking: a structured run with no payload (stopped early, faked with a string, paused for approval) has structured === [] and $response['score'] throws. Remote files from fromUrl() stop at 100 MB; raise it with ai.remote_files.max_size, in kilobytes.",
     sourcePath: "/laravel-ai-sdk-1-3-typed-structured-output-file-limits",
+  },
+  {
+    id: "ai-conversation-pages",
+    release: "Laravel AI SDK 0.11.3",
+    change: "Conversation pages on 0.x",
+    use: "The default conversation store now has paginateConversationMessages($id, perPage: 20), a cursor paginator of StoredMessage rows, newest first, that works with Inertia::scroll(). conversationBelongsTo($id, $type, $key) checks ownership and pendingApprovalsFor($id) lists the tool calls a paused turn waits on.",
+    watch:
+      "The contracts are opt-in, so a custom ConversationStore needs to implement them. 0.11.3 also stops remote files at 100 MB; raise it with ai.remote_files.max_size, in kilobytes.",
+    sourcePath: "/this-week-in-laravel-inertia-2026-10-26",
   },
   {
     id: "stale-reads",
