@@ -1,0 +1,232 @@
+---
+id: 171
+title: "Laravel chaperone(): stop child models re-querying their parent"
+seoTitle: "Laravel chaperone(): Fix Child-to-Parent N+1"
+excerpt: "Hidden gem: add chaperone() to a hasMany and every child gets its parent for free. 22 queries became 2 in our Laravel 13.38 lab."
+date: 2026-10-26T02:30:00Z
+snippet: "return $this->hasMany(Comment::class)->chaperone();"
+categories: [laravel, vuejs]
+tags: [laravel, php, inertia, vuejs]
+---
+You eager loaded the comments. You checked Debugbar. Then the comment partial calls `$comment->post->slug` to build a permalink, and every comment quietly runs a query to fetch a post you already had in memory. One method on the relationship hands each child its parent, with zero SQL.
+
+<TLDR
+  audience="Laravel 11.22+ developers, including Inertia + Vue apps"
+  learn={['What `chaperone()` does and why `with()` does not cover it', 'The usual fix (`comments.post`) vs `chaperone()`, with real query counts', 'An Inertia comment list that checks permissions without N+1', 'Gotchas: JSON payload size, direct queries, guessing the inverse name, pivot models']}
+  tested="Laravel 13.38 · PHP 8.4 · SQLite · Pest"
+>
+
+- Add `->chaperone()` to a `hasMany`, `hasOne`, `morphMany` or `morphOne` relation. Each child loaded through it gets the parent set on its `belongsTo` relation, so `$comment->post` runs no query.
+- In our lab, 5 posts with 20 comments went from **22 queries to 2**. The usual fix, `with('comments.post')`, gets you to 3, and gives every comment a separate copy of the post.
+- It also fires on `create()`, `make()`, `get()` and `paginate()` through the relation, and you can turn it on per query with `with(['comments' => fn ($q) => $q->chaperone()])`.
+- Watch your Inertia props: each comment's JSON now carries its parent, which doubled our payload until we hid it.
+
+</TLDR>
+
+## What chaperone() is and why people miss it
+
+`chaperone()` landed in Laravel 11.22 (September 2024, [PR #51582](https://github.com/laravel/framework/pull/51582), where it was first called `inverse()`, which still works as an alias). It tells a parent-to-children relation to walk back and set the parent on each child after the query runs:
+
+```php title="app/Models/Post.php"
+public function comments(): HasMany
+{
+    return $this->hasMany(Comment::class)->chaperone(); // [!code ++]
+}
+```
+
+Why most people miss it: `with('comments')` feels like it should already know the parent. It doesn't. Eloquent fills `$post->comments` but leaves each comment's `post` relation empty, so the first `$comment->post` goes back to the database. The [docs section](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children) sits under "One to Many", between two code samples, and the method name gives nothing away.
+
+Under the hood it is small. [The trait](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Eloquent/Relations/Concerns/SupportsInverseRelations.php) registers an `afterQuery` callback that calls `setRelation('post', $post)` on every child. No join, no extra query, just a pointer to the model you already hold.
+
+<Diagram name="laravel-eloquent-chaperone" alt="Post::with('comments') runs one query for posts and one for comments. If the comments relation has no chaperone(), reading $comment->post lazy loads the post again, one query per comment: 5 posts and 20 comments cost 22 queries. With chaperone(), Eloquent calls setRelation('post', $post) on every comment with the same instance and no SQL: 5 posts and 20 comments cost 2 queries." caption="Same data, same loop. The only difference is who tells the comment where it came from." />
+
+## The usual way vs chaperone()
+
+Here is the loop from the intro, run against 5 posts with 4 comments each in our Laravel 13.38 lab. The `url()` method on `Comment` reads `$this->post->slug`.
+
+<CodeCompare before="nested eager load" after="chaperone()">
+
+```php title="app/Http/Controllers/PostController.php"
+$posts = Post::with('comments.post')->get();
+
+foreach ($posts as $post) {
+    foreach ($post->comments as $comment) {
+        $comment->url(); // reads $this->post->slug
+    }
+}
+// 3 queries: posts, comments, posts again
+// $comment->post is a second copy of $post
+```
+
+```php title="app/Http/Controllers/PostController.php"
+$posts = Post::with('comments')->get(); // comments() has ->chaperone()
+
+foreach ($posts as $post) {
+    foreach ($post->comments as $comment) {
+        $comment->url(); // reads $this->post->slug
+    }
+}
+// 2 queries: posts, comments
+// $comment->post === $post
+```
+
+</CodeCompare>
+
+What we measured, counting with `DB::getQueryLog()`:
+
+| Scenario (5 posts × 4 comments) | Queries |
+|---|---|
+| `with('comments')`, no chaperone | **22** (1 + 1 + one per comment) |
+| `with('comments.post')` | 3 |
+| `comments()` defined with `->chaperone()` | **2** |
+| `with(['comments' => fn ($q) => $q->chaperone()])` | 2 |
+| Single post page, `Post::find(1)->comments`, no chaperone | 6 |
+| Same page with chaperone | 2 |
+
+The nested eager load is not wrong, it is just one query heavier and it hands you a different object. In the lab, changing `$post->title` in memory showed up on `$comment->post->title` with chaperone, and did not with `comments.post`. When a policy or accessor reads the parent, you want the one you already have.
+
+<Callout type="tip" title="Opt in per query">
+
+Not ready to change the relation for the whole app? Turn it on only where you need it:
+
+```php
+Post::with(['comments' => fn ($comments) => $comments->chaperone()])->get();
+```
+
+And the reverse: a relation defined with `chaperone()` can skip it with `$post->comments()->withoutChaperone()->get()`.
+
+</Callout>
+
+## Real-world example: an Inertia comment list with permissions
+
+A post page in an Inertia app. Each comment needs a permalink and a "can delete" flag: the comment's author can delete it, and so can the post's author. Both read the parent post.
+
+```php title="app/Http/Resources/CommentResource.php"
+class CommentResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'body' => $this->body,
+            'url' => "/posts/{$this->post->slug}#comment-{$this->id}",
+            'can_delete' => $request->user()?->id === $this->user_id
+                || $request->user()?->id === $this->post->user_id,
+        ];
+    }
+}
+```
+
+```php title="app/Http/Controllers/PostController.php"
+public function show(Post $post): Response
+{
+    return Inertia::render('Posts/Show', [
+        'post' => $post->only('id', 'title', 'slug'),
+        'comments' => CommentResource::collection($post->comments),
+    ]);
+}
+```
+
+Without chaperone, that resource runs one `select * from posts` per comment, even though the route already bound the post. That is one extra query per comment, all fetching the same row. In the lab, the same logic on a 4-comment post was 6 queries without and 2 with.
+
+With `->chaperone()` on `comments()`, `$this->post` inside the resource is the route-bound `$post`. The fix lives in the model, so every controller, resource and Blade partial that loops comments gets it for free.
+
+### New comments get their parent too
+
+The same hook runs when you create through the relation. In the lab, this ran exactly one query, the `INSERT`:
+
+```php title="app/Http/Controllers/CommentController.php"
+$comment = $post->comments()->create($request->validated());
+
+$comment->relationLoaded('post'); // true
+$comment->post === $post;         // true, no select
+```
+
+Handy for the `CommentPosted` event or notification that wants `$comment->post->title` right after the insert.
+
+## Gotchas
+
+**Inertia props get heavier.** Pass chaperoned models straight to Inertia and each comment's JSON now includes a `post` object. Laravel's circular-reference guard ([PR #52461](https://github.com/laravel/framework/pull/52461), also 11.22) stops the recursion, so you get the post's columns but not its comments again. Still, our 5-post, 20-comment list grew from 1,427 to 2,702 bytes of JSON. Use an API resource that picks fields (as above), or hide it: `$post->comments->each->makeHidden('post')` brought it back to 1,482 bytes (the extra 55 are a longer relation name in that test).
+
+<Callout type="gotcha" title="Only children loaded through the relation get a chaperone">
+
+`Comment::where('post_id', 1)->get()` never touches the `comments()` relation, so nothing sets `post`. In the lab, that loop ran 5 queries (1 + 4). Load children from the parent (`$post->comments`, `$post->comments()->latest()->get()`) when you need the parent on each one.
+
+</Callout>
+
+**It needs a matching `belongsTo` on the child.** Eloquent guesses the name from the foreign key (`post_id` gives `post`), then the parent's class name, then `owner`. If none exists, the relation throws `RelationNotFoundException` the first time you call it. Pass the name when it is unusual: `->chaperone('article')`.
+
+**`belongsTo` can't have one.** A user has many posts, so setting "the" posts on a user from one post makes no sense. Put `chaperone()` on the `hasMany` side.
+
+**Pivot models are different.** Since Laravel 13.31 ([PR #61152](https://github.com/laravel/framework/pull/61152)), `belongsToMany(...)->using(RoleUser::class)->chaperone()` sets `$user->pivot->user` and `$user->pivot->role`. In the lab, reading both on 5 users took 12 queries without and 2 with. Unlike `hasMany`, it does nothing without `using()`, and if it can't guess the pivot relation names it skips silently instead of throwing.
+
+**It plays fine with strict mode.** With [`Model::preventLazyLoading()`](/laravel-model-should-be-strict) on, the plain version threw `LazyLoadingViolationException` for `[post]` on `Comment`. The chaperoned version passed, because nothing is lazy loaded.
+
+## Try it yourself
+
+<TryIt title="Count the parent queries you didn't know about">
+
+```php title="routes/console.php"
+use App\Models\Post;
+use Illuminate\Support\Facades\DB;
+
+Artisan::command('chaperone:check', function () {
+    DB::enableQueryLog();
+    Post::with('comments')->get()->each(fn ($post) => $post->comments->each(fn ($c) => $c->post->id));
+    $this->info(count(DB::getQueryLog()).' queries');
+});
+```
+
+```bash
+php artisan chaperone:check
+```
+
+</TryIt>
+
+Run it, add `->chaperone()` to `comments()`, run it again. The second number should be 2.
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ One method call removes a whole class of N+1 |
+| How often you'll reach for it | ★★★★☆ Any parent with children that link back: posts, orders, invoices, threads |
+| Risk if misused | ★★☆☆☆ Bigger JSON if you dump models straight into Inertia props |
+| **Overall** | **4 / 5**: the cheapest N+1 fix you will find, once you know it exists |
+
+If you already use [automatic eager loading](/laravel-automatic-eager-loading), it fixes the same loop with one batched query (3 total in our lab). `chaperone()` gets you to 2 and hands back the same instance, and the two stack fine.
+
+## Recap
+
+- `chaperone()` on a `hasMany`, `hasOne`, `morphMany` or `morphOne` sets the parent on every child it loads, with no query.
+- Lab result on Laravel 13.38: 22 queries down to 2 on a list, 6 down to 2 on a single post.
+- It also covers `create()`, `make()`, `get()` and `paginate()` through the relation; opt in per query with a `with()` closure, opt out with `withoutChaperone()`.
+- Mind JSON size in Inertia props, load children through the parent, and add the `belongsTo` it needs.
+- Tested with 14 Pest tests in a scratch Laravel 13.38 app.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version do I need for chaperone()?', a: 'Laravel 11.22 or newer for `hasMany`, `hasOne`, `morphMany` and `morphOne`. Pivot support on `belongsToMany` with a custom pivot model arrived in Laravel 13.31. We tested on 13.38.' },
+  { q: 'What is the difference between chaperone() and with(\'comments.post\')?', a: 'The nested eager load runs one more query and gives each comment a separate copy of the post. `chaperone()` runs no extra query and sets the exact parent instance you already have.' },
+  { q: 'Is inverse() the same thing?', a: 'Yes. `inverse()` is an alias of `chaperone()`, and `withoutInverse()` is an alias of `withoutChaperone()`.' },
+  { q: 'Does chaperone() cause infinite recursion when serializing to JSON?', a: 'No. Since Laravel 11.22 model serialization detects circular references. Each child includes the parent columns but not the parent relations again. It does make the JSON larger, so use resources or `makeHidden(\'post\')` for Inertia props.' },
+  { q: 'Should I add chaperone() to every hasMany?', a: 'Add it where children read their parent: permalinks, policies, accessors, notifications. If nothing ever calls `$child->parent`, it costs a tiny loop and adds the parent to serialized output, so skip it there.' },
+]} />
+
+## Next steps
+
+- [Laravel automatic eager loading](/laravel-automatic-eager-loading), the other one-line N+1 fix
+- [Laravel Model::shouldBeStrict()](/laravel-model-should-be-strict), to catch the N+1 you haven't found yet
+- [API resources for Vue](/laravel-api-resources-vue), to keep Inertia props to the fields you chose
+- [Laravel docs: Automatically hydrating parent models on children](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
+
+## Sources
+
+- [Laravel 13 docs: Automatically hydrating parent models on children](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
+- [Laravel 13 docs: Automatically hydrating pivot relationships](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-pivot-relationships)
+- [laravel/framework PR #51582: Eloquent inverse relations (Laravel 11.22)](https://github.com/laravel/framework/pull/51582)
+- [laravel/framework PR #52461: Handle circular references in model serialization (Laravel 11.22)](https://github.com/laravel/framework/pull/52461)
+- [laravel/framework v11.22.0 release](https://github.com/laravel/framework/releases/tag/v11.22.0)
+- [laravel/framework PR #61152: chaperone support for BelongsToMany pivot models (Laravel 13.31)](https://github.com/laravel/framework/pull/61152)
+- [Source: `SupportsInverseRelations` trait](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Eloquent/Relations/Concerns/SupportsInverseRelations.php)
