@@ -1,0 +1,305 @@
+---
+id: 172
+title: "Laravel 13.39: keyless models, restoreOrCreate on relations and session:garbage-collect"
+seoTitle: "Laravel 13.39: Keyless Models, restoreOrCreate, Session GC"
+excerpt: "Laravel 13.39 adds #[Table(key: false)], working restoreOrCreate() on relations, Rule::array()->min(), session:garbage-collect and job durations on JobAttempted."
+date: 2026-10-28T00:30:00Z
+snippet: "#[Table(name: 'activity_log', key: false)]"
+categories: [laravel]
+tags: [laravel, release, testing, upgrade]
+---
+A user deletes their "Home" address, then adds it back. You call `$user->addresses()->restoreOrCreate(['label' => 'Home'])` and expect the old row to come back. Before 13.39 the relation was ignored: Laravel looked for *any* "Home" address, and if it had to create one, the `user_id` was missing. Laravel **13.39** fixes that, and adds keyless models, array size rules, a scheduled session cleanup and job timings for failed jobs.
+
+<TLDR
+  audience="Laravel 13 developers who use soft deletes, queues, sessions on file/database drivers, or a lot of test fakes"
+  learn={['`#[Table(key: false)]` for tables without a primary key', '`restoreOrCreate()` / `createOrRestore()` and `forceCreate()` that respect the relation', '`Rule::array()->min()`, `max()`, `between()`, `exactly()`', '`session:garbage-collect`, `JobAttempted::$duration`, and six testing upgrades']}
+  tested="Laravel 13.39.0 · PHP 8.4 · Pest 4 · SQLite (11 tests / 33 assertions: keyless create, restoreOrCreate/createOrRestore on hasMany, forceCreate with pivot data, array size rules, session:garbage-collect, sync job duration, BusFake, MailFake::html(), Process::start() shorthands, phar:// block, WithoutMigrationEvents)"
+>
+
+- **13.39.0** was released on **October 27, 2026** (14:06 UTC). No breaking changes and nothing to publish.
+- `#[Table(key: false)]` replaces `protected $primaryKey = null;` and also turns off incrementing, so `create()` works on keyless tables.
+- `restoreOrCreate()` and `createOrRestore()` now go through the relation (`hasMany`, `belongsToMany`, `hasManyThrough`, `hasOneThrough`), and `belongsToMany()->forceCreate()` finally attaches the model.
+- Run `session:garbage-collect` from the scheduler instead of the request lottery. `JobAttempted` now carries `$duration` (ms), even for failed and sync jobs.
+
+</TLDR>
+
+## What's new at a glance
+
+| Change | PR | What it replaces |
+|---|---|---|
+| `#[Table(key: false)]` | [#62113](https://github.com/laravel/framework/pull/62113), [#62205](https://github.com/laravel/framework/pull/62205) | `$primaryKey = null` plus `$incrementing = false` |
+| `restoreOrCreate()` / `createOrRestore()` on relations | [#62146](https://github.com/laravel/framework/pull/62146), [#62204](https://github.com/laravel/framework/pull/62204) | A builder macro that ignored the relation |
+| `forceCreate()` / `forceCreateQuietly()` on `BelongsToMany` | [#62136](https://github.com/laravel/framework/pull/62136) | Creating, then calling `attach()` yourself |
+| Size methods on `Rule::array()` | [#62179](https://github.com/laravel/framework/pull/62179) | `Rule::array(), 'min:1'` |
+| `session:garbage-collect` | [#62104](https://github.com/laravel/framework/pull/62104), [#62150](https://github.com/laravel/framework/pull/62150) | The 2-in-100 request lottery |
+| `$duration` on `JobAttempted` (worker and sync) | [#62118](https://github.com/laravel/framework/pull/62118), [#62155](https://github.com/laravel/framework/pull/62155) | Timing only successful worker jobs |
+| Testing: `WithoutMigrationEvents`, `BusFake`, `MailFake`, `Process` fakes, `RefreshDatabase` | [#62201](https://github.com/laravel/framework/pull/62201), [#62130](https://github.com/laravel/framework/pull/62130), [#62162](https://github.com/laravel/framework/pull/62162), [#62200](https://github.com/laravel/framework/pull/62200), [#62194](https://github.com/laravel/framework/pull/62194) | Flaky counts and fakes that leaked |
+| Atomic `config:cache` / `route:cache` / `event:cache`, `phar://` blocked | [#62117](https://github.com/laravel/framework/pull/62117), [#62164](https://github.com/laravel/framework/pull/62164) | Empty cache files mid-deploy |
+
+## Keyless models with #[Table(key: false)]
+
+Some tables have no primary key: an append-only activity log, an import staging table, a view. Laravel 13 lets you configure a model with the `#[Table]` attribute, but `key: null` meant "use the default", which is `id`. Now `key: false` means "there is no key".
+
+<CodeCompare before="Laravel 13.38" after="Laravel 13.39">
+
+```php title="app/Models/Activity.php"
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Model;
+
+#[Table(name: 'activity_log')]
+class Activity extends Model
+{
+    protected $primaryKey = null;
+
+    public $incrementing = false;
+}
+```
+
+```php title="app/Models/Activity.php"
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Model;
+
+#[Table(name: 'activity_log', key: false)] // [!code highlight]
+class Activity extends Model
+{
+    //
+}
+```
+
+</CodeCompare>
+
+The first PR only set the key to `null`, so `Activity::create()` inserted the row and then threw an `ArgumentCountError` while trying to set the new ID. [#62205](https://github.com/laravel/framework/pull/62205), in the same release, also turns off incrementing. In our lab, `getKeyName()` is `null`, `getIncrementing()` is `false` and `create()` saves the row.
+
+<Callout type="gotcha" title="No key means no find()">
+
+`find()`, `update()` on a loaded model, `delete()` on an instance and route model binding all need a key. Keyless models are for writing rows and querying them with `where()`. If you need to update one row, give the table a key.
+
+</Callout>
+
+## restoreOrCreate() that respects the relation
+
+`restoreOrCreate()` and `createOrRestore()` come from the `SoftDeletes` builder macros. On a relation they skipped the relation completely:
+
+- on `hasMany`, a newly created model had no foreign key;
+- on `belongsToMany`, the pivot `id` could overwrite the related key, so the wrong model was restored, and new models were never attached;
+- on `hasManyThrough` / `hasOneThrough`, the intermediate table's `id` from the join was used, so **another parent's row** could be restored.
+
+13.39 adds real `restoreOrCreate()` and `createOrRestore()` methods to `HasOneOrMany`, `BelongsToMany` and the through relations. They call `withTrashed()` on the relation query and then the relation's own `firstOrCreate()` / `createOrFirst()`.
+
+<Diagram name="laravel-relation-restore-or-create" alt="Calling restoreOrCreate on a user's addresses relation first adds withTrashed to the relation query while keeping the user_id constraint. If a matching row exists for this user, even soft-deleted, it is restored by setting deleted_at to null. If not, a new row is created through the relation with user_id filled in. Either way the model is returned." caption="Both paths stay inside the relation in 13.39." />
+
+```php title="app/Http/Controllers/AddressController.php"
+use App\Http\Requests\StoreAddressRequest;
+use Illuminate\Http\RedirectResponse;
+
+public function store(StoreAddressRequest $request): RedirectResponse
+{
+    // Brings back this user's trashed "Home" address, or creates one with user_id set
+    $request->user()->addresses()->restoreOrCreate(
+        ['label' => $request->validated('label')],
+        $request->safe()->except('label'),
+    );
+
+    return back();
+}
+```
+
+We tested it with two users who both had a trashed "Home" address. The call restored the right user's row and left the other one trashed. `createOrRestore()` on a new label created a row with the correct `user_id`.
+
+Use `createOrRestore()` when the column has a unique index and you expect races: it tries the insert first and falls back to finding and restoring the row on a unique constraint violation.
+
+<Callout type="heads-up" title="Small side effect on belongsToMany">
+
+When `firstOrCreate()` on a `belongsToMany` falls back to the related table, it now drops the same global scopes you removed on the relation. So `$team->users()->withTrashed()->firstOrCreate([...])` now finds a trashed user who is not attached yet, instead of creating a duplicate.
+
+</Callout>
+
+## forceCreate() on belongsToMany now attaches
+
+`BelongsToMany` had no `forceCreate()`, so the call went to the Eloquent builder. The model was saved but never attached, and `$team->users()->count()` stayed at `0`.
+
+<CodeCompare before="Laravel 13.38" after="Laravel 13.39">
+
+```php title="database/seeders/TeamSeeder.php"
+$team = Team::forceCreate(['name' => 'Core', 'is_internal' => true]);
+
+$user->teams()->attach($team, ['role' => 'owner']);
+```
+
+```php title="database/seeders/TeamSeeder.php"
+$team = $user->teams()->forceCreate(
+    ['name' => 'Core', 'is_internal' => true], // guarded columns allowed
+    ['role' => 'owner'],                        // pivot data
+);
+```
+
+</CodeCompare>
+
+The signature matches `create()`: attributes, pivot data, then `$touch`. `forceCreateQuietly()` does the same without model events.
+
+## Array size rules on Rule::array()
+
+Since 13.36 almost every rule has a fluent builder. Array size still needed a string next to it. Now `Rule::array()` has `min()`, `max()`, `between()` and `exactly()` (which compiles to `size`), like `Rule::string()`.
+
+<CodeCompare before="Laravel 13.38" after="Laravel 13.39">
+
+```php title="app/Http/Requests/StorePostRequest.php"
+'tags' => ['required', Rule::array(), 'min:1', 'max:5'],
+'cover' => ['nullable', Rule::array(['url', 'alt']), 'size:2'],
+```
+
+```php title="app/Http/Requests/StorePostRequest.php"
+'tags' => ['required', Rule::array()->min(1)->max(5)],
+'cover' => ['nullable', Rule::array(['url', 'alt'])->exactly(2)],
+```
+
+</CodeCompare>
+
+`(string) Rule::array(['url', 'alt'])->between(1, 2)` gives `array:url,alt|between:1,2`, and the validation parser splits it like a normal rule list. With Inertia, the error comes back in `form.errors.tags` exactly as before, so your Vue form does not change.
+
+## Schedule session cleanup with session:garbage-collect
+
+With the `file` or `database` session driver, Laravel deletes expired sessions on 2 in every 100 requests (`'lottery' => [2, 100]` in `config/session.php`). The unlucky request pays for the cleanup, quiet sites barely clean up, and busy sites clean up too often. The new command runs the driver's garbage collector on demand, using `session.lifetime`.
+
+```php title="routes/console.php"
+use Illuminate\Support\Facades\Schedule;
+
+Schedule::command('session:garbage-collect')->hourly();
+```
+
+```php title="config/session.php"
+'lottery' => [0, 100], // never clean up during a request
+```
+
+Redis, Memcached and other cache-based drivers expire sessions on their own, so the command is a no-op for them. Note that [#62104](https://github.com/laravel/framework/pull/62104) added the command and [#62150](https://github.com/laravel/framework/pull/62150) registered it: both are in 13.39.0.
+
+## Job duration on JobAttempted, even for failures
+
+`JobProcessed` already had a `$duration`, but only for successful jobs on a worker. `JobAttempted` fires for every attempt, success or failure, and now has `$duration` too, in milliseconds as a float. A second PR adds the same timing to the `sync` queue, so `dispatchSync()` jobs report it as well.
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Queue\Events\JobAttempted;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+
+Event::listen(function (JobAttempted $event) {
+    if (! $event->successful() && $event->duration > 10_000) {
+        Log::warning('Slow failing job', [
+            'job' => $event->job->resolveName(),
+            'ms' => $event->duration,
+        ]);
+    }
+});
+```
+
+This is how you spot the API job that now takes 28 seconds before it times out, instead of only seeing "failed".
+
+## Six testing upgrades
+
+Small changes, but each one removes a flaky test or a real email sent from CI.
+
+- **`#[WithoutMigrationEvents]`** ([#62201](https://github.com/laravel/framework/pull/62201)): with `LazilyRefreshDatabase`, migrations run on the first query of the first test, so `expectsDatabaseQueryCount()` counted them. In our lab the same test saw **37 queries** without the attribute and **1** with it. Put it on the method or the class.
+- **`RefreshDatabase` rolls back every level** ([#62194](https://github.com/laravel/framework/pull/62194)): a test that leaves a transaction open no longer breaks every test after it with "cannot start a transaction within a transaction".
+- **`Bus::fake()` + `withoutDispatchingAfterResponses()`** ([#62130](https://github.com/laravel/framework/pull/62130)): you can fake some jobs and still run the `dispatchAfterResponse()` one.
+- **`Mail::html()` and `Mail::plain()` are faked** ([#62162](https://github.com/laravel/framework/pull/62162)): before, `Mail::fake()` forwarded them to the real mailer, so they sent real emails while `assertNothingOutgoing()` passed.
+- **`Process::fake()` shorthands with `start()` and `pool()`** ([#62200](https://github.com/laravel/framework/pull/62200)): `['ls' => 1]` and `['ls' => new RuntimeException]` used to throw a `LogicException` for async processes.
+- **`assertSeeText('0')`** no longer passes when the text is missing ([#62126](https://github.com/laravel/framework/pull/62126)). If a test starts failing after the upgrade, it was probably wrong before.
+
+```php title="tests/Feature/OrderStatsTest.php"
+use Illuminate\Foundation\Testing\Attributes\WithoutMigrationEvents;
+use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+
+class OrderStatsTest extends TestCase
+{
+    use LazilyRefreshDatabase;
+
+    #[WithoutMigrationEvents] // [!code ++]
+    public function test_stats_use_one_query(): void
+    {
+        $this->expectsDatabaseQueryCount(1);
+
+        $this->assertSame(0, Order::query()->pending()->count());
+    }
+}
+```
+
+## Safer deploys and a phar:// block
+
+**Atomic cache files** ([#62117](https://github.com/laravel/framework/pull/62117)). `config:cache` and `route:cache` used `put()` and `event:cache` used `file_put_contents()`. The file was truncated, then filled, so a request booting at that moment could read an empty config. With `opcache.validate_timestamps=0`, OPcache kept that empty file until PHP-FPM restarted. All three now write to a temp file and rename it, like `services.php` and compiled views already did. If you run `php artisan optimize` on a live server, this is a quiet but real fix.
+
+**`phar://` is blocked** in `Filesystem::exists()` and `isFile()` ([#62164](https://github.com/laravel/framework/pull/62164)). Those calls go straight to PHP's file functions, and a `phar://` path can trigger object deserialization. They now return `false` (and `File::get()` throws `FileNotFoundException`). Files inside the phar your app runs from, like a Laravel Zero build, are still allowed ([#62174](https://github.com/laravel/framework/pull/62174)).
+
+<Callout type="pro-tip" title="Still validate user paths">
+
+This is defence in depth. Never pass a user-supplied path or filename to `File::exists()` or `storeAs()` in the first place. The docs got a new warning about user-controlled filenames in `storeAs()` this week too.
+
+</Callout>
+
+## Fixes worth knowing
+
+- **`Http::batch()`** counted requests that failed through `retry()` or `throw()` as successes, skipped `catch()` and ran `then()` ([#62120](https://github.com/laravel/framework/pull/62120)).
+- **`once()`** could return a cached value for a *different* object, because PHP reuses `spl_object_id()` after an object is freed. In a `User::lazy()` loop, user 3 could get user 1's result ([#62121](https://github.com/laravel/framework/pull/62121)).
+- **Octane**: a 404 request no longer sees the previous request's route and bound parameters through `Route::current()` ([#62123](https://github.com/laravel/framework/pull/62123)).
+- **PostgreSQL database cache lock**: taking a held lock inside a transaction (for example dispatching a `ShouldBeUnique` job) no longer aborts the whole transaction ([#62114](https://github.com/laravel/framework/pull/62114)).
+- **Pagination**: counts for grouped `union` queries ([#62131](https://github.com/laravel/framework/pull/62131)) and `simplePaginate()` with a custom page name ([#62128](https://github.com/laravel/framework/pull/62128)).
+- **Queues**: `queue:retry` no longer stops on a job whose model was deleted ([#62124](https://github.com/laravel/framework/pull/62124)), and database queue jobs don't fail on concurrency errors while reserving ([#62145](https://github.com/laravel/framework/pull/62145)).
+- **Markdown notifications** attach an `embed()`ed image once, not twice ([#62163](https://github.com/laravel/framework/pull/62163)).
+- **Also**: `withoutMiddleware()` with parameterised middleware ([#62166](https://github.com/laravel/framework/pull/62166)), `wherePivot()` closures qualify columns ([#62137](https://github.com/laravel/framework/pull/62137)), JSON:API includes without N+1 ([#62152](https://github.com/laravel/framework/pull/62152)), `install:broadcasting` finds `app.js` / `app.jsx` ([#62202](https://github.com/laravel/framework/pull/62202)), and Laravel Cloud exception reporting follow-ups ([#62142](https://github.com/laravel/framework/pull/62142), [#62189](https://github.com/laravel/framework/pull/62189)).
+
+## Upgrade notes
+
+- `composer update laravel/framework` and you are on 13.39. No config to publish.
+- If you scheduled `session:garbage-collect`, set the lottery to `[0, 100]` so requests stop doing the same job.
+- Watch for tests that start failing: `assertSeeText('0')`, `Mail::html()` under `Mail::fake()` and `RefreshDatabase` rollbacks were hiding real problems.
+- On Laravel 12? **12.70.2** shipped the same day with only the Laravel Cloud exception reporting changes ([#61934](https://github.com/laravel/framework/pull/61934), [#62186](https://github.com/laravel/framework/pull/62186)). None of the features above are in 12.x.
+
+<TryIt title="Check restoreOrCreate on your relation">
+
+```php title="tests/Feature/RestoreAddressTest.php"
+it('restores the trashed address of this user only', function () {
+    [$ana, $bob] = User::factory(2)->create();
+    $home = $ana->addresses()->create(['label' => 'Home']);
+    $home->delete();
+    $bob->addresses()->create(['label' => 'Home'])->delete();
+
+    $restored = $ana->addresses()->restoreOrCreate(['label' => 'Home']);
+
+    expect($restored->is($home))->toBeTrue()
+        ->and(Address::onlyTrashed()->count())->toBe(1);
+});
+```
+
+</TryIt>
+
+## Recap
+
+- `#[Table(key: false)]` gives you keyless models that `create()` correctly.
+- `restoreOrCreate()`, `createOrRestore()` and `belongsToMany()->forceCreate()` now respect the relation.
+- `Rule::array()->min()->max()` and `session:garbage-collect` remove two bits of string config.
+- `JobAttempted::$duration` times every attempt; six testing fixes stop flaky counts and leaking fakes.
+- Cache files are written atomically and `phar://` paths are blocked in `Filesystem`.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Is Laravel 13.39 safe to upgrade to?', a: 'Yes. It is a minor release with no breaking changes. Tests that relied on `assertSeeText(\'0\')` or on `Mail::html()` passing through a fake may start failing, because they were wrong before.' },
+  { q: 'Did restoreOrCreate() exist before 13.39?', a: 'Yes, on the Eloquent builder for soft-deleting models. On a relation it ignored the relation, so it could restore another parent\'s row or create a row without the foreign key. 13.39 adds proper relation methods.' },
+  { q: 'Do I need session:garbage-collect with Redis sessions?', a: 'No. Cache-based drivers expire sessions with a TTL. The command matters for the `file` and `database` drivers.' },
+  { q: 'What unit is JobAttempted::$duration in?', a: 'Milliseconds, as a float rounded to two decimals. It is `null` only if the job never started.' },
+  { q: 'Can I use #[Table(key: false)] with route model binding?', a: 'No. Binding, `find()` and instance updates need a primary key. Keyless models are for inserts and `where()` queries.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.38: no more stale reads after a write](/laravel-13-38-stale-reads-write-pdo-health)
+- [Laravel 13.36: validation rule builders, OLAP and sticky queues](/laravel-13-36-validation-builders-olap-sticky-queues)
+- [Soft deleting in the Laravel docs](https://laravel.com/docs/13.x/eloquent#soft-deleting)
+- [Session configuration in the Laravel docs](https://laravel.com/docs/13.x/session#configuration)
+
+## Sources
+
+- [laravel/framework v13.39.0 release notes](https://github.com/laravel/framework/releases/tag/v13.39.0)
+- [laravel/framework v12.70.2 release notes](https://github.com/laravel/framework/releases/tag/v12.70.2)
+- PRs: [#62113](https://github.com/laravel/framework/pull/62113), [#62205](https://github.com/laravel/framework/pull/62205), [#62146](https://github.com/laravel/framework/pull/62146), [#62204](https://github.com/laravel/framework/pull/62204), [#62136](https://github.com/laravel/framework/pull/62136), [#62179](https://github.com/laravel/framework/pull/62179), [#62104](https://github.com/laravel/framework/pull/62104), [#62150](https://github.com/laravel/framework/pull/62150), [#62118](https://github.com/laravel/framework/pull/62118), [#62155](https://github.com/laravel/framework/pull/62155), [#62201](https://github.com/laravel/framework/pull/62201), [#62117](https://github.com/laravel/framework/pull/62117), [#62164](https://github.com/laravel/framework/pull/62164)
+- [Docs: Validation rule builders](https://laravel.com/docs/13.x/validation)
+- [Docs: Queue events](https://laravel.com/docs/13.x/queues#job-events)
