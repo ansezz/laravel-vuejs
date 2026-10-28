@@ -1,0 +1,14 @@
+flowchart LR
+  A["`**$user->addresses()
+  ->restoreOrCreate([...])**`"] --> B["`**1. withTrashed()**
+  on the relation query
+  (user_id = 7 kept)`"]
+  B --> C{"`**Matching row
+  for this user?**`"}
+  C -- "yes" --> D["`**restore()**
+  deleted_at = null`"]
+  C -- "no" --> E["`**create()**
+  through the relation
+  user_id filled in`"]
+  D --> F["`**Model returned**`"]
+  E --> F
