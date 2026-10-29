@@ -1,0 +1,14 @@
+flowchart LR
+  A["`**Search 'sam'**
+  in team 1 only`"] --> B{"`How are the
+  OR clauses built?`"}
+  B -- "chained orWhere" --> C["`team_id = 1 **and** name like ?
+  **or** email like ?`"]
+  C --> D["`AND binds first:
+  any team's email matches
+  **team 2 rows leak in**`"]
+  B -- "whereAny" --> E["`team_id = 1 **and (**
+  name like ? **or** email like ?
+  **)**`"]
+  E --> F["`Grouped for you:
+  **team 1 only**`"]
