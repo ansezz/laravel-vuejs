@@ -4,6 +4,7 @@ title: "Wayfinder + Precognition catch up with Laravel's QUERY routes"
 seoTitle: "Wayfinder & Precognition: QUERY method support"
 excerpt: "Wayfinder 0.1.22 and Precognition 2.1.1 add first-class QUERY support, so Route::query() finally works end-to-end with typed clients and live validation."
 date: 2026-10-16T00:30:00Z
+updated: 2026-10-31T00:30:00Z
 snippet: "search.query() · client.query()"
 categories: [laravel]
 tags: [laravel, vuejs, inertia, release]
@@ -84,6 +85,12 @@ Generated definitions use lowercase `"query"`, consistent with `"patch"`. The Fe
 </Callout>
 
 ### Call it with fetch (Inertia does not speak QUERY yet)
+
+<Callout type="heads-up" title="update: Inertia 3.10 speaks QUERY">
+
+Since **Inertia 3.10** (October 30, 2026) you can pass the Wayfinder object straight to `router.query()` or `<Link :href>`, and `useForm`/`useHttp` have a `query()` method. See [Inertia 3.10: QUERY visits for search pages and filters](/inertia-3-10-query-method). The `fetch` version below still works outside Inertia.
+
+</Callout>
 
 Inertia's `Method` type is still `get | post | put | patch | delete` as of **3.9.1**, so `router.visit({ method: 'query' })` will not type-check. Use Wayfinder's definition with `fetch` (or axios), and keep CSRF in mind for `web` routes:
 

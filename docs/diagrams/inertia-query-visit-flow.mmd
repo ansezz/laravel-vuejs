@@ -1,0 +1,13 @@
+flowchart LR
+  A["`**form.query('/products')**
+  filters in a JSON body`"] -->|"QUERY + XSRF header"| B["`**Route::query('/products')**
+  FormRequest validates`"]
+  B -- "valid" --> C["`**Inertia page**
+  URL stays /products
+  body remembered`"]
+  C -->|"router.reload, Deferred,
+  polling, InfiniteScroll"| B
+  B -- "invalid: 302" --> D["`**inertia-laravel 3.6**
+  turns it into 303`"]
+  D -->|"follow with GET"| E["`**GET /products**
+  with errors`"]
