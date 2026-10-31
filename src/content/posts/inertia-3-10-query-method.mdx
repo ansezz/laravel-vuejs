@@ -1,0 +1,366 @@
+---
+id: 174
+title: "Inertia 3.10: QUERY visits for search pages and filters"
+seoTitle: "Inertia 3.10: QUERY visits for search and filters"
+excerpt: "Inertia 3.10 adds router.query(), method=\"query\" on Link and Form, and query() on useForm and useHttp. inertia-laravel 3.6 makes redirects safe. Tested with Vue 3."
+date: 2026-10-31T00:30:00Z
+snippet: "form.query('/products')"
+categories: [vuejs, laravel]
+tags: [inertia, vuejs, laravel, release]
+---
+Your product search has twelve filters, nested price ranges and a category list. As a GET, the URL turns into a paragraph. As a POST, every reload, deferred prop and "load more" forgets the filters. Inertia **3.10** speaks Laravel's `QUERY` method, so the filters travel in the body and the page remembers them.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia 3"
+  learn={['How to make a `QUERY` visit with `router.query()`, `<Link>`, `<Form>`, `useForm` and `useHttp`', 'Why reloads, deferred props and infinite scroll keep your filters', 'The two gotchas we hit in the lab, and the redirect fix in inertia-laravel 3.6']}
+  tested="Laravel 13.39 · inertia-laravel 3.6.0 · @inertiajs/vue3 3.10.0 · Vue 3.5 · PHP 8.4"
+>
+
+- **Inertia 3.10.0** (October 30, 2026) adds `router.query(url, data)`, `method="query"` on `<Link>` and `<Form>`, and a `query()` method on `useForm` and `useHttp`.
+- A page rendered by a `QUERY` visit **remembers its body**. `router.reload()`, `<Deferred>`, polling, `<WhenVisible>` and `<InfiniteScroll>` send it again. The URL doesn't change.
+- **inertia-laravel 3.6.0** turns a `302` after a `QUERY` request into a `303`, so a failed validation redirects with `GET` instead of replaying the `QUERY`. Update both packages together.
+- In our lab, `php artisan serve` answered `QUERY` with **501**, and `useForm` data with arrays needed a plain copy. Details below.
+
+</TLDR>
+
+## What's new at a glance
+
+| Package | Version | What changed |
+|---|---|---|
+| `@inertiajs/vue3` (and React, Svelte) | 3.10.0 | `QUERY` visits, prefetch for `QUERY`, 15+ fixes for cancelled and stale requests |
+| `inertiajs/inertia-laravel` | 3.6.0 | `303` after `QUERY` redirects, a way to start SSR without stopping the other servers |
+
+This is the last piece of the `QUERY` story on this site. Laravel added `Route::query()` in [13.35](/laravel-13-35-query-routes-markdown-responses), then [Wayfinder and Precognition](/wayfinder-precognition-query-method) learned the method. Back then we wrote "Inertia does not speak QUERY yet". Now it does.
+
+## QUERY in one paragraph
+
+`QUERY` is a new HTTP method: **safe and repeatable like `GET`, with a body like `POST`**. It fits searches and filters with large or nested payloads. On the Laravel side it is one route:
+
+```php title="routes/web.php"
+use App\Http\Controllers\ProductController;
+
+Route::get('/products', [ProductController::class, 'index'])->name('products.index');
+Route::query('/products', [ProductController::class, 'index'])->name('products.search');
+```
+
+Both routes point at the same action, so the first visit (`GET`) and every search (`QUERY`) render the same page. The controller reads the body with a normal `FormRequest`:
+
+```php title="app/Http/Controllers/ProductController.php"
+public function index(SearchProductsRequest $request): Response
+{
+    $filters = $request->validated();
+
+    return Inertia::render('products/index', [
+        'filters' => $filters,
+        'products' => fn () => Product::query()
+            ->when($filters['search'] ?? null, fn (Builder $q, string $s) => $q->whereLike('name', "%{$s}%"))
+            ->when($filters['categories'] ?? null, fn (Builder $q, array $c) => $q->whereIn('category', $c))
+            ->when($filters['price']['min'] ?? null, fn (Builder $q, int $min) => $q->where('price', '>=', $min))
+            ->when($filters['price']['max'] ?? null, fn (Builder $q, int $max) => $q->where('price', '<=', $max))
+            ->get(['id', 'name', 'category', 'price']),
+        'facets' => Inertia::defer(fn () => Product::query()
+            ->selectRaw('category, count(*) as total')
+            ->groupBy('category')
+            ->pluck('total', 'category')),
+    ]);
+}
+```
+
+## Five ways to make a QUERY visit
+
+Every Inertia API that takes a method now accepts `'query'`. We checked each one against the [pull request](https://github.com/inertiajs/inertia/pull/3328) source and ran it in a Vue 3 lab.
+
+### useForm: the search form
+
+Before 3.10, you had to pick between a long URL and a `POST` that is not really a write. Now the form has a `query()` method:
+
+<CodeCompare before="3.9: GET with a query string" after="3.10: QUERY with a body">
+
+```vue title="resources/js/pages/products/index.vue"
+<script setup lang="ts">
+import { useForm } from '@inertiajs/vue3'
+
+const form = useForm({
+    search: '',
+    categories: [] as string[],
+    price: { min: null as number | null, max: null as number | null },
+})
+
+// /products?search=&categories[0]=Keyboards&categories[1]=Monitors&price[min]=100&price[max]=500
+const apply = () => form.get('/products', { preserveState: true })
+</script>
+```
+
+```vue title="resources/js/pages/products/index.vue"
+<script setup lang="ts">
+import { useForm } from '@inertiajs/vue3'
+
+const form = useForm({
+    search: '',
+    categories: [] as string[],
+    price: { min: null as number | null, max: null as number | null },
+}).transform((data) => JSON.parse(JSON.stringify(data))) // see the gotcha below
+
+// QUERY /products with {"search":"","categories":["Keyboards"],"price":{"min":100,"max":null}}
+const apply = () => form.query('/products')
+</script>
+```
+
+</CodeCompare>
+
+`QUERY` visits preserve component state by default, like `POST`, `PUT` and `PATCH`. Your inputs keep their values when the results come back.
+
+<Callout type="gotcha" title="DataCloneError with arrays and nested objects">
+
+In our lab, `form.query()` with an array field (`categories`) or a nested object (`price`) failed with *"Failed to execute 'replaceState' on 'History': [object Object] could not be cloned"*, and the page did not update. Inertia 3.10.0 saves the request body in browser history, and the browser can't copy Vue's reactive arrays. A form with only strings worked. The one-line `transform()` above sends a plain copy, and everything worked after that. We'll update this post when a fix ships.
+
+</Callout>
+
+### router.query: from code
+
+```ts
+import { router } from '@inertiajs/vue3'
+
+router.query('/products', {
+    categories: ['Keyboards', 'Monitors'],
+    price: { min: 100, max: 500 },
+})
+```
+
+The signature is `router.query(url, data, options)`, the same as `router.post()`. It sets `preserveState: true` for you.
+
+### Link: saved searches and quick filters
+
+```vue title="resources/js/components/QuickFilters.vue"
+<template>
+    <Link href="/products" method="query" :data="{ search: 'Acme' }" prefetch>
+        Acme products
+    </Link>
+</template>
+```
+
+`QUERY` is safe, so it can be **prefetched**. Each body gets its own cache entry, so two links to `/products` with different `data` don't share a response. You can even prefetch the page you are on.
+
+### Form: no script at all
+
+```vue title="resources/js/pages/products/index.vue"
+<template>
+    <Form action="/products" method="query" #default="{ processing }">
+        <input name="search" />
+        <button type="submit" :disabled="processing">Search</button>
+    </Form>
+</template>
+```
+
+### useHttp: JSON endpoints
+
+For a count badge or an autocomplete, you don't want a page visit. `useHttp` gained `query()` too, and it returns the response:
+
+```ts
+import { useHttp } from '@inertiajs/vue3'
+
+const counter = useHttp<{ categories: string[] }, { count: number }>({ categories: [] })
+
+const { count } = await counter.query('/products/count')
+```
+
+Our lab returned `{"count":2,"method":"QUERY"}` from a `Route::query('/products/count', ...)` route.
+
+<Callout type="tip" title="CSRF is already handled">
+
+Laravel checks the CSRF token on `QUERY` requests to `web` routes (a request without it got a **419** in our lab). Inertia's HTTP client sends the `X-XSRF-TOKEN` header on same-origin requests for every method, so `QUERY` visits pass without extra code.
+
+</Callout>
+
+## Reloads keep the filters
+
+This is the part that makes `QUERY` better than "just use POST". A page rendered by a `QUERY` visit remembers the body. Anything that reloads the page sends it again:
+
+```ts
+router.reload({ only: ['products'] }) // sent as QUERY with the same filters
+```
+
+The same goes for `<Deferred>`, polling, `<WhenVisible>` and `<InfiniteScroll>`. In our lab, the deferred `facets` prop and a partial reload both went out as `QUERY` with the original JSON body. `<InfiniteScroll>` adds the page number to the body (`{"term":"Apple","page":2}` in the Inertia test suite).
+
+<Diagram
+  name="inertia-query-visit-flow"
+  alt="form.query('/products') sends the filters as a JSON body with the XSRF header to Route::query('/products'), where a FormRequest validates them. If valid, Inertia renders the page, the URL stays /products and the body is remembered, so router.reload, Deferred, polling and InfiniteScroll send the same body again. If invalid, Laravel returns a 302, inertia-laravel 3.6 turns it into a 303, and the browser follows it with GET /products, which shows the errors."
+  caption="A QUERY visit, its reloads, and a failed validation"
+/>
+
+A few rules, all from the pull request and confirmed in the lab:
+
+| Situation | What happens |
+|---|---|
+| `router.reload()` on a `QUERY` page | Sent as `QUERY` with the remembered body |
+| `router.reload({ data: { search: 'x' } })` | Your data is merged on top of the remembered body |
+| `router.reload({ method: 'get' })` | Uses `GET`, the body is not sent |
+| Back, then Forward | The body is restored with the page |
+| Browser refresh (F5) | A normal `GET /products`: the filters are gone |
+| A visit that ends on another page | The body is dropped |
+
+<Callout type="heads-up" title="QUERY or GET?">
+
+The URL doesn't change, so filters aren't in browser history, can't be shared and don't survive a refresh. If users bookmark or share searches, keep `GET` with a query string. Use `QUERY` when the payload is too big or too nested for a URL, or when you don't want filters in logs and history.
+
+</Callout>
+
+## inertia-laravel 3.6: redirects after QUERY
+
+What happens when validation fails? Laravel redirects back with a `302`. Browsers only switch to `GET` when they follow a `302` after a `POST`. For any other method, they **replay the same method and body** to the new URL. Inertia already turned `302` into `303` for `PUT`, `PATCH` and `DELETE`. Version 3.6 adds `QUERY` to that list:
+
+```php title="vendor/inertiajs/inertia-laravel/src/Middleware.php"
+if ($response->getStatusCode() === 302 && in_array($request->method(), ['PUT', 'PATCH', 'DELETE'])) { // [!code --]
+if ($response->getStatusCode() === 302 && in_array($request->method(), ['PUT', 'PATCH', 'DELETE', 'QUERY'])) { // [!code ++]
+```
+
+In the lab, an invalid price range (`min: 500, max: 100`) returned **303**, the browser followed it with `GET /products`, and the page showed the error. Without the fix, the redirect is replayed as `QUERY`, which the PR notes "usually ends in a 405".
+
+You can pin it with a test. `$this->json()` sends `Accept: application/json` and gets a 422, so send the headers a browser visit would:
+
+```php title="tests/Feature/ProductSearchTest.php"
+it('redirects a failed QUERY search with a 303', function () {
+    $this->from('/products')->call('QUERY', '/products', server: [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_ACCEPT' => 'text/html, application/xhtml+xml',
+        'HTTP_X_INERTIA' => 'true',
+    ], content: json_encode(['price' => ['min' => 500, 'max' => 100]]))
+        ->assertStatus(303)
+        ->assertRedirect('/products');
+});
+```
+
+<Callout type="gotcha" title="the error page has no filters">
+
+The redirect lands on a `GET` page, so it does not carry the `QUERY` body. The error shows, but the results are unfiltered until the user searches again. Inertia also skips remembering the body when the response has validation errors.
+
+</Callout>
+
+### Starting SSR without stopping the others
+
+`inertia:start-ssr` always called `inertia:stop-ssr` first, which sends `/shutdown` to `inertia.ssr.url`. With several SSR replicas behind one load balancer, a new instance could shut down a healthy sibling. 3.6 adds an opt-out:
+
+```bash
+php artisan inertia:start-ssr --no-stop-before-start
+```
+
+The release notes call it `--no-stop`, but the option in the 3.6.0 source and in `--help` is `--no-stop-before-start`.
+
+## Gotcha: php artisan serve answers 501
+
+The first `QUERY` request in our lab failed before Laravel saw it:
+
+```bash
+curl -i -X QUERY -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8000/products
+# HTTP/1.1 501 Not Implemented
+```
+
+`php artisan serve` uses PHP's built-in web server, and on PHP 8.4 it rejects the method with *"Request method not supported"*. Sail's default runtime starts the app with `artisan serve` too. Your tests still pass (they don't go through a web server), so you only notice in the browser. Run that `curl` against your local setup before you build a page on `QUERY`.
+
+<TryIt title="Check your local server in 10 seconds">
+
+```bash
+php artisan route:list --method=QUERY
+curl -s -o /dev/null -w "%{http_code}\n" -X QUERY -H 'Content-Type: application/json' -d '{}' http://localhost:8000/products
+# 419 or 200 = Laravel got it. 501 = your web server stopped it.
+```
+
+</TryIt>
+
+## Wayfinder and Precognition work together now
+
+Inertia's `Method` type now includes `'query'`, so the Wayfinder objects from [our Wayfinder + Precognition post](/wayfinder-precognition-query-method) go straight into Inertia. `<Link>` and `<Form>` read the method from the object. With Wayfinder 0.1.23, both lines below sent `QUERY {"search":"Acme"}` in our lab and passed `vue-tsc`:
+
+```vue title="resources/js/pages/products/index.vue"
+<script setup lang="ts">
+import { Link, router } from '@inertiajs/vue3'
+import { search } from '@/routes/products'
+
+router.query(search(), { search: 'Acme' })
+</script>
+
+<template>
+    <Link :href="search()" :data="{ search: 'Acme' }">Acme products</Link>
+</template>
+```
+
+Live validation also works with `QUERY`. `@inertiajs/vue3` 3.10 depends on `laravel-precognition` ^2.1.1, the release that added `client.query()`. This snippet follows the test pages in the pull request (we didn't run it):
+
+```ts
+const form = useForm({ search: '', email: '' }).withPrecognition('query', '/products')
+
+form.validate('search')
+```
+
+`<Form method="query">` with `validate()` in its slot works the same way.
+
+## Other fixes in 3.10
+
+Most of the other changes stop old responses from winning a race. If you've seen a page "jump back" after a fast click or the Back button, update:
+
+- **Stale responses no longer revert navigations** ([#3344](https://github.com/inertiajs/inertia/pull/3344)). A poll, deferred prop or partial reload still in flight when you navigate is cancelled instead of putting the old page back.
+- **Client-side visits cancel in-flight async requests** ([#3333](https://github.com/inertiajs/inertia/pull/3333)). Before, `router.push()` let them finish, fire `onSuccess`, and report `cancelled: false`.
+- **Visits served from the prefetch cache can be interrupted** ([#3360](https://github.com/inertiajs/inertia/pull/3360)) by a newer visit, Back/Forward or `router.cancelAll()`.
+- **`useHttp` `cancel()` hits the right request** ([#3346](https://github.com/inertiajs/inertia/pull/3346)). With two overlapping requests, it used to cancel nothing, or the wrong one.
+- **Relative `Link` and `Form` URLs** resolve against the current page ([#3358](https://github.com/inertiajs/inertia/pull/3358)). `href="pass"` on `/a1/a2/a3` went to `/a1/a2/a1/a2/pass`.
+- **`useHttp` respects `forceIndicesArrayFormatInFormData`** with files ([#3329](https://github.com/inertiajs/inertia/pull/3329)), so `items[0][quantity]` no longer splits into separate array items in PHP.
+- **The SSR server rejects malformed `/render` requests** with a 400 instead of crashing ([#3314](https://github.com/inertiajs/inertia/pull/3314)). One `curl` to `/render` used to stop the process.
+- **Shared `once` props survive instant visits** ([#3356](https://github.com/inertiajs/inertia/pull/3356)), and `useForm(rememberKey, data)` accepts `null` or `undefined` as the key ([#3279](https://github.com/inertiajs/inertia/pull/3279)).
+- Smaller ones: `<InfiniteScroll>` no longer restores a stale scroll position ([#3343](https://github.com/inertiajs/inertia/pull/3343)), Back no longer saves the wrong scroll position on slow devices ([#3348](https://github.com/inertiajs/inertia/pull/3348)), `preserveUrl` resets after validation errors ([#3332](https://github.com/inertiajs/inertia/pull/3332)), client visits from a page that cleared history don't clear it again ([#3355](https://github.com/inertiajs/inertia/pull/3355)), and SSR stylesheet links work on Windows ([#3323](https://github.com/inertiajs/inertia/pull/3323)).
+- Packaging: the Svelte adapter no longer needs SvelteKit ([#3365](https://github.com/inertiajs/inertia/pull/3365)), and the React adapter lists `@types/react` and `@types/react-dom` as optional peers ([#3321](https://github.com/inertiajs/inertia/pull/3321)).
+
+## Upgrade notes
+
+<Steps>
+
+1. **Update both packages.** The client sends `QUERY`, and the server turns its redirects into `303`.
+
+   ```bash
+   composer require inertiajs/inertia-laravel:^3.6
+   npm install @inertiajs/vue3@^3.10
+   ```
+
+   If you use the Vite plugin, update `@inertiajs/vite` to 3.10 as well.
+2. **Laravel 13.35 or newer** for `Route::query()`. See [the 13.35 post](/laravel-13-35-query-routes-markdown-responses).
+3. **Check your local web server** with the `curl` above. `php artisan serve` returns 501.
+4. **No breaking changes.** Existing `GET`/`POST` code is untouched, and `QUERY` is opt-in per route.
+
+</Steps>
+
+On Inertia 2? Nothing new on the 2.x lines this week (still 2.3.29 and inertia-laravel 2.0.28).
+
+## Recap
+
+- `router.query()`, `method="query"` on `<Link>` and `<Form>`, and `query()` on `useForm` and `useHttp` send the data in the body.
+- Reloads, deferred props, polling, `<WhenVisible>` and `<InfiniteScroll>` resend the remembered body. A browser refresh does not.
+- Update inertia-laravel to **3.6** so failed validation redirects with `303` and `GET`.
+- In 3.10.0, give `useForm` a plain copy with `transform()` if it has arrays or objects. Don't test with `php artisan serve`.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'How do I make a QUERY request with Inertia?', a: "Update to `@inertiajs/vue3` 3.10, then use `router.query(url, data)`, `form.query(url)`, `useHttp().query(url)`, or `method=\"query\"` on `<Link>` and `<Form>`. The route needs `Route::query()` (Laravel 13.35+)." },
+  { q: 'Does router.reload() keep the QUERY filters?', a: 'Yes. A page rendered by a `QUERY` visit remembers the body, and reloads, `<Deferred>`, polling, `<WhenVisible>` and `<InfiniteScroll>` send it again. A browser refresh is a plain `GET`.' },
+  { q: 'Why do I get a 405 or a loop after a failed QUERY validation?', a: 'The browser replays a `302` with the same method. `inertiajs/inertia-laravel` 3.6 turns it into a `303`, so the browser follows it with `GET`.' },
+  { q: 'Why does my QUERY request return 501 locally?', a: "`php artisan serve` uses PHP's built-in server, which rejected `QUERY` in our PHP 8.4 lab. Sail's default runtime uses it too. Test with a different local web server." },
+  { q: 'Should I replace my GET search pages with QUERY?', a: 'Only when the filters are too big or nested for a URL. `QUERY` keeps the URL clean, so searches cannot be bookmarked, shared or restored after a refresh.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.35: QUERY routes and Markdown responses](/laravel-13-35-query-routes-markdown-responses): the server side of `QUERY`.
+- [Wayfinder + Precognition catch up with Laravel's QUERY routes](/wayfinder-precognition-query-method): typed `.query()` helpers and live validation.
+- [Partial reloads in Inertia and Vue](/inertia-partial-reloads): make every reload of a search page cheap.
+- [Inertia 3.9: background polling and the navigate type](/inertia-3-9-background-polling-navigate-type): the previous release.
+
+## Sources
+
+- [Inertia v3.10.0 release notes](https://github.com/inertiajs/inertia/releases/tag/v3.10.0)
+- [inertia-laravel v3.6.0 release notes](https://github.com/inertiajs/inertia-laravel/releases/tag/v3.6.0)
+- [PR #3328: support the `QUERY` HTTP method](https://github.com/inertiajs/inertia/pull/3328)
+- [inertia-laravel PR #927: `303` after `QUERY` redirects](https://github.com/inertiajs/inertia-laravel/pull/927)
+- [inertia-laravel PR #925: start SSR without stopping first](https://github.com/inertiajs/inertia-laravel/pull/925)
+- [laravel/precognition PR #179: `QUERY` support in the client](https://github.com/laravel/precognition/pull/179)
+- [laravel/framework PR #61797: `Route::query()`](https://github.com/laravel/framework/pull/61797)
+- [MDN: the QUERY method](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods/QUERY)
+- [Laravel Sail runtime Dockerfile (PHP 8.4)](https://github.com/laravel/sail/blob/1.x/runtimes/8.4/Dockerfile)
