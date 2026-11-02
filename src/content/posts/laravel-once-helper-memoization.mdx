@@ -1,0 +1,297 @@
+---
+id: 176
+title: "Laravel once(): memoize anything per request in one line"
+seoTitle: "Laravel once() Helper: One-Line Memoization"
+excerpt: "Hidden gem: once() runs a closure one time per object and returns the cached result after that. One line replaces private cache properties, plus 5 gotchas we tested."
+date: 2026-11-02T02:30:00Z
+snippet: "return once(fn () => $this->permissions()->pluck('name')->all());"
+categories: [laravel, vuejs]
+tags: [laravel, php, inertia, vuejs]
+---
+Your `HandleInertiaRequests` middleware asks the user for their permissions. So does the policy. So does the controller, twice. Four identical queries for one page, and the usual fix is a `private ?array $permissions = null` property with an `if` around it. Laravel has shipped a one-line replacement since 11.0, and most apps still hand-roll the property.
+
+<TLDR
+  audience="Laravel 11+ developers, including Inertia + Vue apps with shared props, policies and service classes"
+  learn={['What `once()` caches and how it builds its key', 'The private-property pattern vs `once()`, side by side', 'An Inertia permissions example that drops 4 queries to 1', 'Gotchas: queue workers, `$this` properties, value objects, tinker, fresh model instances']}
+  tested="Laravel 13.39 · PHP 8.4 · SQLite · inertia-laravel 3.5 · Pest (13 tests, 45 assertions) + a real database queue worker"
+>
+
+- `return once(fn () => $this->expensive());` runs the closure the first time and returns the stored result on every later call. Inside an object, the cache belongs to that instance.
+- Variables the closure captures are part of the key, so `once(fn () => $this->price($id))` caches per `$id` with no extra code.
+- In our Inertia lab, a page that read permissions four times ran 4 permission queries before and 1 after.
+- Watch out: in static methods and plain functions the cache is process-wide, and a queue worker never clears it. Our second job read a stale setting until we added `Queue::before(fn () => Once::flush())`.
+
+</TLDR>
+
+## What once() is and why most people miss it
+
+`once()` is a global helper that arrived in Laravel 11.0, added by Nuno Maduro in [PR #49744](https://github.com/laravel/framework/pull/49744) (merged January 19, 2024). You hand it a closure. The first call runs it, and every later call from the same place returns the stored result:
+
+```php title="app/Services/ExchangeRates.php"
+class ExchangeRates
+{
+    public function all(): array
+    {
+        return once(fn () => Http::get('https://rates.example.test/latest')->json());
+    }
+}
+
+$rates = app(ExchangeRates::class);
+$rates->all(); // HTTP call
+$rates->all(); // cached, no HTTP call
+```
+
+Why people miss it: it shipped inside the Laravel 11 release, which was busy with the slim skeleton, Reverb and per-second rate limiting. The [docs entry](https://laravel.com/docs/13.x/helpers#method-once) is a few lines in the "Miscellaneous" helpers list, alphabetically between `old()` and `optional()`. If you didn't read the helpers page top to bottom, you never saw it.
+
+It keeps getting better, too. Laravel 11.36.1 made it remember `null` results ([PR #53949](https://github.com/laravel/framework/pull/53949)), Laravel 12.19 added the `HasOnceHash` interface for value objects ([PR #56009](https://github.com/laravel/framework/pull/56009)), and Laravel 13.39 (October 27, 2026) fixed a subtle bug where a new object could receive an old object's cached value ([PR #62121](https://github.com/laravel/framework/pull/62121)).
+
+### How once() builds its cache key
+
+[The source](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Support/Onceable.php) hashes four things: the file and line of the `once()` call, the class and method it sits in, and the variables the closure captures. Then it stores the result:
+
+- **Inside an object**: in a `WeakMap` keyed by `$this`. Each instance has its own cache, and it disappears when the object does.
+- **In a static method or plain function**: in one shared bucket for the whole PHP process.
+
+<Diagram name="laravel-once-helper-memoization" alt="When once() is called, Laravel builds a key from the file, line, method and the variables the closure captures. If the call happens inside an object, the result is stored on that instance in a WeakMap and freed with the object. If it happens in a static method or plain function, the result goes into one global bucket for the whole process. On a later call with the same key, the cached value is returned and the closure is skipped; otherwise the closure runs and its result is stored. The global bucket is cleared by Octane after each request and by Laravel's test case, but not between queue jobs, so add Queue::before with Once::flush." caption="Per object, or per process. That one branch explains every gotcha below." />
+
+## The usual way vs once()
+
+Both versions below ran 1 permission query for three `can()` checks in our lab. One of them needs a property, a null check and a comment explaining why the property exists.
+
+<CodeCompare before="private cache property" after="once()">
+
+```php title="app/Models/User.php"
+private ?array $permissionNames = null;
+
+public function permissionNames(): array
+{
+    if ($this->permissionNames === null) {
+        $this->permissionNames = $this->permissions()->pluck('name')->all();
+    }
+
+    return $this->permissionNames;
+}
+```
+
+```php title="app/Models/User.php"
+public function permissionNames(): array
+{
+    return once(fn () => $this->permissions()->pluck('name')->all());
+}
+```
+
+</CodeCompare>
+
+The `once()` version has a bonus: you can't forget to reset the property, because there isn't one. And when the method takes arguments, the hand-rolled version grows an array keyed by `$id`. `once()` handles that for free:
+
+```php title="app/Services/Pricing.php"
+public function priceFor(int $productId): int
+{
+    return once(fn () => $this->calculate($productId)); // cached per $productId
+}
+```
+
+In the lab, `priceFor(1)`, `priceFor(2)`, `priceFor(1)` ran the closure twice, not three times. Arrow functions and `function () use ($productId)` both work, because both capture the variable.
+
+| | Private property | `Cache::remember` | `once()` |
+|---|---|---|---|
+| Lives for | the object | until the TTL ends | the object (or the process, see gotchas) |
+| Survives the request | no | yes, in Redis/DB | no |
+| Per-argument caching | a hand-built array | a hand-built key | automatic, from captured variables |
+| Lines of code | 5–8 | 1, plus a key and TTL | 1 |
+| Good for | same as `once()`, with more typing | data shared across users and requests | repeated work inside one request or job |
+
+<Callout type="tip" title="Not the same thing as Inertia's once props">
+
+Inertia also has "once props", which the browser remembers across page visits. PHP's `once()` lives in server memory for a single request (or object). They solve different problems and you can use both on the same page.
+
+</Callout>
+
+## Real-world example: Inertia permissions without repeated queries
+
+The classic Inertia page reads permissions in three places: the middleware shares them with Vue, the controller gates the page, and the props expose `can.create` and `can.export` for the buttons.
+
+```php title="app/Models/User.php"
+public function permissionNames(): array
+{
+    return once(fn () => $this->permissions()->pluck('name')->all());
+}
+
+public function canDo(string $permission): bool
+{
+    return in_array($permission, $this->permissionNames(), true);
+}
+```
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+public function share(Request $request): array
+{
+    return [
+        ...parent::share($request),
+        'auth' => [
+            'user' => $request->user()?->only('id', 'name'),
+            'permissions' => fn () => $request->user()?->permissionNames() ?? [],
+        ],
+    ];
+}
+```
+
+```php title="app/Http/Controllers/InvoiceController.php"
+public function index(Request $request): Response
+{
+    $user = $request->user();
+    abort_unless($user->canDo('invoices.view'), 403);
+
+    return Inertia::render('Invoices/Index', [
+        'invoices' => $user->team->invoices()->latest()->paginate(20),
+        'can' => [
+            'create' => $user->canDo('invoices.create'),
+            'export' => $user->canDo('invoices.export'),
+        ],
+    ]);
+}
+```
+
+`$request->user()` returns the same `User` instance everywhere in the request, so all four reads share one cache. We ran this shape in a Pest test with an `X-Inertia` request: **4 permission queries without `once()`, 1 with it**, and the JSON props were identical.
+
+On the Vue side nothing changes. The props arrive as plain arrays and booleans:
+
+```vue title="resources/js/pages/Invoices/Index.vue"
+<script setup lang="ts">
+import { usePage } from '@inertiajs/vue3'
+import { computed } from 'vue'
+
+const props = defineProps<{ can: { create: boolean; export: boolean } }>()
+const page = usePage<{ auth: { permissions: string[] } }>()
+const canRefund = computed(() => page.props.auth.permissions.includes('invoices.refund'))
+</script>
+
+<template>
+    <button v-if="props.can.create">New invoice</button>
+    <button v-if="props.can.export">Export CSV</button>
+    <button v-if="canRefund">Refund</button>
+</template>
+```
+
+Other good homes for `once()`: a service that loads a tenant's settings, a report class that computes totals used by three charts, a `Feature` check that hits the database, an exchange-rate lookup inside a cart that prices 40 lines.
+
+## Gotchas
+
+<Callout type="gotcha" title="Static methods and queue workers: the cache never resets">
+
+Outside an object, `once()` stores the result for the whole PHP process. In a web request that is fine, because the process handles one request. In a queue worker it is not. We dispatched two jobs to a real database queue; job 1 read the theme with a static `Settings::current()` and then changed it to `dark`:
+
+```text
+job 1: once() says light, database says light
+job 2: once() says light, database says dark
+```
+
+Octane clears the cache for you (its `FlushOnce` listener runs after each operation), and Laravel's test case flushes it between tests. The queue worker doesn't. One line in `AppServiceProvider::boot()` fixed it in the lab:
+
+```php title="app/Providers/AppServiceProvider.php"
+Queue::before(fn () => Once::flush()); // use Illuminate\Support\Once;
+```
+
+Same two jobs afterwards: `job 2: once() says dark, database says dark`.
+
+</Callout>
+
+**`$this` properties are not part of the key.** Only captured variables are. In the lab, `once(fn () => "Prices in {$this->currency}")` kept returning `USD` after we set `$this->currency = 'MYR'`. If a property can change, pass it in: `$currency = $this->currency; return once(fn () => ... $currency ...);`.
+
+**Equal value objects are different keys.** `tagFor(new ProductId(7))` called twice ran the closure twice, because each `ProductId` is a new object. Implement `Illuminate\Contracts\Support\HasOnceHash` and return a string from `onceHash()`, and the second call became a cache hit (2 runs down to 1 in our test).
+
+**A fresh model instance has a fresh cache.** `Member::find(1)->canDo(...)` builds a new object, so it queries again. The trick only works when you reuse the instance, like `$request->user()` or a model you already loaded.
+
+**Exceptions are not cached, `null` is.** A closure that throws runs again on the next call (good for flaky APIs). A closure that returns `null` is remembered (since 11.36.1), so don't use `null` to mean "try again later".
+
+**It does nothing in tinker.** Code evaluated with `eval()` skips memoization on purpose, so `once()` in a tinker session runs every time. Call a method from a real class file to try it.
+
+<Callout type="heads-up" title="On Laravel 13.38 or older? Upgrade before caching per object">
+
+Before [PR #62121](https://github.com/laravel/framework/pull/62121), the key used `spl_object_id()` for captured objects, and PHP reuses ids as soon as an object is freed. So a loop like `foreach (User::lazy() as $user) $billing->discountFor($user);` can hand every user the first user's result, with no error.
+
+We ran the same loop with six short-lived customers (tiers 1 to 6, discount = tier × 10). Laravel 13.38 returned `[10, 10, 10, 10, 10, 10]`. Laravel 13.39, which keeps a weak reference to each captured object and checks it, returned `[10, 20, 30, 40, 50, 60]`.
+
+</Callout>
+
+## Try it yourself
+
+<TryIt title="Count how many times the closure runs">
+
+```php title="routes/console.php"
+use Illuminate\Support\Facades\Artisan;
+
+Artisan::command('once:check', function () {
+    $service = new class {
+        public int $runs = 0;
+
+        public function slow(int $id): int
+        {
+            return once(function () use ($id) {
+                $this->runs++;
+                usleep(200_000);
+
+                return $id * 2;
+            });
+        }
+    };
+
+    foreach ([1, 1, 2, 1, 2] as $id) {
+        $service->slow($id);
+    }
+
+    $this->info("5 calls, {$service->runs} real runs"); // 5 calls, 2 real runs
+});
+```
+
+```bash
+php artisan once:check
+```
+
+</TryIt>
+
+Now grep your app for `?array $` and `=== null) {` inside getters. Each match is a candidate for a one-line `once()`.
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★☆☆ A property, a null check and a reset become one line |
+| How often you'll reach for it | ★★★★☆ Permissions, settings, services, report totals |
+| Risk if misused | ★★★☆☆ Stale values in queue workers and from `$this` properties |
+| **Overall** | **4 / 5**: tiny API, real query savings, and two gotchas worth one line of setup |
+
+## Recap
+
+- `once()` runs a closure once and returns the stored result after that, per object instance.
+- Captured variables are part of the key, so per-argument caching is automatic; `$this` properties are not.
+- In static methods and plain functions the cache is process-wide: add `Queue::before(fn () => Once::flush())` for queue workers.
+- Use `HasOnceHash` for value objects, reuse model instances, and run Laravel 13.39+ if you capture objects.
+- Tested with 13 Pest tests in a scratch Laravel 13.39 app, an Inertia endpoint and a real database queue worker.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version has the once() helper?', a: 'Laravel 11.0 (PR #49744, merged January 2024). `null` results are remembered since 11.36.1, `HasOnceHash` arrived in 12.19, and 13.39 fixed cached values leaking between freed and new objects. We tested on 13.39.' },
+  { q: 'Is once() the same as Cache::remember?', a: 'No. `Cache::remember` stores data in Redis, the database or files, shared across requests until a TTL ends. `once()` keeps the value in PHP memory for one object or one request. Use `once()` for repeated work inside a request, and the cache for data many requests share.' },
+  { q: 'Does once() work with Laravel Octane?', a: 'Yes. Octane registers a `FlushOnce` listener that clears the cache after each request, task or tick, so values do not leak between users. Queue workers have no such listener, so add `Queue::before(fn () => Once::flush())` yourself.' },
+  { q: 'How do I turn once() off in a test?', a: 'Call `Illuminate\\Support\\Once::disable()` and `Once::enable()` afterwards. Laravel\'s base test case already calls `Once::flush()` between tests, so values never leak from one test to the next.' },
+  { q: 'Is PHP once() related to Inertia once props?', a: 'Only by name. Inertia once props are remembered by the browser across visits, so the server can skip sending them. PHP `once()` memoizes a closure on the server. They work well together.' },
+]} />
+
+## Next steps
+
+- [Inertia shared props in Vue](/inertia-shared-props-vue), where the permissions example plugs in
+- [Laravel + Vue permissions](/laravel-vue-permissions), for the full roles and abilities setup
+- [Cache::flexible](/laravel-cache-flexible-swr), when the value should survive across requests
+- [Laravel docs: once()](https://laravel.com/docs/13.x/helpers#method-once)
+
+## Sources
+
+- [Laravel 13 docs: once()](https://laravel.com/docs/13.x/helpers#method-once)
+- [laravel/framework PR #49744: Adds once memoization function (Laravel 11.0)](https://github.com/laravel/framework/pull/49744)
+- [laravel/framework PR #53949: Once remember null values](https://github.com/laravel/framework/pull/53949)
+- [laravel/framework PR #56009: ComputesOnceableHashInterface, now HasOnceHash](https://github.com/laravel/framework/pull/56009)
+- [laravel/framework PR #62121: Fix once() returning a cached value for a different object (Laravel 13.39)](https://github.com/laravel/framework/pull/62121)
+- [Source: `Illuminate\Support\Once` and `Onceable`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Support/Onceable.php)
+- [Laravel Octane: FlushOnce listener](https://github.com/laravel/octane/blob/2.x/src/Listeners/FlushOnce.php)

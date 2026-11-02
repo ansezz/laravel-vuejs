@@ -1,0 +1,21 @@
+flowchart LR
+  A["`**once(fn () => ...)**
+  is called`"] --> B["`Build the key:
+  file + line + method
+  + captured variables`"]
+  B --> C{"`Called inside
+  an object?`"}
+  C -- "yes" --> D["`Stored on **that instance**
+  (WeakMap: freed with the object)`"]
+  C -- "no: static or function" --> E["`Stored in **one global bucket**
+  for the whole process`"]
+  D --> F{"`Key already
+  stored?`"}
+  E --> F
+  F -- "yes" --> G["`Return the cached value
+  **closure skipped**`"]
+  F -- "no" --> H["`Run the closure,
+  store the result`"]
+  E -.-> I["`Cleared by Octane and tests.
+  **Not** between queue jobs:
+  add Queue::before(Once::flush)`"]
