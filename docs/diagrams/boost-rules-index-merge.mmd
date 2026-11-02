@@ -1,0 +1,13 @@
+flowchart LR
+  A["`**Branch A** records a rule
+  .ai/rules/models.md`"] --> C["`**git merge**
+  index.md conflicts`"]
+  B["`**Branch B** records a rule
+  .ai/rules/controllers.md`"] --> C
+  C -->|"fix the rule files,
+  not the index"| D["`**php artisan boost:index-rules**
+  Boost 2.10.4`"]
+  D -- "rule files clean" --> E["`**index.md rebuilt**
+  one row per glob`"]
+  D -- "markers left in a rule file" --> F["`**exit 1**
+  lists the files to fix`"]

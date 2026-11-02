@@ -1,0 +1,225 @@
+---
+id: 175
+title: "This week in Laravel & Inertia: Boost rules index fix, Nov 2, 2026"
+seoTitle: "This week in Laravel & Inertia: Boost 2.10.4 (Nov 2, 2026)"
+excerpt: "Boost 2.10.4 rebuilds a conflicted rules index, drops the application-info tool and stops suggesting commands your app lacks. Laravel 12.70.2 gets Cloud errors."
+date: 2026-11-02T00:30:00Z
+snippet: "php artisan boost:index-rules"
+categories: [laravel, vuejs]
+tags: [laravel, tooling, release]
+---
+Two teammates each ask their agent to "remember" a project rule. Both branches touch `.ai/rules/index.md`. You merge, and the file your agents read before every edit is now full of `<<<<<<<` markers.
+
+Boost 2.10.4 gives you one command to fix that. It's a quiet week otherwise: Boost also trims what agents load into context, and Laravel 12 gets Laravel Cloud exception reporting. Here's what shipped since last Monday, in one short read.
+
+<TLDR
+  audience="Laravel + Vue developers who use Laravel Boost with an AI agent, or run Laravel 12 on Laravel Cloud"
+  learn={['How to rebuild a conflicted Boost rules index with one command', 'Why the application-info MCP tool is gone and what agents use instead', 'What Laravel 12.70.2 changes (and doesn’t) outside Laravel Cloud']}
+  tested="laravel/boost 2.10.3 → 2.10.4 on Laravel 13.39 · PHP 8.4 · Inertia 3.10 + Vue app (index-rules with a conflicted index and a conflicted rule file, MCP tools/list before and after, guidelines composed with and without a composer dev script)"
+  applies="Laravel 12.70.2 Cloud reporting (#61934, #62186), executable remote skill scripts (#1082) and the testing skill wording (#1065) were checked against their PRs and source, not run on Laravel Cloud"
+>
+
+- **Boost 2.10.4** adds `php artisan boost:index-rules`. It rebuilds `.ai/rules/index.md` from your rule files after a merge, and refuses to run while a rule file still has conflict markers.
+- The **`application-info` MCP tool is removed**. Agents called it every session and got a huge package list (26,581 characters in our Inertia app). The `application-info.md` resource is still there.
+- Guidelines now only suggest **`composer run dev`** when your `composer.json` has a `dev` script, and the Pest guideline no longer tells agents to ask you to run the full suite.
+- **Laravel 12.70.2** backports Laravel Cloud exception reporting from 13.x. It only switches on inside Laravel Cloud; anywhere else, nothing changes.
+
+</TLDR>
+
+## The week at a glance
+
+| Package | Version | Released (UTC) | Should you hurry? |
+|---|---|---|---|
+| `laravel/framework` (12.x line) | 12.70.2 | Oct 27 | Only if you host Laravel 12 on Laravel Cloud |
+| `laravel/boost` | 2.10.4 | Oct 29 | Yes, if you use project rules or want a lighter agent context |
+
+<Callout type="heads-up" title="The rest of the week already has its own posts">
+
+Laravel 13.39 and Inertia 3.10 shipped this week too, and each got a full article. They're linked in [In case you missed it](#in-case-you-missed-it) below, so this roundup doesn't repeat them.
+
+</Callout>
+
+## Laravel Boost 2.10.4
+
+Boost is the package that gives your AI agent Laravel-specific guidelines, skills and an MCP server. If you haven't set it up yet, start with [Install Laravel Boost on a Vue starter kit](/laravel-boost-vue). This release is mostly about giving agents less noise and more accurate instructions.
+
+### Rebuild a conflicted rules index with boost:index-rules
+
+Project rules live in `.ai/rules`, one Markdown file per area, each with a `paths` list in its frontmatter. Boost keeps `.ai/rules/index.md` as a map from globs to rule files, and agents are told to read it before planning or editing anything.
+
+The index is generated. Until now it was only rewritten when an agent recorded a rule with the `record-rule` tool, so a merge conflict in it meant hand-editing a generated file. The new command regenerates it from the rule files themselves:
+
+<CodeCompare before="After the merge" after="After boost:index-rules">
+
+```md title=".ai/rules/index.md"
+| Applies to | Rule file |
+| --- | --- |
+<<<<<<< HEAD
+| app/Models/** | .ai/rules/models.md |
+=======
+| app/Http/Controllers/** | .ai/rules/controllers.md |
+>>>>>>> feature/controllers
+```
+
+```md title=".ai/rules/index.md"
+| Applies to | Rule file |
+| --- | --- |
+| app/Http/Controllers/** | .ai/rules/controllers.md |
+| app/Models/** | .ai/rules/models.md |
+```
+
+</CodeCompare>
+
+```bash
+php artisan boost:index-rules
+# Regenerated .ai/rules/index.md.
+```
+
+That's the exact output we got. On 2.10.3 the command doesn't exist, so Artisan just tells you it isn't defined.
+
+<Diagram name="boost-rules-index-merge" alt="Two branches each record a Boost project rule, and merging them leaves conflict markers in .ai/rules/index.md. You fix the rule files, then run php artisan boost:index-rules. If the rule files are clean, the index is rebuilt with one row per glob. If a rule file still has conflict markers, the command exits with code 1 and lists the files to fix." />
+
+The command checks the rule files first. If one of them still has conflict markers, it stops before touching the index:
+
+```bash
+php artisan boost:index-rules
+# Resolve the merge conflicts in these rule files first:
+#  - .ai/rules/models.md
+echo $?   # 1
+```
+
+A rule file without a valid `paths` frontmatter is skipped with a warning instead of breaking the whole index. If there's no `.ai/rules` directory at all, the command says so and exits cleanly.
+
+<Callout type="tip" title="Resolve the rules, regenerate the index">
+
+When a merge conflicts in `.ai/rules`, fix only the rule files (the parts you actually wrote). Take either side of `index.md`, then run `boost:index-rules` and commit the result. Never merge the index by hand.
+
+</Callout>
+
+### The application-info MCP tool is gone
+
+Boost's MCP server used to start with an `application-info` tool. Its description told agents to call it, so they did, in every session. The answer was a JSON dump of PHP and Laravel versions, the database engine and every installed package.
+
+In our Inertia + Vue test app, that one call returned **26,581 characters**, and it stays in the agent's context for the rest of the session. The Boost team measured 13–17k characters on Inertia and starter-kit apps, mostly the npm package list.
+
+| | Boost 2.10.3 | Boost 2.10.4 |
+|---|---|---|
+| MCP tools | 10, starting with `application-info` | 9: `browser-logs`, `database-connections`, `database-query`, `database-schema`, `get-absolute-url`, `last-error`, `read-log-entries`, `record-rule`, `search-docs` |
+| `file://instructions/application-info.md` resource | Yes | Yes |
+| PHP version and package majors | From the tool | From the guidelines (picked per installed major), `composer show --direct` and `package.json` |
+| Database engine | From the tool | From `database-schema` |
+
+If you listed `ApplicationInfo::class` in `boost.mcp.tools.exclude` or `include`, you can leave it. The entry is ignored and doesn't break anything.
+
+<Callout type="gotcha" title="The docs still list it">
+
+At the time of writing, the MCP tools table in the Laravel Boost docs still shows Application Info. The 2.10.4 server doesn't register it. If a custom prompt or skill of yours tells the agent to call `application-info`, update it.
+
+</Callout>
+
+### Guidelines that match your app
+
+Two lines in the generated guidelines used to be wrong for some apps. Both are fixed, and you get the new text after `php artisan boost:update`.
+
+| Guideline line | Before 2.10.4 | 2.10.4 |
+|---|---|---|
+| Vite manifest error | Ask the user to run `npm run dev` **or `composer run dev`**, always | Mentions `composer run dev` only when `composer.json` has a `scripts.dev` entry |
+| Pest: after feature tests pass | "Ask the user to run the complete suite with `php artisan test --compact`" | Line removed, same as the PHPUnit guideline |
+
+We composed the guidelines in the same app with and without a `dev` script. With one (the starter kits have it), the output is the same as before. Without one, the agent no longer suggests a command that would fail.
+
+If your real check is a `composer test` script that also runs lint and static analysis, the Pest change means agents stop pointing you to the wrong command. Tell them about your script with a [project rule](#rebuild-a-conflicted-rules-index-with-boostindex-rules) instead.
+
+### Skill fixes
+
+- **Unit tests in the testing skill (#1065).** For PHPUnit projects, the rule now says feature tests extend your project's `TestCase` and unit tests extend `PHPUnit\Framework\TestCase`, like `php artisan make:test --unit` generates. Before, a unit test made by Artisan failed the skill's own review checklist. The Pest branch is unchanged.
+- **Plainer skill prose (#1076).** Every bundled skill, including Inertia Vue, Wayfinder and the Laravel best-practices rules, was rewritten with one idea per sentence and the condition before the instruction. Smaller models were misreading the denser text.
+- **Executable remote skill scripts (#1082).** `boost:add-skill` used to write every file from a GitHub skill as `0644`, so a `scripts/check.sh` failed with "permission denied". Files committed as executable now get `0755` (minus your umask). Windows is unchanged.
+
+Boost itself now allows Pest 5 in its own dev dependencies (#1078). That's for people working on Boost. It doesn't change what your app can install.
+
+```bash title="Update Boost"
+composer update laravel/boost
+composer show laravel/boost | grep versions   # * v2.10.4
+php artisan boost:update
+```
+
+`boost:update` rewrites the guideline and skill files with the new text. If you keep them in git, commit them with the update. More on that in [Update Laravel Boost after you upgrade](/laravel-boost-update-vue).
+
+<TryIt title="Try it yourself">
+
+On Boost 2.10.4, in a project that already has `.ai/rules`, break the index on purpose and let Boost fix it:
+
+```bash
+printf '<<<<<<< HEAD\nbroken\n=======\n>>>>>>> other\n' > .ai/rules/index.md
+php artisan boost:index-rules
+git diff .ai/rules/index.md
+```
+
+No `.ai/rules` yet? Ask your agent to "remember that money is stored as integer cents" first, and it creates one with `record-rule`.
+
+</TryIt>
+
+## Laravel 12.70.2: Laravel Cloud exception reporting
+
+This one is a backport. Laravel 13 has built-in exception reporting for apps on Laravel Cloud, and 12.70.2 brings it to the 12.x line ([#61934](https://github.com/laravel/framework/pull/61934)), along with a follow-up ([#62186](https://github.com/laravel/framework/pull/62186)).
+
+It switches on only when Laravel Cloud sets `LARAVEL_CLOUD=1` and passes its exception config in `LARAVEL_CLOUD_EXCEPTIONS`. On your own server, Forge, Vapor or a laptop, the reporter is never registered.
+
+On Cloud, exceptions from requests, Artisan commands, queued jobs and scheduled tasks are reported with their context. The defaults are careful: request payloads are not captured unless Cloud turns that on, and `Authorization`, `Cookie`, CSRF headers and fields like `password` and `token` are redacted.
+
+The follow-up makes fatal errors reportable. The reporter now keeps its own 32 KB memory reserve and frees it when a `FatalError` such as running out of memory comes in, so there's room left to send the report. The same change landed on 13.x in 13.39 ([#62189](https://github.com/laravel/framework/pull/62189)).
+
+```bash
+composer update laravel/framework
+php artisan --version   # Laravel Framework 12.70.2
+```
+
+Only the exception reporting was backported. The PR leaves out the other recent 13.x Cloud changes (scoped disks, read replicas, pooling, credential caching and the `cloud` log channel). We covered the 13.x side in [Laravel 13.39: keyless models, restoreOrCreate on relations and session:garbage-collect](/laravel-13-39-keyless-models-restore-or-create).
+
+## In case you missed it
+
+Three feature posts went out this week. Each one has tested code and upgrade notes:
+
+| Post | In one line |
+|---|---|
+| [Inertia 3.10: QUERY visits for search pages and filters](/inertia-3-10-query-method) | `router.query()` and `method="query"` send filters in a body while the URL stays clean |
+| [Laravel 13.39: keyless models, restoreOrCreate on relations and session:garbage-collect](/laravel-13-39-keyless-models-restore-or-create) | `#[Table(key: false)]`, `restoreOrCreate()` on relations and a command to prune sessions |
+| [Laravel whereAny, whereAll, whereNone](/laravel-whereany-whereall-wherenone) | Multi-column search without the `orWhere` trap |
+
+## Upgrade notes
+
+- **Laravel Boost:** run `composer update laravel/boost`, then `php artisan boost:update` (commit the regenerated files if you track them). Remove any instruction that tells agents to call `application-info`.
+- **Rules conflicts:** after a merge, fix the rule files and run `php artisan boost:index-rules`. It exits with `1` while conflict markers remain.
+- **Laravel 12:** 12.70.2 is safe to take everywhere. It only does something on Laravel Cloud.
+- Then run your tests. Nothing else changed this week.
+
+## Recap
+
+- **`php artisan boost:index-rules`** rebuilds `.ai/rules/index.md` from your rule files and refuses to run on conflicted rule files.
+- **`application-info` is gone** from Boost's MCP server; agents get the same facts from guidelines, `search-docs` and `database-schema`, with far less context.
+- **Guidelines** only suggest `composer run dev` when you have that script, and the Pest guideline stops asking for full-suite runs.
+- **Laravel 12.70.2** brings Laravel Cloud exception reporting to 12.x, including a 32 KB reserve for out-of-memory errors. It's off everywhere except Cloud.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'My agent still calls application-info after I updated Boost. Why?', a: 'Restart the agent or reload its MCP servers so it fetches the new tool list. Then check your own prompts, skills and project rules for instructions that mention the tool.' },
+  { q: 'Do I need boost:index-rules if I always use record-rule?', a: 'Yes, after merges. record-rule rebuilds the index when it writes a rule, but a merge between two branches can still leave conflict markers in index.md. Run boost:index-rules after you fix the rule files.' },
+  { q: 'Does Laravel 12.70.2 send my exceptions anywhere if I am not on Laravel Cloud?', a: 'No. The reporter is only registered when LARAVEL_CLOUD is 1 and Laravel Cloud provides the LARAVEL_CLOUD_EXCEPTIONS config.' },
+  { q: 'Can my app use Pest 5 because Boost allows it now?', a: 'That change is in Boost’s own dev dependencies, used to test Boost. Your app’s Pest version depends on your own composer.json and your PHP version.' },
+  { q: 'Will boost:update overwrite what I wrote in CLAUDE.md or AGENTS.md?', a: 'No. Boost only replaces the content inside its `<laravel-boost-guidelines>` block. Your own text outside it, your custom guidelines in `.ai/guidelines` and your rules in `.ai/rules` stay as they are.' },
+]} />
+
+## Next steps
+
+- [Install Laravel Boost on a Vue starter kit](/laravel-boost-vue)
+- [Update Laravel Boost after you upgrade](/laravel-boost-update-vue)
+- [Use the Boost skill for Inertia Vue](/boost-inertia-vue-skill)
+- [Laravel Boost docs: project rules](https://laravel.com/docs/13.x/boost#project-rules)
+
+## Sources
+
+- [laravel/boost v2.10.4 release](https://github.com/laravel/boost/releases/tag/v2.10.4): [PR #1062 (boost:index-rules)](https://github.com/laravel/boost/pull/1062), [PR #1074 (application-info removed)](https://github.com/laravel/boost/pull/1074), [PR #1076 (skill prose)](https://github.com/laravel/boost/pull/1076), [PR #1083 (composer run dev)](https://github.com/laravel/boost/pull/1083), [PR #1084 (Pest guideline)](https://github.com/laravel/boost/pull/1084), [PR #1082 (executable scripts)](https://github.com/laravel/boost/pull/1082), [PR #1078 (Pest 5)](https://github.com/laravel/boost/pull/1078), [PR #1065 (unit tests)](https://github.com/laravel/boost/pull/1065)
+- [Laravel Boost docs](https://laravel.com/docs/13.x/boost)
+- [laravel/framework v12.70.2 release](https://github.com/laravel/framework/releases/tag/v12.70.2): [PR #61934 (Cloud exceptions on 12.x)](https://github.com/laravel/framework/pull/61934), [PR #62186 (improvements)](https://github.com/laravel/framework/pull/62186), [PR #62189 (13.x memory reserve)](https://github.com/laravel/framework/pull/62189)
