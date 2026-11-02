@@ -1,0 +1,399 @@
+---
+id: 177
+title: "Inertia 3.11 live props: real-time Vue pages with Reverb"
+seoTitle: "Inertia 3.11 live props with Laravel Reverb and Vue"
+excerpt: "Inertia 3.11 and inertia-laravel 3.7 add Inertia::live(): props that refresh when a broadcast event arrives. Setup, throttling, payloads and gotchas, tested."
+date: 2026-11-02T12:30:00Z
+snippet: "Inertia::live(fn () => $order, on: new OrderUpdated($order))"
+categories: [vuejs, laravel]
+tags: [inertia, vuejs, laravel, release]
+---
+Your order page shows "pending" while the warehouse already shipped it. So you add `usePoll(5000)`, and now a thousand open tabs ask the server every five seconds for news that comes twice a day. Inertia **3.11** has a better deal: mark the prop as **live**, broadcast an event when it changes, and only the pages that care reload it.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia 3 who already broadcast events (or want to)"
+  learn={['How `Inertia::live()` and the `echo()` transport keep a prop in sync', 'When to send values in the event instead of reloading', 'Throttling, hidden tabs, `useProp` and the `live` event', 'Five gotchas we hit in a Reverb lab']}
+  tested="Laravel 13.39 · inertia-laravel 3.7.0 · @inertiajs/vue3 3.11.0 · @laravel/echo-vue 2.6.3 · Reverb 1.12 · Vue 3.5 · PHP 8.4"
+>
+
+- **inertia-laravel 3.7.0** adds `Inertia::live($value, on: $event)`. The page gets the channels and event names, and the client reloads that one prop (a partial reload) when the event is broadcast.
+- **@inertiajs/vue3 3.11.0** adds the `live` option to `createInertiaApp()`. Pass `echo()` from `@inertiajs/vue3/echo` and you're done. `pusher()`, `actionCable()` and custom transports exist too.
+- Events can **carry the new value** with `Inertia::broadcastProps()`, so no request is made at all. Reloads are throttled (1 s per prop by default) and paused while the tab is hidden.
+- From our lab: `toOthers()` only works if the event uses `InteractsWithSockets`, a signal-only event still broadcasts the whole model unless you add `broadcastWith()`, and a bare channel string is always public.
+
+</TLDR>
+
+## What's new at a glance
+
+| Package | Version | Released (UTC) | What changed |
+|---|---|---|---|
+| `inertiajs/inertia-laravel` | 3.7.0 | Nov 2, 2026 10:45 | `Inertia::live()`, `->live()` on defer/once/optional/always props, `Inertia::broadcastProps()` |
+| `@inertiajs/vue3` (and React, Svelte, core) | 3.11.0 | Nov 2, 2026 11:40 | `live` option, `echo()` / `pusher()` / `actionCable()` transports, `useProp()`, `live` router event, `X-Socket-Id` header |
+
+That's the whole release: [PR #3232](https://github.com/inertiajs/inertia/pull/3232) on the client, [PR #901](https://github.com/inertiajs/inertia-laravel/pull/901) on the server, plus a dependency bump ([#3368](https://github.com/inertiajs/inertia/pull/3368)). No breaking changes: `@laravel/echo-vue` is an **optional** peer dependency, so apps without live props install nothing new.
+
+## Live props in one paragraph
+
+A live prop is a normal page prop with a list of broadcast events attached. The server puts the channels and event names in a new `liveProps` key of the page object. The client subscribes to them through a **transport** (Laravel Echo, for most of us), and when an event arrives it runs `router.reload({ only: ['order'] })` for you. If the event already contains the new value, the client writes it into the page and skips the request.
+
+<Diagram
+  name="inertia-live-props-flow"
+  alt="The controller marks a prop with Inertia::live(..., on: OrderUpdated). The page object carries liveProps with the channel, events and throttle. The Vue page, set up with createInertiaApp({ live: echo() }), subscribes to private-orders.1 on Reverb or Pusher. When the server calls broadcast(new OrderUpdated), Reverb delivers order.updated to the page. If the event is only a signal, the page runs a throttled router.reload with only the order prop, which goes back to the controller. If the payload has __inertia.props, the value is written into the page and no request is made."
+  caption="A live prop: subscribe from the page object, reload or write on each event"
+/>
+
+## Server side: Inertia::live()
+
+Start with a broadcast event you probably already have. Two details matter for live props, and both come from our lab (more on that below): `InteractsWithSockets`, and a small `broadcastWith()`.
+
+```php title="app/Events/OrderUpdated.php"
+namespace App\Events;
+
+use App\Models\Order;
+use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Broadcasting\PrivateChannel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+
+class OrderUpdated implements ShouldBroadcast
+{
+    use InteractsWithSockets; // needed for ->toOthers()
+
+    public function __construct(public Order $order) {}
+
+    public function broadcastOn(): PrivateChannel
+    {
+        return new PrivateChannel("orders.{$this->order->id}");
+    }
+
+    public function broadcastAs(): string
+    {
+        return 'order.updated';
+    }
+
+    // A signal only. Without this, the whole public $order model is broadcast.
+    public function broadcastWith(): array
+    {
+        return ['order_id' => $this->order->id];
+    }
+}
+```
+
+Then mark the prop as live and pass the event. Inertia reads the channels from `broadcastOn()` and the name from `broadcastAs()` (or the class name when there is none), so you don't repeat them:
+
+<CodeCompare before="3.10: poll the whole page" after="3.11: a live prop">
+
+```php title="app/Http/Controllers/OrderController.php"
+public function show(Order $order): Response
+{
+    return Inertia::render('orders/show', [
+        'order' => fn () => OrderResource::make($order->fresh()),
+    ]);
+}
+
+// orders/show.vue: usePoll(5000, { only: ['order'] })
+```
+
+```php title="app/Http/Controllers/OrderController.php"
+public function show(Order $order): Response
+{
+    return Inertia::render('orders/show', [
+        'order' => Inertia::live( // [!code highlight]
+            fn () => OrderResource::make($order->fresh()),
+            on: new OrderUpdated($order),
+        ),
+    ]);
+}
+```
+
+</CodeCompare>
+
+Wherever the order changes, broadcast as usual:
+
+```php title="app/Http/Controllers/OrderController.php"
+public function update(UpdateOrderRequest $request, Order $order): RedirectResponse
+{
+    $order->update($request->validated());
+
+    broadcast(new OrderUpdated($order))->toOthers();
+
+    return back();
+}
+```
+
+This is what the page object carried in our lab. Channel names come **without** Laravel's `private-` prefix, with the type next to them, so each transport can add its own prefix:
+
+```json title="Inertia page object (excerpt)"
+"liveProps": {
+  "order": {
+    "listeners": [
+      { "channel": { "name": "orders.1", "type": "private" }, "events": ["order.updated"] }
+    ]
+  }
+}
+```
+
+### More events, other channels, other prop types
+
+```php title="app/Http/Controllers/OrderController.php"
+return Inertia::render('orders/show', [
+    // several events: each one brings its own channels
+    'order' => Inertia::live(fn () => OrderResource::make($order->fresh()), on: [
+        new OrderUpdated($order),
+        new OrderShipped($order),
+    ]),
+
+    // deferred on the first load, live after that
+    'activity' => Inertia::defer(fn () => $order->activity()->latest()->get())
+        ->live(on: new OrderUpdated($order)),
+
+    // a class name works when channels and name don't need the payload
+    'stats' => Inertia::live(fn () => ['orders' => Order::count()], on: StatsUpdated::class, throttle: 4000),
+
+    // listen on a channel you choose
+    'feed' => Inertia::live(fn () => Feed::latest(), on: 'feed.updated', channel: new PrivateChannel('team.7')),
+]);
+```
+
+`->live()` also works on `Inertia::once()`, `Inertia::optional()` and `Inertia::always()`. An optional live prop is only refreshed after the page has loaded it. **Merge props can't be live**: `Inertia::defer(...)->merge()->live(...)` throws a `LogicException`, and `Inertia::merge()` has no `live()` method at all.
+
+Private, presence and encrypted private channels are authorized in `routes/channels.php`, the same as anywhere else:
+
+```php title="routes/channels.php"
+Broadcast::channel('orders.{order}', fn (User $user, Order $order) => $user->id === $order->user_id);
+```
+
+## Client side: one option in createInertiaApp
+
+Install the Echo packages (we used `@laravel/echo-vue` 2.6.3 with Reverb):
+
+```bash
+npm install @inertiajs/vue3@^3.11 @laravel/echo-vue laravel-echo pusher-js
+```
+
+<CodeCompare before="3.10" after="3.11">
+
+```ts title="resources/js/app.ts"
+import { createInertiaApp } from '@inertiajs/vue3'
+import { configureEcho } from '@laravel/echo-vue'
+
+configureEcho({ broadcaster: 'reverb' })
+
+createInertiaApp({
+    // ...
+})
+```
+
+```ts title="resources/js/app.ts"
+import { createInertiaApp } from '@inertiajs/vue3'
+import { echo } from '@inertiajs/vue3/echo' // [!code ++]
+import { configureEcho } from '@laravel/echo-vue'
+
+configureEcho({ broadcaster: 'reverb' })
+
+createInertiaApp({
+    live: echo(), // [!code ++]
+    // ...
+})
+```
+
+</CodeCompare>
+
+`echo()` uses the instance `configureEcho()` set up. Inertia subscribes and unsubscribes as the user navigates, so a page only listens to the events its own props declared. If you build Echo yourself, pass it in: `echo({ resolve: () => window.Echo })`.
+
+Not on Echo? `pusher({ client })` from `@inertiajs/core/pusher` takes any `pusher-js` client, `actionCable()` from `@inertiajs/core/actionCable` covers Rails and AnyCable, and any object with a `subscribe(channel, event, handler)` method works as a custom transport (SSE, a raw WebSocket, a `BroadcastChannel`).
+
+### useProp: a quiet loading state
+
+Background refreshes shouldn't flash a spinner. The new `useProp()` returns the value plus `loading` and `loaded`:
+
+```vue title="resources/js/pages/orders/show.vue"
+<script setup lang="ts">
+import { useProp } from '@inertiajs/vue3'
+
+const { value: order, loading } = useProp<{ id: number; status: string }>('order')
+</script>
+
+<template>
+    <p :class="{ 'opacity-50': loading }">{{ order?.status }}</p>
+</template>
+```
+
+`loading` tracks every request that refreshes the prop, deferred loads included. `loaded` is handy for a prop that is deferred and live.
+
+## Send the value, skip the request
+
+By default the event is only a signal: every listening tab asks your server for the new value. A dashboard open in 500 tabs turns one event into 500 requests. If the value is the same for everyone on the channel, put it in the event with `Inertia::broadcastProps()`:
+
+```php title="app/Events/OrderStatusChanged.php"
+use App\Http\Resources\OrderResource;
+use Inertia\Inertia;
+
+public function broadcastWith(): array
+{
+    return [
+        'order_id' => $this->order->id,
+        ...Inertia::broadcastProps([
+            'order' => OrderResource::make($this->order),
+        ]),
+    ];
+}
+```
+
+The payload gets an `__inertia.props` key. Values are resolved like page props (resources, `Arrayable`, closures), keys use dot notation for nested props (`'stats.orders'`), and only props that listen for that event can be written. In the browser run, the status changed and **zero** requests went out.
+
+<Callout type="gotcha" title="same resource on both sides">
+
+The value from the event replaces the prop as is, so it must have the same shape as the page prop. With Laravel's default resource wrapping, `OrderResource::make($order)` resolves to `{ data: { ... } }` in the page **and** in the broadcast. A raw `$order` model on one side and a resource on the other gives the client two different shapes, and the model also leaks every attribute that isn't `$hidden` (our `internal_note` showed up). Use the same resource in the controller and the event. We call `JsonResource::withoutWrapping()` in the lab so `order.status` reads naturally.
+
+</Callout>
+
+The [docs](https://inertiajs.com/docs/v3/data-props/live-props#broadcasting-values) add a warning worth repeating: channel authorization runs once, when the user subscribes. Every subscriber gets the same payload, so anything that depends on the user (prices per customer, permissions) belongs in a reload, not in the event.
+
+## Throttling, bursts and hidden tabs
+
+Inertia doesn't reload on every event. From the [PR](https://github.com/inertiajs/inertia/pull/3232) and the `live.ts` source:
+
+| Rule | Default | Change it |
+|---|---|---|
+| Max one reload per prop per window | 1000 ms | `echo({ throttle: 2000 })` or `Inertia::live(..., throttle: 4000)` |
+| Events a few ms apart join one request | 32 ms collect window | not configurable |
+| Props sharing an event reload together | one `only: [...]` request | not configurable |
+| Tab hidden | reloads wait, then flush on return | `echo({ pauseWhenHidden: false })` |
+| Socket reconnects | every live prop on the page reloads | automatic |
+| A request already fetching the prop | the event waits, then reloads | automatic |
+| `router.reload()` you call yourself | never throttled | none |
+
+Our lab matched the table. Three `StatsUpdated` events about a second apart on a `throttle: 4000` prop caused **two** reloads, at about 0.7 s and 4.2 s, and the second one picked up the last value. With the tab hidden, an `OrderUpdated` event caused no request for 3 seconds; the reload went out right after the tab became visible again.
+
+### The live event: show "new data" instead
+
+Every event fires a cancelable `live` event on the router first. Return `false` to skip the update, then apply it when the user asks:
+
+```vue title="resources/js/pages/posts/show.vue"
+<script setup lang="ts">
+import { router } from '@inertiajs/vue3'
+import { onUnmounted, ref } from 'vue'
+
+const waiting = ref<string[]>([])
+
+const stop = router.on('live', (event) => {
+    if (event.detail.props.includes('comments')) {
+        waiting.value = event.detail.props
+        return false // skip it for now
+    }
+})
+onUnmounted(stop)
+
+const showNew = () => router.reload({ only: waiting.value, onFinish: () => (waiting.value = []) })
+</script>
+
+<template>
+    <button v-if="waiting.length" @click="showNew">Show new comments</button>
+</template>
+```
+
+`event.detail` also has `channel` (`{ name, type }`), `event` (the broadcast name) and `payload`.
+
+## What we tested
+
+We added live props to the Inertia 3.10 lab: Laravel 13.39, inertia-laravel 3.7.0, `@inertiajs/vue3` 3.11.0, `@laravel/echo-vue` 2.6.3, Reverb 1.12.0, PHP 8.4.
+
+- **16 Pest tests, 39 assertions**: the `liveProps` metadata (unprefixed private channel, `broadcastAs()` name or class name, per-prop throttle), a deferred live prop keeping its listeners before it loads, a partial reload returning only the live prop and its listeners, `broadcastProps()` output, explicit channels, the `LogicException`s, and `X-Socket-Id`.
+- **A Playwright run against Reverb** with two tabs: a signal-only event reloaded `order,activity` in one request; a value-carrying event updated the page with no request; tab B saved the order and only tab A reloaded (with `InteractsWithSockets`); throttling and hidden tabs as described above.
+
+<TryIt title="Check your live prop metadata in a Pest test">
+
+```php title="tests/Feature/OrderLivePropsTest.php"
+it('marks the order as live on its private channel', function () {
+    $order = Order::factory()->create();
+
+    $this->get("/orders/{$order->id}", [
+        'X-Inertia' => 'true',
+        'X-Inertia-Version' => app(HandleInertiaRequests::class)->version(request()),
+    ])
+        ->assertOk()
+        ->assertJsonPath('liveProps.order.listeners.0.channel', ['name' => "orders.{$order->id}", 'type' => 'private'])
+        ->assertJsonPath('liveProps.order.listeners.0.events', ['order.updated']);
+});
+```
+
+Send `X-Inertia-Version` once Vite has built a manifest, or Inertia answers with a `409`.
+
+</TryIt>
+
+## Gotchas from the lab
+
+**1. `toOthers()` needs `InteractsWithSockets`.** Inertia sends the socket id as `X-Socket-Id` on every same-origin request, and Laravel reads it. But `broadcast(...)->toOthers()` only does something if the event has the `InteractsWithSockets` trait. Without it, the tab that saved the order also got `order.updated` and fired an extra reload. With the trait, only the other tab reloaded.
+
+**2. A signal still sends a payload.** With no `broadcastWith()`, Laravel broadcasts every public property. Our signal-only event sent the full `Order` model, `internal_note` included, to every subscriber. Return just the id.
+
+**3. A bare string channel is public.** `channel: 'private-orders.1'` became a **public** channel named `private-orders.1`. Use `new PrivateChannel('orders.1')`. The same rule applies to strings returned from `broadcastOn()`.
+
+**4. Some events fail at render time.** `on: 'order.updated'` without a `channel` throws (*"because it was given as a string"*), and so does `on: OrderUpdated::class` when the channel needs `$this->order`: Inertia builds the event without its constructor. Pass an instance. The good news: you see it on the first page load, not in production at 2 a.m.
+
+**5. Resource shapes must match.** See the callout above: same resource, same wrapping, on both sides.
+
+<Callout type="heads-up" title="queue it in production">
+
+Our lab used `ShouldBroadcastNow` to keep the test simple. In a real app use `ShouldBroadcast`, so saving an order doesn't wait for Reverb. We wrote about that in [Queue a broadcast instead of blocking the save](/laravel-should-broadcast-vue).
+
+</Callout>
+
+## Live props or polling?
+
+| | `usePoll()` | Live props |
+|---|---|---|
+| Needs a broadcaster | No | Yes (Reverb, Pusher, Action Cable or your own transport) |
+| Requests when nothing changed | Every interval | None |
+| Delay after a change | Up to one interval | About 32 ms for the first event, then at most one reload per throttle window |
+| Good for | Data you don't control (an external API), simple apps | Data your app changes and can broadcast |
+
+Already running Reverb? Live props are the cheaper choice for anything your own code changes. No broadcaster yet? [Inertia 3.9's background polling](/inertia-3-9-background-polling-navigate-type) is still fine.
+
+## Upgrade notes
+
+<Steps>
+
+1. **Update both packages.** `composer require inertiajs/inertia-laravel:^3.7` and `npm install @inertiajs/vue3@^3.11` (or the React / Svelte adapter).
+2. **Set up broadcasting** if you haven't: `php artisan install:broadcasting --reverb`. In our lab, the non-interactive run (`--no-interaction`) didn't write the `REVERB_*` and `VITE_REVERB_*` values, so check `.env`.
+3. **Install the Echo adapter** (`@laravel/echo-vue`, `@laravel/echo-react` or `@laravel/echo-svelte`) and add `live: echo()` to `createInertiaApp()`.
+4. **Wrap one prop** with `Inertia::live()` and add `InteractsWithSockets` plus a small `broadcastWith()` to its event.
+5. **Nothing else changes.** No breaking changes, and pages without live props behave exactly as before.
+
+</Steps>
+
+## Recap
+
+- `Inertia::live($value, on: $event)` refreshes a prop with a partial reload whenever the event is broadcast.
+- On the client, `createInertiaApp({ live: echo() })` is the whole setup. `useProp()` gives you a quiet loading state.
+- `Inertia::broadcastProps()` puts the value in the event, so no request is made. Only send what every subscriber may see.
+- Reloads are throttled per prop (1 s default), batched, paused in hidden tabs and redone after a reconnect.
+- Add `InteractsWithSockets` and `broadcastWith()` to your events, and use channel classes, not bare strings.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'What are live props in Inertia.js?', a: 'Props that refresh themselves when a broadcast event arrives. Added in inertia-laravel 3.7 with `Inertia::live()` and in `@inertiajs/vue3` 3.11 with the `live` option of `createInertiaApp()`.' },
+  { q: 'Do live props need Laravel Reverb?', a: 'They need a broadcaster and a transport. Reverb, Pusher or any Pusher-compatible server through Echo or `pusher-js` works, and so does Action Cable or a custom transport.' },
+  { q: 'Do live props replace usePoll?', a: 'For data your app changes and broadcasts, yes: no requests when nothing changed. For data you cannot broadcast, like a third-party API, keep polling.' },
+  { q: 'Why does the user who saved the form also reload the prop?', a: 'Your event is missing the `InteractsWithSockets` trait, so `broadcast(...)->toOthers()` does nothing. Inertia already sends the `X-Socket-Id` header.' },
+  { q: 'Can a merge or infinite-scroll prop be live?', a: "No. `->merge()->live()` throws a `LogicException`, and `Inertia::merge()` and `Inertia::scroll()` have no `live()` method." },
+]} />
+
+## Next steps
+
+- [Listen for Laravel events in Vue with Reverb](/laravel-reverb-vue): set up Reverb and Echo first.
+- [Queue a broadcast instead of blocking the save](/laravel-should-broadcast-vue): `ShouldBroadcast` vs `ShouldBroadcastNow`.
+- [Partial reloads in Inertia and Vue](/inertia-partial-reloads): what a live prop does under the hood.
+- [Inertia 3.10: QUERY visits for search pages and filters](/inertia-3-10-query-method): the previous release.
+
+## Sources
+
+- [Inertia v3.11.0 release notes](https://github.com/inertiajs/inertia/releases/tag/v3.11.0)
+- [inertia-laravel v3.7.0 release notes](https://github.com/inertiajs/inertia-laravel/releases/tag/v3.7.0)
+- [PR #3232: support for live props (client)](https://github.com/inertiajs/inertia/pull/3232)
+- [inertia-laravel PR #901: support for live props (server)](https://github.com/inertiajs/inertia-laravel/pull/901)
+- [PR #3368: bump dependencies](https://github.com/inertiajs/inertia/pull/3368)
+- [Inertia docs: live props](https://inertiajs.com/docs/v3/data-props/live-props)
+- [Inertia docs: the protocol (`liveProps`)](https://inertiajs.com/docs/v3/core-concepts/the-protocol)
+- [Laravel docs: broadcasting](https://laravel.com/docs/broadcasting)
