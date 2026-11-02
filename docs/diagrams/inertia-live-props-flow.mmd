@@ -1,0 +1,13 @@
+flowchart LR
+  A["`**Controller**
+  Inertia::live(..., on: OrderUpdated)`"] -->|"page object + liveProps
+  (channel, events, throttle)"| B["`**Vue page**
+  createInertiaApp({ live: echo() })`"]
+  B -->|"subscribe private-orders.1"| C["`**Reverb / Pusher**`"]
+  D["`**broadcast(new OrderUpdated)**`"] --> C
+  C -->|"order.updated"| B
+  B -- "signal only" --> E["`**router.reload**
+  only: order (throttled)`"]
+  E --> A
+  B -- "payload has __inertia.props" --> F["`**Write value**
+  no request`"]
