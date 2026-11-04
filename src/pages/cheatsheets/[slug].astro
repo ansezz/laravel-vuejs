@@ -14,7 +14,8 @@ const LANG: Record<string, string> = { ts: 'typescript', js: 'javascript', vue: 
 const jsonld = [
   {
     '@type': 'TechArticle', '@id': url + '#article', headline: sheet.title, description: sheet.description, url,
-    mainEntityOfPage: url, inLanguage: 'en', dateModified: sheet.checked, proficiencyLevel: 'Intermediate',
+    mainEntityOfPage: url, inLanguage: 'en', datePublished: sheet.published, dateModified: sheet.checked > sheet.published ? sheet.checked : sheet.published,
+    image: { '@type': 'ImageObject', url: `${SITE_URL}/og/default.jpg`, width: 1200, height: 630 }, proficiencyLevel: 'Intermediate',
     about: sheet.version, author: { '@type': 'Person', name: AUTHOR.name, url: SITE_URL + AUTHOR.url },
     publisher: { '@id': SITE_URL + '/#organization' }, isPartOf: { '@id': SITE_URL + '/#website' },
     citation: sheet.sources.map((s) => s.url),
