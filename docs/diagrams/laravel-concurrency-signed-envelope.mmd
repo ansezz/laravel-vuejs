@@ -1,0 +1,16 @@
+flowchart LR
+  A["`**Parent process**
+  random key per task`"] -- "key in env var" --> B["`**Child process**
+  removes the key,
+  runs your task`"]
+  B --> C["`**stdout**
+  task output, then a
+  frame signed with
+  HMAC-SHA256`"]
+  C --> D{"`**Parent scans
+  bottom-up:
+  signature valid?**`"}
+  D -- "yes" --> E["`**unserialize()**
+  the real result`"]
+  D -- "no" --> F["`**Ignored**
+  forged or junk output`"]

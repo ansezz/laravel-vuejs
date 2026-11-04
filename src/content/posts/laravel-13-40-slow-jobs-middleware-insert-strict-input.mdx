@@ -1,0 +1,375 @@
+---
+id: 178
+title: "Laravel 13.40: slow job alerts, middleware insertBefore() and strict input"
+seoTitle: "Laravel 13.40: Slow Jobs, Middleware Insert, Strict Input"
+excerpt: "Laravel 13.40 adds Queue::whenJobRunsLongerThan(), Schedule::whenTaskRunsLongerThan(), $middleware->insertAfter(), strict request casting and a Concurrency security fix."
+date: 2026-11-04T00:30:00Z
+snippet: "Queue::whenJobRunsLongerThan(CarbonInterval::seconds(90), $alert)"
+categories: [laravel]
+tags: [laravel, release, upgrade, testing]
+---
+Your nightly export used to take 4 minutes. Now it takes 38, and you find out when the worker hits its timeout. Laravel **13.40** gives you a one-line alert for slow jobs and slow scheduled tasks, a clean way to slot middleware next to the built-in ones, and request casting that stops turning `?per_page=abc` into `0`. It also closes a hole in `Concurrency::run()`, so this is one to install this week.
+
+<TLDR
+  audience="Laravel 13 developers who run queues or the scheduler, customise the default middleware stack, or use Concurrency::run()"
+  learn={['`Queue::whenJobRunsLongerThan()` and `Schedule::whenTaskRunsLongerThan()`', '`$middleware->insertBefore()` / `insertAfter()` and `replace()` with an array', 'The new `strict` flag on `integer()`, `float()`, `boolean()` and `string()`', 'Why the `Concurrency::run()` fix matters, plus `ScheduledTaskSkipped`, commit IDs and transaction fixes']}
+  tested="Laravel 13.40.0 · PHP 8.4 · Pest 4 · SQLite (16 tests / 45 assertions: slow job and task callbacks incl. failed jobs, ScheduledTaskSkipped on onOneServer, insertBefore/insertAfter/replace arrays and groups, strict casting, commit ID API on SQLite, RELEASED in queue:work, savepoint rollback on a lock wait timeout, forged Concurrency output). All 13 non-Concurrency tests fail on 13.39.0; the forged output test returns the forged value on 13.39.0."
+>
+
+- **13.40.0** was released on **November 3, 2026** (15:08 UTC). No breaking changes, nothing to publish.
+- `Queue::whenJobRunsLongerThan()` fires for slow jobs, **failed ones included**. `Schedule::whenTaskRunsLongerThan()` does the same for scheduled tasks. Watch the units: plain numbers are **milliseconds** for jobs and **seconds** for tasks.
+- `$middleware->insertAfter(TrustProxies::class, MyMiddleware::class)` replaces copying the whole default stack. `replace()` now takes an array too.
+- `$request->integer('per_page', 15, strict: true)` returns `15` for `abc123` instead of `0`. **Upgrade if you use `Concurrency::run()`**: task output could forge the result the parent process unserializes.
+
+</TLDR>
+
+## What's new at a glance
+
+| Change | PR | What it replaces |
+|---|---|---|
+| `Queue::whenJobRunsLongerThan()` | [#62141](https://github.com/laravel/framework/pull/62141) | A hand-written `JobAttempted` listener |
+| `Schedule::whenTaskRunsLongerThan()` | [#62233](https://github.com/laravel/framework/pull/62233) | Timing tasks yourself in `before()` / `after()` |
+| `ScheduledTaskSkipped` for `onOneServer()` skips | [#62256](https://github.com/laravel/framework/pull/62256) | A console line you only see on some hosts |
+| `insertBefore()`, `insertAfter()` and `*InGroup()` variants | [#62261](https://github.com/laravel/framework/pull/62261) | Re-declaring the default middleware stack |
+| `replace()` / `replaceInGroup()` with an array | [#62230](https://github.com/laravel/framework/pull/62230) | One-to-one replacements only |
+| `strict` flag on `string()`, `boolean()`, `integer()`, `float()` | [#62254](https://github.com/laravel/framework/pull/62254), [#62217](https://github.com/laravel/framework/pull/62217) | Plain casts, or a validator for one query param |
+| `DB::getLastCommitId()` / `hasCommitId()` / `mergeCommitIds()` | [#62198](https://github.com/laravel/framework/pull/62198) | Guessing how far behind the replica is |
+| `RELEASED` in `queue:work` output | [#62180](https://github.com/laravel/framework/pull/62180) | `DONE` for jobs that were put back |
+| Signed `Concurrency` result envelope (security) | [#62297](https://github.com/laravel/framework/pull/62297) | Parsing raw child stdout as JSON |
+| Transactions: reconnect after a lost connection, savepoint rollback on deadlocks | [#62211](https://github.com/laravel/framework/pull/62211), [#62248](https://github.com/laravel/framework/pull/62248) | A stuck worker, or half-committed nested writes |
+| Redis tagged cache `flush()` per tag | [#62215](https://github.com/laravel/framework/pull/62215) | One slow Lua call that blocks Redis |
+
+## Get an alert when a queued job runs long
+
+Laravel already had `DB::whenQueryingForLongerThan()` and the request and command lifecycle versions. Jobs were the missing piece. `Queue::whenJobRunsLongerThan()` takes a threshold and a callback that receives the job and its duration in milliseconds.
+
+<CodeCompare before="Laravel 13.39" after="Laravel 13.40">
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Queue\Events\JobAttempted;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+
+public function boot(): void
+{
+    Event::listen(function (JobAttempted $event) {
+        if ($event->duration !== null && $event->duration > 90_000) {
+            Log::warning('Slow job', [
+                'job' => $event->job->resolveName(),
+                'ms' => $event->duration,
+            ]);
+        }
+    });
+}
+```
+
+```php title="app/Providers/AppServiceProvider.php"
+use Carbon\CarbonInterval;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
+
+public function boot(): void
+{
+    Queue::whenJobRunsLongerThan(CarbonInterval::seconds(90), function ($job, float $duration) { // [!code highlight]
+        Log::warning('Slow job', [
+            'job' => $job->resolveName(),
+            'ms' => $duration,
+        ]);
+    });
+}
+```
+
+</CodeCompare>
+
+Under the hood it is that same `JobAttempted` listener, which got its `$duration` in [13.39](/laravel-13-39-keyless-models-restore-or-create). That detail matters: `Queue::after()` only runs for successful jobs, but `JobAttempted` runs for every attempt. In our lab, a job that slept 250 ms and then threw triggered the slow-job callback, while `Queue::after()` never ran.
+
+Use it to spot jobs creeping toward their `timeout`, or toward your host's runtime limit, before they start failing.
+
+## Get an alert when a scheduled task runs long
+
+`Schedule::whenTaskRunsLongerThan()` is the scheduler's version. It listens to `ScheduledTaskFinished` **and** `ScheduledTaskFailed`, so a task that crashes after 40 minutes still counts.
+
+```php title="routes/console.php"
+use Carbon\CarbonInterval;
+use Illuminate\Console\Scheduling\Event;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schedule;
+
+Schedule::command('reports:nightly')->dailyAt('02:00');
+
+Schedule::whenTaskRunsLongerThan(CarbonInterval::minutes(45), function (Event $task, float $runtime) {
+    Log::warning("Scheduled task [{$task->getSummaryForDisplay()}] took {$runtime}s");
+});
+```
+
+In the lab, a closure task that slept 1.1 s triggered a one-second threshold with its name and a runtime above 1.0, and a fast task next to it did not.
+
+<Callout type="gotcha" title="Milliseconds for jobs, seconds for tasks">
+
+A plain number means **milliseconds** in `Queue::whenJobRunsLongerThan(90)` and **seconds** in `Schedule::whenTaskRunsLongerThan(90)`. The durations passed to your callback follow the same rule. Pass a `CarbonInterval` to both and you never have to remember which is which.
+
+</Callout>
+
+### ScheduledTaskSkipped now fires for onOneServer()
+
+When a task uses `onOneServer()` and another server already took the lock, `schedule:run` printed "Skipping [emails:send] because the command already ran on another server" and dispatched nothing. 13.40 dispatches `ScheduledTaskSkipped` there too ([#62256](https://github.com/laravel/framework/pull/62256)), so your metrics can prove the task was skipped on purpose and not lost.
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Console\Events\ScheduledTaskSkipped;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+
+Event::listen(function (ScheduledTaskSkipped $event) {
+    Log::info('Task skipped', ['task' => $event->task->getSummaryForDisplay()]);
+});
+```
+
+The event already existed for tasks skipped by `when()` / `skip()` filters, so an existing listener now also sees these skips.
+
+## Insert middleware before or after the built-in ones
+
+Say you want your own middleware to run right after `TrustProxies`, because it needs the real client IP. In `bootstrap/app.php` you could `append()` or `prepend()`, but not "put it next to that one". The workaround was `$middleware->use([...])` with the whole default stack copied in.
+
+<CodeCompare before="Laravel 13.39" after="Laravel 13.40">
+
+```php title="bootstrap/app.php"
+->withMiddleware(function (Middleware $middleware): void {
+    // Copy the whole default global stack just to insert one class
+    $middleware->use([
+        \Illuminate\Http\Middleware\ValidatePathEncoding::class,
+        \Illuminate\Foundation\Http\Middleware\InvokeDeferredCallbacks::class,
+        \Illuminate\Http\Middleware\TrustProxies::class,
+        \App\Http\Middleware\BlockBannedIps::class,
+        \Illuminate\Http\Middleware\HandleCors::class,
+        // ...and every other default, kept in sync by hand
+    ]);
+})
+```
+
+```php title="bootstrap/app.php"
+use App\Http\Middleware\BlockBannedIps;
+use App\Http\Middleware\SanitiseInput;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
+use Illuminate\Http\Middleware\TrustProxies;
+
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->insertAfter(TrustProxies::class, BlockBannedIps::class); // [!code highlight]
+    $middleware->insertBefore(TrimStrings::class, SanitiseInput::class); // [!code highlight]
+})
+```
+
+</CodeCompare>
+
+Both methods take a class or an array of classes. For middleware groups there are `insertBeforeInGroup()` and `insertAfterInGroup()`:
+
+```php title="bootstrap/app.php"
+use App\Http\Middleware\TouchLastSeen;
+use Illuminate\Session\Middleware\StartSession;
+
+$middleware->insertAfterInGroup('web', StartSession::class, TouchLastSeen::class);
+```
+
+They are built on [#62230](https://github.com/laravel/framework/pull/62230), which lets `replace()` and `replaceInGroup()` take an array. `$middleware->replace(Foo::class, [Bar::class, Baz::class])` swaps one middleware for two, and the `web(replace: [...])` / `api(replace: [...])` shortcuts accept arrays as well.
+
+Inserts stack. In the lab, `insertAfter('A', 'X')`, then `insertAfter('A', 'Y')`, then `insertBefore('A', 'W')` on `['A', 'B']` gave `['W', 'A', 'X', 'Y', 'B']`.
+
+<Callout type="heads-up" title="Two quiet edge cases">
+
+If the middleware you target is not in the stack, nothing is inserted and nothing complains. And if you later `remove()` the target, the middleware you inserted around it stays. Check the final order with a test like the one at the end of this post.
+
+</Callout>
+
+## Strict request casting with a default that works
+
+`$request->integer('per_page', 15)` is a plain `(int)` cast. A request with `?per_page=abc123` gives you `0`, not `15`, and `?name[]=x` makes `$request->string('name')` throw "Array to string conversion". [#62254](https://github.com/laravel/framework/pull/62254) adds a third `strict` argument to `string()` / `str()`, `boolean()`, `integer()` and `float()`.
+
+<CodeCompare before="Plain cast" after="strict: true">
+
+```php title="app/Http/Controllers/ProductController.php"
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
+
+public function index(Request $request): Response
+{
+    // ?per_page=abc123 → 0, ?featured=maybe → false, ?price=1,5 → 1.0
+    $perPage = $request->integer('per_page', 15);
+
+    return Inertia::render('Products/Index', [
+        'products' => Product::query()->paginate(max($perPage, 1)),
+    ]);
+}
+```
+
+```php title="app/Http/Controllers/ProductController.php"
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
+
+public function index(Request $request): Response
+{
+    // ?per_page=abc123 → 15, ?per_page=30 → 30
+    $perPage = $request->integer('per_page', 15, strict: true); // [!code highlight]
+
+    return Inertia::render('Products/Index', [
+        'products' => Product::query()->paginate(min($perPage, 100)),
+    ]);
+}
+```
+
+</CodeCompare>
+
+What "strict" means for each method, as tested in the lab:
+
+| Method | Returns the default when the value is… | Lab: input → strict result |
+|---|---|---|
+| `integer()` | not a valid integer (or a bool) | `abc123` → `15` (default), `3` → `3` |
+| `float()` | not a valid number (or a bool) | `1,5` → `9.99` (default), `0.25` → `0.25` |
+| `boolean()` | missing, or not `1/true/on/yes/0/false/off/no` | `maybe` → `true` (default), `off` → `false` |
+| `string()` / `str()` | not a string, number or `Stringable` | `['chris']` → `guest` (default) |
+
+It works anywhere the `InteractsWithData` trait is used, so `Fluent` objects get it too.
+
+<Callout type="tip" title="Strict is not validation">
+
+Use `strict` for optional knobs where "use it if it's valid, otherwise the default" is the right answer: page size, sort direction, a `?debug=1` flag. When the input must be valid, keep a Form Request so the user gets a 422 and an error message. `array()` and `collect()` don't have the flag yet.
+
+</Callout>
+
+## Security: upgrade if you use Concurrency::run()
+
+This is the change that should decide your upgrade date. With the default `process` driver, `Concurrency::run()` serializes each closure, runs it in a child `php artisan` process, and reads the result back from that process's **stdout**. The result is `unserialize()`d in your web process.
+
+Before 13.40, the parent cut stdout at the first gzip magic bytes and decoded whatever JSON was there. The task's own output shares the same stdout. So a task that printed user-controlled text (a progress line, an export, a debug `echo`) could print a fake result, and the parent would unserialize it. The PR author describes it as a remote code execution path.
+
+In our lab on **13.39.0**, a task that printed a forged JSON result followed by `\x1f\x8b` and then returned `'real'` came back as **`'forged'`**. On **13.40.0** it returns `'real'`. Even harmless output broke things on 13.39: any `echo` inside a task crashed the parent with "Trying to access array offset on null".
+
+<Diagram name="laravel-concurrency-signed-envelope" alt="The parent process creates a random key for each task and passes it to the child process in an environment variable. The child removes the key from its environment, runs the task (which may print anything), then appends a result frame signed with HMAC-SHA256 using that key. The parent scans the output from the bottom up and only unserializes a frame whose signature matches; anything else in the output is ignored." caption="13.40 only trusts a result frame signed with a per-task key." />
+
+[#62297](https://github.com/laravel/framework/pull/62297) changes the protocol. Each task gets a random 32-byte key through an environment variable, which the child removes before your code runs. The child appends a frame signed with HMAC-SHA256, and the parent only accepts a frame with a valid signature. Your task code doesn't change: return values still unserialize to any type, and exceptions keep their class.
+
+<Callout type="gotcha" title="On Laravel 12?">
+
+At the time of writing, the latest 12.x release is **12.70.2** and this fix is only in 13.40. Until a 12.x release ships it, never print request data from inside a `Concurrency::run()` task, or use the `sync` driver for code that has to.
+
+</Callout>
+
+## Know when the replica has your write
+
+[13.38](/laravel-13-38-stale-reads-write-pdo-health) added `PreventStaleDatabaseReads`, which reads from the primary for a fixed time after a write. [#62198](https://github.com/laravel/framework/pull/62198) adds the building blocks to **know** instead of guess:
+
+```php title="app/Http/Controllers/OrderController.php"
+use Illuminate\Support\Facades\DB;
+
+// After the write, on the primary
+$order = $request->user()->orders()->create($request->validated());
+session(['commit_id' => DB::getLastCommitId()]);
+
+// On a later request, against the replica
+if (DB::hasCommitId(session('commit_id'), wait: 2)) {
+    // The replica has the order, read from it as usual
+}
+```
+
+`getLastCommitId()` always asks the write connection. `hasCommitId()` checks the read connection and can wait up to `wait` seconds. `mergeCommitIds()` combines several IDs into one that covers all of them.
+
+| Database | Commit ID | Requirement |
+|---|---|---|
+| MySQL | GTID set | `log_bin` and `gtid_mode = ON` |
+| MariaDB | GTID position | `log_bin` |
+| PostgreSQL | WAL LSN | waiting (`wait > 0`) needs PostgreSQL 19 |
+| SQLite, SQL Server | not supported | throws `RuntimeException` |
+
+We only ran the SQLite case (all three methods throw a `RuntimeException`); the MySQL, MariaDB and PostgreSQL behaviour above comes from the PR diff and its integration tests. This is a low-level API: the PR mentions a future version of `PreventStaleDatabaseReads` that uses it.
+
+## Transactions that recover, and other queue fixes
+
+**A lost connection no longer breaks the next transaction** ([#62211](https://github.com/laravel/framework/pull/62211)). If the connection dropped inside `DB::transaction()`, the rollback failed and Laravel kept the dead PDO. Every later transaction failed with "There is already an active transaction" until you restarted the queue worker or Octane. Laravel now drops the PDO so the next query reconnects.
+
+**Deadlocks in nested transactions roll back to the savepoint** ([#62248](https://github.com/laravel/framework/pull/62248)). Other exceptions already did this; lock wait timeouts and deadlocks did not. In the lab, an inner `DB::transaction()` that inserted a row and then hit "Lock wait timeout exceeded" left its row in the table on 13.39 once the outer transaction committed. On 13.40 only the outer row is there.
+
+```php title="app/Actions/ReserveStock.php"
+DB::transaction(function () use ($orders) {
+    foreach ($orders as $order) {
+        try {
+            $this->stock->reserve($order); // uses DB::transaction() itself
+        } catch (DeadlockException) {
+            $order->markAsFailed(); // 13.40: reserve()'s partial writes are rolled back
+        }
+    }
+});
+```
+
+**`queue:work` says `RELEASED`** ([#62180](https://github.com/laravel/framework/pull/62180)). A job put back with `release()`, `WithoutOverlapping` or `RateLimited` showed a green `DONE`. It now shows a yellow `RELEASED`, matching what `--json` already reported.
+
+**Batches finish when a model is gone** ([#62280](https://github.com/laravel/framework/pull/62280)). If a batched job's model was deleted while it waited, the failure was never recorded on the batch, so `finally()` never ran.
+
+## Fixes worth knowing
+
+- **Redis tagged cache**: `Cache::tags([...])->flush()` now runs per tag. The PR author measured 1,958 ms → 58 ms with 1,000 keys and 2,001 tags, time during which Redis was blocked ([#62215](https://github.com/laravel/framework/pull/62215)).
+- **Replicas**: `belongsToMany()->firstOrCreate()` looks up the existing row on the write connection after a unique violation, like the other `createOrFirst()` methods ([#62223](https://github.com/laravel/framework/pull/62223)).
+- **Broadcasting** to several encrypted Pusher channels at once works ([#62279](https://github.com/laravel/framework/pull/62279)).
+- **Eloquent and queries**: JSON path updates with arrays and collections on MySQL/MariaDB ([#62225](https://github.com/laravel/framework/pull/62225)), `toResourceCollection()` on filtered collections ([#62266](https://github.com/laravel/framework/pull/62266)), `cursorPaginate()` on unions with several orders ([#62272](https://github.com/laravel/framework/pull/62272)), `forceIndex()` on SQLite ([#62255](https://github.com/laravel/framework/pull/62255)).
+- **SQL Server and PostgreSQL**: `withExists()` ([#62273](https://github.com/laravel/framework/pull/62273)), `orderBy` on update/delete with limit ([#62239](https://github.com/laravel/framework/pull/62239)), check constraints when dropping columns ([#62222](https://github.com/laravel/framework/pull/62222)), schema-qualified index drops and renames ([#62213](https://github.com/laravel/framework/pull/62213)).
+- **Also**: `Str::substrCount()` counts characters, not bytes ([#62277](https://github.com/laravel/framework/pull/62277)), `ImageFile::default()` returns an image rule ([#62244](https://github.com/laravel/framework/pull/62244)), `Cookie::queue()` with named arguments ([#62246](https://github.com/laravel/framework/pull/62246)), and the Cloud log socket reconnects after a failed write ([#62258](https://github.com/laravel/framework/pull/62258)).
+
+## Upgrade notes
+
+- `composer update laravel/framework` and you are on 13.40. No config to publish, no breaking changes.
+- **Upgrade soon if you call `Concurrency::run()` with the process driver.** No code changes are needed.
+- If you scrape `queue:work` output, released jobs now print `RELEASED` instead of `DONE`.
+- If a nested transaction catches deadlocks and carries on, its partial writes are now rolled back. That is the correct behaviour, but check any code that counted on them.
+- No 12.x release this week. None of the features above are in 12.x.
+
+<TryIt title="Lock in your middleware order">
+
+```php title="tests/Feature/MiddlewareOrderTest.php"
+use App\Http\Middleware\BlockBannedIps;
+use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\TrustProxies;
+
+it('runs BlockBannedIps right after TrustProxies', function () {
+    $middleware = new Middleware;
+    $middleware->insertAfter(TrustProxies::class, BlockBannedIps::class);
+
+    $global = $middleware->getGlobalMiddleware();
+
+    expect($global[array_search(TrustProxies::class, $global) + 1])
+        ->toBe(BlockBannedIps::class);
+});
+```
+
+</TryIt>
+
+## Recap
+
+- `Queue::whenJobRunsLongerThan()` and `Schedule::whenTaskRunsLongerThan()` alert on slow work, failures included. Use `CarbonInterval` to dodge the ms/seconds trap.
+- `insertBefore()` / `insertAfter()` (plus the `InGroup` versions) and array `replace()` end copy-pasted middleware stacks.
+- `integer()`, `float()`, `boolean()` and `string()` take `strict: true` to fall back to your default.
+- The `Concurrency` process driver now signs its results: upgrade if you use it.
+- Commit IDs, transaction recovery, savepoint rollbacks and a faster Redis tag flush round it out.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Is Laravel 13.40 safe to upgrade to?', a: 'Yes. It is a minor release with no breaking changes. The only visible differences are `RELEASED` in `queue:work` output and nested transactions that now roll back on deadlocks.' },
+  { q: 'Am I affected by the Concurrency issue?', a: 'Only if you use `Concurrency::run()` with the default `process` driver and a task can print text an attacker controls. Upgrading fixes it with no code changes.' },
+  { q: 'Does whenJobRunsLongerThan() catch jobs that time out?', a: 'It catches every attempt that reports a duration through `JobAttempted`, including jobs that throw. A worker killed by its timeout may never get to report, so keep a `failed()` handler as well.' },
+  { q: 'Why does the schedule callback get seconds and the queue callback milliseconds?', a: 'They reuse existing events: `JobAttempted::$duration` is in milliseconds and `ScheduledTaskFinished::$runtime` is in seconds. Pass a `CarbonInterval` as the threshold and it is converted for you.' },
+  { q: 'Should I use strict: true instead of validation?', a: 'For optional query parameters with a sensible default, yes. For input the user must get right, keep validation so they see an error instead of a silent default.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.39: keyless models and restoreOrCreate on relations](/laravel-13-39-keyless-models-restore-or-create)
+- [Laravel 13.38: no more stale reads after a write](/laravel-13-38-stale-reads-write-pdo-health)
+- [Load slow dashboard queries in parallel with Concurrency::run()](/laravel-concurrency-run-parallel-dashboard)
+- [Middleware in the Laravel docs](https://laravel.com/docs/13.x/middleware)
+
+## Sources
+
+- [laravel/framework v13.40.0 release notes](https://github.com/laravel/framework/releases/tag/v13.40.0)
+- PRs: [#62141](https://github.com/laravel/framework/pull/62141), [#62233](https://github.com/laravel/framework/pull/62233), [#62256](https://github.com/laravel/framework/pull/62256), [#62261](https://github.com/laravel/framework/pull/62261), [#62230](https://github.com/laravel/framework/pull/62230), [#62254](https://github.com/laravel/framework/pull/62254), [#62217](https://github.com/laravel/framework/pull/62217), [#62198](https://github.com/laravel/framework/pull/62198), [#62180](https://github.com/laravel/framework/pull/62180), [#62297](https://github.com/laravel/framework/pull/62297), [#62211](https://github.com/laravel/framework/pull/62211), [#62248](https://github.com/laravel/framework/pull/62248), [#62215](https://github.com/laravel/framework/pull/62215), [#62280](https://github.com/laravel/framework/pull/62280)
+- [Docs: Queues](https://laravel.com/docs/13.x/queues)
+- [Docs: Task scheduling](https://laravel.com/docs/13.x/scheduling)
+- [Docs: Concurrency](https://laravel.com/docs/13.x/concurrency)
