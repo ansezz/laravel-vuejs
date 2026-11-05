@@ -1,0 +1,336 @@
+---
+id: 179
+title: "Laravel Http::pool(): call three APIs in the time of one"
+seoTitle: "Laravel Http::pool(): Concurrent HTTP Requests"
+excerpt: "Hidden gem: Http::pool() sends outgoing API calls at the same time, so three 500 ms calls take 0.5 s, not 1.5 s. Plus Http::batch() and 6 gotchas we tested."
+date: 2026-11-05T02:30:00Z
+snippet: "Http::pool(fn (Pool $pool) => [$pool->get($a), $pool->get($b)]);"
+categories: [laravel, vuejs]
+tags: [laravel, php, inertia, vuejs]
+---
+Your checkout asks three shipping carriers for a rate. Each answers in about half a second, and your controller asks them one after another, so the customer waits a full 1.5 seconds before seeing a price. Laravel's HTTP client can send all three at once with one method, and it has been there since Laravel 8.
+
+<TLDR
+  audience="Laravel 11–13 developers who call more than one external API in a request, job or command (Inertia + Vue apps included)"
+  learn={['What `Http::pool()` does and why most apps never use it', 'Sequential calls vs a pool, side by side, with real timings', 'A checkout that gets rates from four carriers, survives one being down and loads as an Inertia deferred prop', 'Gotchas: completion order, dropped headers, exceptions in the array, concurrency, `Http::batch()` callbacks']}
+  tested="Laravel 13.39 · PHP 8.4 · inertia-laravel 3.5 · Pest (21 tests, 66 assertions) against a local slow API"
+>
+
+- `Http::pool(fn (Pool $pool) => [...])` sends every request at the same time and waits for the slowest one. Three 500 ms calls took 504 ms in our lab instead of 1,507 ms.
+- Name requests with `$pool->as('billing')`, and cap parallel requests with `concurrency: 5` when an API rate-limits you.
+- Failures don't throw. A timeout or dead host comes back as a `ConnectionException` inside the results array, so check each entry before calling `->json()`.
+- On Laravel 13 the results come back in the order requests **finish**, and `Http::withHeaders()->pool()` silently drops your headers. Configure each request inside the pool.
+
+</TLDR>
+
+## What Http::pool() is and why most people miss it
+
+`Http::pool()` takes a closure, collects the requests you add to the `Pool`, and fires them together through Guzzle's curl multi handle. It returns an array of responses once the last one is done:
+
+```php title="app/Http/Controllers/DashboardController.php"
+use Illuminate\Http\Client\Pool;
+use Illuminate\Support\Facades\Http;
+
+$responses = Http::pool(fn (Pool $pool) => [
+    $pool->get('https://billing.example.test/mrr'),
+    $pool->get('https://shipping.example.test/late-orders'),
+    $pool->get('https://support.example.test/open-tickets'),
+]);
+
+$mrr = $responses[0]->json('value');
+```
+
+It arrived in Laravel 8.37 (April 2021, [PR #36948](https://github.com/laravel/framework/pull/36948)), and it sits in the HTTP client docs under "Concurrent Requests", well below the `Http::get()` examples everyone copies. Most code reviews never ask "could these three calls run at once?", so the sequential version ships and stays.
+
+It kept growing since: `Http::batch()` with progress callbacks in 12.32, a `concurrency` limit in 12.36 that actually caps in-flight requests since 12.42, a new default in 13.0, and a `batch()` fix for `retry()`/`throw()` failures in 13.39 ([PR #62120](https://github.com/laravel/framework/pull/62120)).
+
+<Diagram name="laravel-http-pool-concurrent-requests" alt="Http::pool collects the requests from the closure and Guzzle sends them at the same time through a curl multi handle. With the Laravel 13 default, every request is in flight at once and the wait equals the slowest request. With concurrency set to 2, at most two are in flight and the next one starts when one finishes. The result is an array keyed by index or by the name given with as(), in the order requests completed. Each entry is either a Response, which you check with ok or failed, or an exception for timeouts, DNS errors or requests that used throw()." caption="One closure in, one array out. Everything in the gotchas section comes from the last two boxes." />
+
+## The usual way vs Http::pool()
+
+We pointed both versions at a local API that sleeps 500 ms per call.
+
+<CodeCompare before="one after another: 1,507 ms" after="Http::pool(): 504 ms">
+
+```php title="app/Services/DashboardStats.php"
+$billing = Http::timeout(3)->get($billingUrl);
+$shipping = Http::timeout(3)->get($shippingUrl);
+$support = Http::timeout(3)->get($supportUrl);
+
+return [
+    'mrr' => $billing->json('value'),
+    'late' => $shipping->json('value'),
+    'tickets' => $support->json('value'),
+];
+```
+
+```php title="app/Services/DashboardStats.php"
+$r = Http::pool(fn (Pool $pool) => [
+    $pool->as('billing')->timeout(3)->get($billingUrl),
+    $pool->as('shipping')->timeout(3)->get($shippingUrl),
+    $pool->as('support')->timeout(3)->get($supportUrl),
+]);
+
+return [
+    'mrr' => $r['billing']->json('value'),
+    'late' => $r['shipping']->json('value'),
+    'tickets' => $r['support']->json('value'),
+];
+```
+
+</CodeCompare>
+
+The time you wait drops from the **sum** of the calls to the **slowest** call. With eight 400 ms calls the gap gets silly: 404 ms pooled, with all eight in flight at once.
+
+| | Sequential `Http::get()` | `Http::pool()` | `Concurrency::run()` | Queue job per call |
+|---|---|---|---|---|
+| Runs calls at the same time | no | yes | yes | yes |
+| Extra cost | none | none (one PHP process) | about 200 ms to boot child processes | a worker and a round trip |
+| Good for | one call | many HTTP calls in one request | slow PHP work: queries, CPU | work the user doesn't wait for |
+| Result | `Response` or exception thrown | array of `Response` or exception | array of return values | nothing, until you store it |
+
+If your slow work is HTTP, the pool is the cheapest way to parallelize it. Our [Concurrency::run() post](/laravel-concurrency-run-parallel-dashboard) covers the case where the slow part is database queries or PHP code.
+
+### Named requests, loops and concurrency
+
+`$pool->as('name')` keys the result by name. The closure doesn't even have to return anything, so building a pool in a loop is fine:
+
+```php title="app/Services/OrderSync.php"
+$responses = Http::pool(function (Pool $pool) use ($orderIds) {
+    foreach ($orderIds as $id) {
+        $pool->as("order-{$id}")->get("https://shop.example.test/orders/{$id}");
+    }
+}, concurrency: 5);
+```
+
+`concurrency: 5` keeps at most five requests in flight and starts the next one when a slot frees up. In the lab, eight 400 ms calls with `concurrency: 2` took 1,613 ms and the server never saw more than two at once. Use it for APIs with rate limits or for pools of hundreds of URLs.
+
+## Real-world example: shipping quotes in an Inertia checkout
+
+Four carriers, each with its own token. One is slow, one returns a 500, one is down. The page must still show the quotes that worked, cheapest first, and log the rest.
+
+```php title="app/Services/ShippingQuotes.php"
+namespace App\Services;
+
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class ShippingQuotes
+{
+    public function for(array $parcel): array
+    {
+        $carriers = config('shipping.carriers'); // ['name' => ['url' => ..., 'token' => ...]]
+
+        $responses = Http::pool(function (Pool $pool) use ($carriers, $parcel) {
+            foreach ($carriers as $name => $carrier) {
+                $pool->as($name)
+                    ->withToken($carrier['token'])
+                    ->timeout(3)
+                    ->retry(2, 200, throw: false)
+                    ->post($carrier['url'], $parcel);
+            }
+        });
+
+        return collect($responses)
+            ->each(function ($response, string $carrier) {
+                if (! $response instanceof Response || $response->failed()) {
+                    Log::warning("Shipping quote failed: {$carrier}", [
+                        'error' => $response instanceof \Throwable ? $response->getMessage() : $response->status(),
+                    ]);
+                }
+            })
+            ->filter(fn ($response) => $response instanceof Response && $response->successful())
+            ->map(fn (Response $response, string $carrier) => [
+                'carrier' => $carrier,
+                'price' => $response->json('price'),
+                'days' => $response->json('days'),
+            ])
+            ->sortBy('price')
+            ->values()
+            ->all();
+    }
+}
+```
+
+Now the Inertia part. Wrap the quotes in `Inertia::defer()` so the checkout paints first and the quotes arrive in a follow-up request:
+
+```php title="app/Http/Controllers/CheckoutController.php"
+public function show(Request $request, ShippingQuotes $quotes): Response
+{
+    $cart = $request->user()->cart;
+
+    return Inertia::render('Checkout', [
+        'cart' => $cart->toSummary(),
+        'quotes' => Inertia::defer(fn () => $quotes->for($cart->parcel())),
+    ]);
+}
+```
+
+```vue title="resources/js/pages/Checkout.vue"
+<script setup lang="ts">
+import { Deferred } from '@inertiajs/vue3'
+
+defineProps<{
+    cart: { items: number }
+    quotes?: { carrier: string; price: number; days: number }[]
+}>()
+</script>
+
+<template>
+    <Deferred data="quotes">
+        <template #fallback>
+            <p>Asking the carriers…</p>
+        </template>
+
+        <ul>
+            <li v-for="quote in quotes" :key="quote.carrier">
+                {{ quote.carrier }}: {{ quote.price }} ({{ quote.days }} days)
+            </li>
+        </ul>
+    </Deferred>
+</template>
+```
+
+We ran this exact service in a Pest test with four fake carriers: 600 ms, 400 ms, a 500 error and a dead port. The first Inertia request returned in **10 ms** without the `quotes` prop. The deferred request came back in **607 ms** with two quotes, cheapest first, and two warnings in the log. Sequentially, the same carriers would cost more than a second, plus the retry.
+
+## Gotchas
+
+<Callout type="gotcha" title="On Laravel 13, results arrive in completion order">
+
+The keys are right, but the array order is the order requests **finished**. We sent calls of 400 ms, 50 ms and 200 ms:
+
+```php
+array_keys($responses); // [1, 2, 0]
+```
+
+`$responses[0]` is still the first request, so index and name lookups (and `[$a, $b] = $responses`) are safe. But `foreach` position, `array_values()`, `array_combine($ids, $responses)` or `collect($responses)->values()` now pair data with the wrong request. Call `ksort($responses)` first, or use names.
+
+Why it changed: Laravel 13.0 switched the default `concurrency` from `null` to `0`, which means "all at once" ([PR #57972](https://github.com/laravel/framework/pull/57972)). The old `null` path still exists and waits in definition order: passing `concurrency: null` in our lab gave `[0, 1, 2]` in 403 ms. `Http::batch()` always returns definition order.
+
+</Callout>
+
+**Config on `Http::` before `pool()` is silently dropped.** `Http::withHeaders(['X-Tenant' => 'acme'])->withToken('secret')->pool(...)` sent neither the header nor the token in our test. Each request in the pool starts fresh. The [docs say it](https://laravel.com/docs/13.x/http-client#customizing-concurrent-requests), and nothing warns you at runtime. Put the config on each request, or share it with a `PendingRequest` macro:
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Http\Client\PendingRequest;
+
+PendingRequest::macro('crm', function () {
+    return $this->baseUrl(config('services.crm.url'))
+        ->withToken(config('services.crm.token'))
+        ->timeout(3);
+});
+
+// $pool->as('contacts')->crm()->get('/contacts');
+// Http::crm()->get('/contacts'); also works outside a pool
+```
+
+**Failures are values, not exceptions.** A dead host or a timeout gives you a `ConnectionException` in the array. Calling `->json()` on it is a fatal `Error`, not a nice HTTP exception. A 4xx or 5xx is a normal `Response` with `failed() === true`, unless you add `->throw()`, which turns it into a `RequestException` in the array.
+
+**`retry()` works per request.** `$pool->retry(3, 100)->get(...)` retried our flaky endpoint and got a 200 on the third try. With `throw: false`, an endpoint that never recovers comes back as its last failed `Response`. There is no pool-wide `retry()`: proposals for one ([#61537](https://github.com/laravel/framework/pull/61537)) and for pool-level defaults ([#61562](https://github.com/laravel/framework/pull/61562)) were closed.
+
+**Tests: fake as usual.** `Http::fake()`, `assertSent()` and `assertSentCount()` work with pooled requests. With `Http::preventStrayRequests()`, an unfaked pooled request doesn't throw. It shows up as a `StrayRequestException` in the results array, so assert on it.
+
+<Callout type="heads-up" title="Need callbacks? Use Http::batch()">
+
+`Http::batch()` (Laravel 12.32+) takes the same closure and adds `before`, `progress`, `catch`, `then` and `finally` hooks, like `Bus::batch()`. `then` only runs when every request succeeded. `->defer()` sends the whole batch after the response:
+
+```php title="app/Actions/SyncStoreCatalog.php"
+Http::batch(fn (Batch $batch) => [
+    $batch->as('products')->get($productsUrl),
+    $batch->as('prices')->get($pricesUrl),
+    $batch->as('stock')->get($stockUrl),
+])->catch(fn (Batch $batch, int|string $key, $failure) => Log::warning("Catalog sync failed: {$key}"))
+  ->then(fn (Batch $batch, array $results) => CatalogImported::dispatch($results))
+  ->concurrency(2)
+  ->send();
+```
+
+With one request returning 500, our log read `catch:b:500`, `progress:c`, `progress:a`, `finally:failed=1`, and `then` never ran. Before 13.39, a request that failed after `retry()` counted as a success and skipped `catch()`. On 13.39 it reached `catch()` as a `RequestException`.
+
+</Callout>
+
+## Try it yourself
+
+<TryIt title="Time it against a slow public endpoint">
+
+```php title="routes/console.php"
+use Illuminate\Http\Client\Pool;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
+
+Artisan::command('pool:check', function () {
+    $url = 'https://httpbin.org/delay/1';
+
+    $start = microtime(true);
+    foreach (range(1, 3) as $i) {
+        Http::get($url);
+    }
+    $this->info('One by one: '.round(microtime(true) - $start, 1).'s');
+
+    $start = microtime(true);
+    Http::pool(fn (Pool $pool) => [
+        $pool->get($url),
+        $pool->get($url),
+        $pool->get($url),
+    ]);
+    $this->info('Pooled:     '.round(microtime(true) - $start, 1).'s');
+});
+```
+
+```bash
+php artisan pool:check
+# One by one: 7.5s
+# Pooled:     2.4s
+```
+
+</TryIt>
+
+Your numbers depend on your network; the gap is what matters. Then search your app for two `Http::` calls in a row that don't use each other's result. Each pair is a candidate.
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★★ The wait drops from the sum of the calls to the slowest one |
+| How often you'll reach for it | ★★★★☆ Dashboards, checkouts, syncs, webhooks fan-out, scrapers |
+| Risk if misused | ★★★☆☆ Completion order, dropped headers, unchecked exceptions |
+| **Overall** | **4.5 / 5**: no package, no workers, and the speedup shows up on the first request |
+
+## Recap
+
+- `Http::pool()` sends outgoing requests at the same time; you wait for the slowest one, not the sum.
+- Name requests with `as()`, cap them with `concurrency:`, and configure each request inside the pool.
+- Every entry is a `Response` or an exception: check `instanceof Response` and `successful()` before reading it.
+- On Laravel 13 the array is in completion order. Use names or `ksort()`, not `foreach` position.
+- Reach for `Http::batch()` when you need `progress`/`catch`/`then` callbacks or `defer()`.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version has Http::pool()?', a: 'Laravel 8.37 (April 2021, PR #36948). The `concurrency` argument arrived in 12.36 and limits in-flight requests properly since 12.42. Laravel 13.0 changed the default to send every request at once. We tested on 13.39.' },
+  { q: 'Is Http::pool() real parallelism?', a: 'It is concurrent I/O in one PHP process: curl sends all requests and waits on the network for all of them together. Your PHP code is not run in parallel. For CPU or database work, use `Concurrency::run()` instead.' },
+  { q: 'Why did Http::withHeaders()->pool() not send my headers?', a: 'Each request in the pool is built fresh, so options set on the outer `Http::` call are ignored. Set them on each `$pool->...` request, or share them with a `PendingRequest` macro.' },
+  { q: 'How do I handle a timeout in a pool?', a: 'Nothing is thrown. The entry for that request is a `ConnectionException`. Check `$response instanceof Response` before calling `ok()` or `json()`, and log or skip the rest.' },
+  { q: 'What is the difference between Http::pool() and Http::batch()?', a: '`pool()` returns the array of results and that is all. `batch()` (12.32+) adds `before`, `progress`, `catch`, `then` and `finally` callbacks, counters like `failedRequests`, `concurrency()` and `defer()`, and always returns results in definition order.' },
+]} />
+
+## Next steps
+
+- [Concurrency::run()](/laravel-concurrency-run-parallel-dashboard), when the slow part is PHP or the database
+- [The defer() helper](/laravel-defer-helper-after-response), for calls the user doesn't need to wait for
+- [Testing with Http::fake()](/laravel-http-fake-test-vue), to cover the failure paths above
+- [Laravel docs: concurrent requests](https://laravel.com/docs/13.x/http-client#concurrent-requests)
+
+## Sources
+
+- [Laravel 13 docs: HTTP client, concurrent requests](https://laravel.com/docs/13.x/http-client#concurrent-requests)
+- [laravel/framework PR #36948: Handle concurrent asynchronous requests in the HTTP client (Laravel 8.37)](https://github.com/laravel/framework/pull/36948)
+- [laravel/framework PR #56946: Add Http::batch (Laravel 12.32)](https://github.com/laravel/framework/pull/56946)
+- [laravel/framework PR #57555: Concurrency control for Http::pool and Http::batch (Laravel 12.36)](https://github.com/laravel/framework/pull/57555)
+- [laravel/framework PR #57973: Fix pool() and batch() concurrency (Laravel 12.42)](https://github.com/laravel/framework/pull/57973)
+- [laravel/framework PR #57972: Default pool() concurrency in 13.x](https://github.com/laravel/framework/pull/57972)
+- [laravel/framework PR #62120: Fix Http::batch() treating retry() and throw() failures as successes (Laravel 13.39)](https://github.com/laravel/framework/pull/62120)
+- [Source: `PendingRequest::pool()`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Http/Client/PendingRequest.php)
+- [Inertia docs: deferred props](https://inertiajs.com/docs/v3/data-props/deferred-props)
