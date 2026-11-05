@@ -1,0 +1,19 @@
+flowchart LR
+  A["`**Http::pool(fn (Pool $pool) => [...])**
+  collects the requests`"] --> B["`Guzzle sends them
+  **at the same time**
+  (curl multi handle)`"]
+  B --> C{"`concurrency
+  set?`"}
+  C -- "default (13.x): all at once" --> D["`Every request in flight
+  wait = the **slowest** one`"]
+  C -- "concurrency: 2" --> E["`At most 2 in flight,
+  the next starts when one ends`"]
+  D --> F["`Results array, keyed by
+  index or **as('name')**
+  in **completion order**`"]
+  E --> F
+  F --> G["`Each entry is a **Response**
+  (check ok / failed)
+  or an **exception**
+  (timeout, DNS, throw())`"]
