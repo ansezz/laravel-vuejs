@@ -45,6 +45,7 @@ Build-time variables you may set locally: `SHOW_FUTURE_POSTS=1` (include schedul
 | `check` | `astro check`: types and templates |
 | `check:worker` | `tsc -p worker` |
 | `check:links` | No internal link, image, script or stylesheet in `dist/` points at a missing file |
+| `check:seo` | Every indexable page in `dist/` has a title of at most 60 characters, one unique description of 50 to 160 characters, its own canonical, one `<h1>`, an existing `og:image` and valid JSON-LD; the sitemap lists exactly the indexable pages |
 | `check:packages` | The package chart data (`src/data/packages.ts`) is consistent |
 | `check:tools` | The developer tools data (`src/data/dev-tools.ts`) is consistent |
 | `check:live` | Post-deploy check against the live site (`SITE_URL=...` for a preview or `wrangler dev`, `EXPECT_SHA` / `WAIT_MINUTES` to wait for a build) |
@@ -111,7 +112,7 @@ npm run deploy
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| `ci.yml` (CI) | Push to `master`, pull requests, manual | `npm ci`, `astro check`, `check:worker`, `build` (with future posts on PRs), `check:links`, then Lighthouse CI on key pages |
+| `ci.yml` (CI) | Push to `master`, pull requests, manual | `npm ci`, `astro check`, `check:worker`, `build` (with future posts on PRs), `check:links`, `check:seo`, then Lighthouse CI on key pages |
 | `post-deploy.yml` (Post-deploy check) | Push to `master`, daily 07:45 UTC, manual (optional site URL) | Waits up to 15 minutes for `/version.json` to report the pushed commit, then runs `scripts/check-live.mjs`: key pages and content types, Worker security headers, 404 and `www` redirect, newest post with its Markdown twin and OG image, forms API, every due post live |
 | `indexnow.yml` (IndexNow) | Push to `master`, manual (`all` = whole sitemap) | Waits for the deploy, then submits recently changed URLs to IndexNow (`scripts/indexnow.mjs`) |
 | `publish-scheduled.yml` (Publish scheduled posts) | Daily 07:05 UTC, manual (`force`) | If a post's date has passed and the live site lacks it (`scripts/scheduled-due.mjs`), triggers a production rebuild (deploy hook, or an empty commit to `master`) and pings IndexNow |
@@ -156,12 +157,6 @@ Future posts are included in Workers Builds previews (every branch except `maste
 
 **Markdown pipeline** (`astro.config.mjs`): `rehypeHeadingIds`, then `src/lib/markdown/rehype-post.mjs` (heading anchors, `{{CONTACT_EMAIL}}` in `.md`, the hidden mid-article sponsor marker on long posts); Shiki with `transformerFrame` (code frame, file name, copy button) plus meta/notation highlight, diff and focus transformers. After the build, `scripts/markdown.mjs` writes `/<slug>.md` and `/llms-full.txt`.
 
-### Scheduled publishing
-
-A post whose `date` is in the future is left out of production builds: it does not appear in lists, feeds, the sitemap or the search index, and it has no page. You can merge it early. Every day at 07:05 UTC (15:05 MYT), the `Publish scheduled posts` workflow checks whether a post's date has passed and the live site still lacks it. If so, it triggers a production rebuild. It uses the `CF_DEPLOY_HOOK_URL` repo secret (a Workers Builds deploy hook for `master`) when that is set, and otherwise pushes an empty commit to `master`. You can also run the workflow by hand (Actions, then Run workflow, with `force` to rebuild anyway).
-
-Future posts are included in Workers Builds previews (every branch except `master`), in PR CI and in local builds run with `SHOW_FUTURE_POSTS=1`, so they can be reviewed. Set `date` to the exact moment the post should go live, in UTC (for example `2026-10-13T07:00:00Z` = 15:00 MYT). It then appears with the next daily run.
-
 ## Analytics, comments and privacy
 
 - **Analytics:** Cloudflare Web Analytics, cookieless. It is turned on in the Cloudflare dashboard (the beacon is added by Cloudflare, not by this repo); the CSP allows `static.cloudflareinsights.com`.
@@ -186,6 +181,7 @@ Configure with the build variables under [Environment variables](#environment-va
 - **Feeds:** `/feed.xml` (also `/feed/posts.xml`, `/feed/categories.xml`, `/feed/tags.xml`).
 - **AI search / GEO:** `/llms.txt` (index), `/llms-full.txt` (full text of every article) and `/<slug>.md` (each post as clean Markdown; the Worker sends a `Link: rel="canonical"` header to the HTML page). `robots.txt` explicitly allows the main AI crawlers (`AI_CRAWLERS` in `src/config/site.ts`).
 - **Author page:** `/author/anass-ez-zouaine` (E-E-A-T: who writes, how articles are tested and corrected). Keep it to verifiable facts.
+- **Checked in CI:** `npm run check:seo` fails the build on a missing or long title, a missing, duplicate, too short or too long description, a canonical that is not the page's own URL, more or less than one `<h1>`, a missing `og:image`, invalid or incomplete article JSON-LD, or a sitemap that disagrees with the indexable pages. Empty category and tag pages are `noindex` and left out of the sitemap. Legacy duplicate URLs get a 301 in the Worker (for example `/page/term-conditions`) rather than a second copy of the page.
 - **Pagination:** `/posts` shows 12 articles; older ones move to `/posts/page/2`, `/posts/page/3`, ... with `rel=prev/next`.
 - **IndexNow:** the key is `INDEXNOW_KEY` in `src/config/site.ts`, served at `/<key>.txt`. `.github/workflows/indexnow.yml` submits recently changed URLs after each deploy of master (run it manually with *all* to submit the whole sitemap), and the scheduled-publishing job pings new posts on their release day.
 

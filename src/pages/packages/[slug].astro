@@ -30,7 +30,7 @@ const leagueName = pkg.ecosystem === 'laravel' ? 'Laravel' : 'Vue'
 const metric = pkg.ecosystem === 'laravel' ? SNAPSHOT.laravelMetric : SNAPSHOT.vueMetric
 const registryLabel = pkg.ecosystem === 'laravel' ? 'Packagist' : 'npm'
 ---
-<Base title={pkg.name} description={clip(pkg.description, 155)}>
+<Base title={pkg.name} description={clip(`${pkg.description.trim().replace(/\.$/, '')}. ${pkg.name} on Laravel & VueJs: install command, ${registryLabel} downloads and the guides that use it.`, 155)}>
   <div class={pkg.ecosystem === 'laravel' ? 'league-laravel' : 'league-vue'}>
   <PageHero
     class="pkg-hero"

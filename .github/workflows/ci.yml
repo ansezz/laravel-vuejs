@@ -35,6 +35,8 @@ jobs:
           SHOW_FUTURE_POSTS: ${{ github.event_name == 'pull_request' && '1' || '' }}
       - name: Internal link check
         run: npm run check:links
+      - name: SEO check (titles, descriptions, canonicals, h1, structured data, sitemap)
+        run: npm run check:seo
       - uses: actions/upload-artifact@v7
         with:
           name: dist

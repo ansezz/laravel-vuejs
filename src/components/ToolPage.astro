@@ -2,7 +2,8 @@
 import Base from '../layouts/Base.astro'
 import PageHero from './PageHero.astro'
 interface Props { title: string; lead: string; description?: string }
-const { title, lead, description = lead } = Astro.props
+import { clip } from '../lib/content'
+const { title, lead, description = clip(lead, 155) } = Astro.props
 ---
 <Base title={title} description={description}>
   <PageHero
