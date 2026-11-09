@@ -4,6 +4,7 @@ title: "Laravel 13.40: slow job alerts, middleware insertBefore() and strict inp
 seoTitle: "Laravel 13.40: Slow Jobs, Middleware Insert, Strict Input"
 excerpt: "Laravel 13.40 adds Queue::whenJobRunsLongerThan(), Schedule::whenTaskRunsLongerThan(), $middleware->insertAfter(), strict request casting and a Concurrency security fix."
 date: 2026-11-04T00:30:00Z
+updated: 2026-11-09T00:30:00Z
 snippet: "Queue::whenJobRunsLongerThan(CarbonInterval::seconds(90), $alert)"
 categories: [laravel]
 tags: [laravel, release, upgrade, testing]
@@ -250,7 +251,7 @@ In our lab on **13.39.0**, a task that printed a forged JSON result followed by 
 
 <Callout type="gotcha" title="On Laravel 12?">
 
-At the time of writing, the latest 12.x release is **12.70.2** and this fix is only in 13.40. Until a 12.x release ships it, never print request data from inside a `Concurrency::run()` task, or use the `sync` driver for code that has to.
+**Update (Nov 9):** the fix was backported to 12.x in **12.71.0**, tagged the same day as 13.40. Update with `composer update laravel/framework`. Details in [this week's roundup](/this-week-in-laravel-inertia-2026-11-09).
 
 </Callout>
 

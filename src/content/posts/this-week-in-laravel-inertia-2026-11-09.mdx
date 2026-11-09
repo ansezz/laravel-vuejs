@@ -1,0 +1,158 @@
+---
+id: 180
+title: "This week in Laravel & Inertia: the Concurrency fix lands on Laravel 12, Nov 9, 2026"
+seoTitle: "This week in Laravel & Inertia: Laravel 12.71 (Nov 9, 2026)"
+excerpt: "Laravel 12.71.0 backports the signed Concurrency result envelope from 13.40, so a task's own output can no longer forge the value your app unserializes."
+date: 2026-11-09T00:30:00Z
+snippet: "composer update laravel/framework"
+categories: [laravel]
+tags: [laravel, release, upgrade]
+---
+Last week we told Laravel 12 users to keep request data out of `Concurrency::run()` tasks, because the fix only existed in 13.40. That workaround can go now.
+
+Laravel **12.71.0** ships the same signed result envelope. It's the only patch-level release we collected this week, and it's a short read with one clear action: update.
+
+<TLDR
+  audience="Laravel 12 developers who call Concurrency::run() with the default process driver"
+  learn={['What 12.71.0 changes in the Concurrency process driver', 'How to check that your app is on the fixed version', 'Which posts from this week cover everything else']}
+  tested="Laravel 12.70.1 → 12.71.0 · PHP 8.4 · Pest (3 tests: a task that prints a forged JSON result, a task that prints a forged frame with a bad signature, a task that prints a forged result followed by the gzip marker, plus a task that prints normal progress lines)"
+>
+
+- **Laravel 12.71.0** backports [#62297](https://github.com/laravel/framework/pull/62297) from 13.40. Each concurrent task signs its result with a per-task key, and the parent only unserializes a frame with a valid signature.
+- In our lab, a task that printed a forged result came back as **`'forged'`** on 12.70.1 and as its real return value on 12.71.0.
+- Normal `echo` output inside a task no longer crashes the parent with "Trying to access array offset on null".
+- No code changes. Run `composer update laravel/framework` and check you're on 12.71.0.
+
+</TLDR>
+
+## The week at a glance
+
+| Package | Version | Released (UTC) | Should you hurry? |
+|---|---|---|---|
+| `laravel/framework` (12.x line) | 12.71.0 | Nov 3 | Yes, if you use `Concurrency` with the `process` driver |
+
+Nothing else in the watched packages had a patch release this week. Inertia 3.11 and Laravel 13.40 were feature releases, so they got full posts, linked in [In case you missed it](#in-case-you-missed-it).
+
+## Laravel 12.71.0: signed Concurrency results
+
+`Concurrency::run()` with the default `process` driver serializes each closure, starts a child `php artisan` process and reads the result back from that child's stdout. The parent then calls `unserialize()` on it.
+
+The problem was that your task's own output goes to the same stdout. Up to 12.70.x, the parent cut the output at the first gzip magic bytes (`\x1f\x8b`) and decoded the JSON it found there. A task that printed text an attacker controls could print a fake result, and your web process would unserialize it.
+
+<Diagram name="laravel-concurrency-signed-envelope" alt="The parent process creates a random key for each task and passes it to the child process in an environment variable. The child removes the key from its environment, runs the task (which may print anything), then appends a result frame signed with HMAC-SHA256 using that key. The parent scans the output from the bottom up and only unserializes a frame whose signature matches; anything else in the output is ignored." caption="12.71.0 uses the same signed frame as 13.40." />
+
+The 12.x port ([commit 0f90494](https://github.com/laravel/framework/commit/0f904940d176d51db1105cc925136f01bb69e92c)) copies the 13.x change line for line:
+
+- The parent creates a random 32-byte key per task and passes it in `LARAVEL_CONCURRENCY_HMAC_KEY`.
+- The child removes that variable from `$_SERVER`, `$_ENV` and `getenv()` before running your closure, so your code can't read it.
+- The child writes its result as a base64 frame between `@@LARAVEL-CONCURRENCY-V1@@` markers, signed with HMAC-SHA256.
+- The parent scans from the end of the output and accepts only a frame whose signature matches. If none does, it throws a `RuntimeException` with the first 200 characters of the output.
+
+### What we saw in the lab
+
+We ran the same three tests on 12.70.1 and then on 12.71.0. The tasks are plain closures like this one:
+
+```php title="app/Support/L40Tasks.php"
+public static function forgedWithGzipMarker(): \Closure
+{
+    return static function () {
+        // Forged JSON followed by the gzip bytes the old parser cut at
+        echo json_encode(['successful' => true, 'result' => serialize('forged')])."\x1f\x8b";
+
+        return 'real';
+    };
+}
+```
+
+| Task prints | 12.70.1 | 12.71.0 |
+|---|---|---|
+| A forged JSON result, then returns `'real'` | Crash: "Trying to access array offset on null" | `'real'` |
+| A forged frame with a bad signature, then returns `42` | Crash: same error | `42` |
+| A forged result followed by `\x1f\x8b`, then returns `'real'` | **`'forged'`** | `'real'` |
+| Two progress lines, then returns `['rows' => 3]` | Crash: same error | `['rows' => 3]` |
+
+The first and last rows matter even if you never worried about attackers. On 12.70.x, any `echo` inside a task broke the result. On 12.71.0, progress output is simply ignored.
+
+<Callout type="heads-up" title="Only the process driver changed">
+
+The diff touches `ProcessDriver` and the `invoke-serialized-closure` command, nothing else. The `sync` driver never went through stdout, so it behaves the same as before.
+
+</Callout>
+
+### Update and check
+
+```bash
+composer update laravel/framework
+php artisan --version   # Laravel Framework 12.71.0
+```
+
+If you pinned the workaround from our [Laravel 13.40 post](/laravel-13-40-slow-jobs-middleware-insert-strict-input#security-upgrade-if-you-use-concurrencyrun) (switching a task to the `sync` driver, or removing output from it), you can undo it after the update.
+
+<TryIt title="Try it yourself">
+
+Add this test to a Laravel 12 app, run it on your current version, then again after the update:
+
+```php title="tests/Feature/ConcurrencyEnvelopeTest.php"
+use Illuminate\Support\Facades\Concurrency;
+
+it('ignores output a task prints', function () {
+    [$result] = Concurrency::driver('process')->run([
+        static function () {
+            echo json_encode(['successful' => true, 'result' => serialize('forged')])."\x1f\x8b";
+
+            return 'real';
+        },
+    ]);
+
+    expect($result)->toBe('real');
+});
+```
+
+On 12.70.x it fails with `'forged'`. On 12.71.0 it passes.
+
+</TryIt>
+
+## In case you missed it
+
+Four posts went out since last Monday's roundup:
+
+| Post | In one line |
+|---|---|
+| [Inertia 3.11 live props: real-time Vue pages with Reverb](/inertia-3-11-live-props) | Props that refresh themselves when the server broadcasts a change |
+| [Laravel 13.40: slow job alerts, middleware insertBefore() and strict input](/laravel-13-40-slow-jobs-middleware-insert-strict-input) | `Queue::whenJobRunsLongerThan()`, `$middleware->insertAfter()`, `strict: true` casting and the 13.x side of this fix |
+| [Laravel once(): memoize anything per request in one line](/laravel-once-helper-memoization) | Cache an expensive call for the rest of the request |
+| [Laravel Http::pool(): call three APIs in the time of one](/laravel-http-pool-concurrent-requests) | Concurrent HTTP calls without a queue |
+
+## Upgrade notes
+
+- **Laravel 12:** update to 12.71.0 if you use `Concurrency::run()` with the `process` driver. No code changes, no config changes.
+- **Laravel 13:** you already have this fix if you're on 13.40.0 or later.
+- If a task's output used to break `Concurrency::run()` and you worked around it, the workaround is no longer needed.
+
+## Recap
+
+- Laravel 12.71.0 brings the signed Concurrency result envelope from 13.40 to the 12.x line.
+- A task's own output can no longer forge the value the parent unserializes, and plain `echo` output no longer crashes the parent.
+- Update with `composer update laravel/framework`; nothing else changed in the watched packages this week.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Am I affected if I never call Concurrency::run()?', a: 'No. The change only touches the process driver of the Concurrency component. If you never use Concurrency, 12.71.0 changes nothing for you, but it is still a safe update.' },
+  { q: 'Does Concurrency::defer() need this?', a: 'No. defer() starts the child processes in the background after the response is sent and never reads their output, so there is no result to forge. It is unchanged in 12.71.0.' },
+  { q: 'Can my task code read LARAVEL_CONCURRENCY_HMAC_KEY?', a: 'No. The child process removes the variable from $_SERVER, $_ENV and getenv() before it runs your closure.' },
+  { q: 'What happens if a child process prints no valid frame at all?', a: 'The parent throws a RuntimeException that says the process did not return a valid result envelope and shows the first 200 characters of its output.' },
+]} />
+
+## Next steps
+
+- [Load slow dashboard queries in parallel with Concurrency::run()](/laravel-concurrency-run-parallel-dashboard)
+- [Laravel 13.40: slow job alerts, middleware insertBefore() and strict input](/laravel-13-40-slow-jobs-middleware-insert-strict-input)
+- [Laravel docs: Concurrency](https://laravel.com/docs/12.x/concurrency)
+
+## Sources
+
+- [laravel/framework v12.71.0 tag](https://github.com/laravel/framework/tree/v12.71.0) and [compare v12.70.2...v12.71.0](https://github.com/laravel/framework/compare/v12.70.2...v12.71.0)
+- [12.x port commit 0f90494](https://github.com/laravel/framework/commit/0f904940d176d51db1105cc925136f01bb69e92c)
+- [PR #62297: authenticate the Concurrency process result envelope (13.x)](https://github.com/laravel/framework/pull/62297)
+- [Laravel 12.x docs: Concurrency](https://laravel.com/docs/12.x/concurrency)
