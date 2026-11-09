@@ -1,0 +1,16 @@
+flowchart LR
+  A["`Your code: **Sleep::for(n)->unit()**
+  or retry(), Http::retry(),
+  lock block(), limiters`"] --> B{"`Sleep object destroyed:
+  **Sleep::fake()** on?`"}
+  B -- "production: off" --> C["`PHP **sleep() / usleep()**
+  really pause`"]
+  B -- "tests: on" --> D["`No pause.
+  Duration **recorded**
+  in the sequence`"]
+  D --> E["`whenFakingSleep callbacks
+  and **syncWithCarbon**
+  moves now() forward`"]
+  D --> F["`Your test asserts:
+  **assertSequence**, assertSlept,
+  assertSleptTimes, assertNeverSlept`"]
