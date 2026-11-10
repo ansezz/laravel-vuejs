@@ -3,7 +3,7 @@ id: 121
 title: "Chunk a large export in a job"
 seoTitle: "Chunk a large export"
 excerpt: "chunkById walks a table in a job. Do not chunk() an update, and do not do this work inside the HTTP request."
-description: "chunkById walks a table in a job. Do not chunk() an update, and do not do this work inside the HTTP request."
+description: "Export a large Laravel table in a queued job with chunkById, so memory stays flat and the HTTP request returns fast. Why chunk() breaks when you update rows."
 date: 2026-10-11T11:08:00Z
 snippet: "Post::query()->chunkById(200, function ($posts) { ... })"
 categories: [laravel, vuejs]

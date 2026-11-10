@@ -3,7 +3,7 @@ id: 139
 title: "Log a failure without the password"
 seoTitle: "Do not log the password"
 excerpt: "Log the user id and the failure. Do not log the request body, the token, or the password."
-description: "Log the user id and the failure. Do not log the request body, the token, or the password."
+description: "Log a failure in Laravel without leaking secrets: log the user id, the action and the error, never the request body, the token or the password."
 date: 2026-10-11T11:26:00Z
 snippet: "Log::warning('login failed', ['email' => $email])"
 categories: [laravel, vuejs]

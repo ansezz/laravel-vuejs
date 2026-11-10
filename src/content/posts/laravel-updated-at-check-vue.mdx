@@ -3,7 +3,7 @@ id: 96
 title: "Reject a Vue form that edited a stale row"
 seoTitle: "Reject a stale Vue form"
 excerpt: "Send updated_at with the form and compare it before you write. Do not use HTTP 409 for that."
-description: "Send updated_at with the form and compare it before you write. Do not use HTTP 409 for that."
+description: "Reject a stale Vue form edit in Laravel: send updated_at with the form, compare it before writing, and return a validation error, not an overwrite."
 date: 2026-10-11T10:43:00Z
 snippet: "$post->updated_at->equalTo(...)"
 categories: [laravel, vuejs]

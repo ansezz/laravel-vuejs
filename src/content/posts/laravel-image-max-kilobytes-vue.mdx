@@ -3,7 +3,7 @@ id: 120
 title: "The image max rule is kilobytes"
 seoTitle: "Image max is kilobytes"
 excerpt: "max:2048 on a file is 2 MB. PHP can reject the upload first, and Laravel then looks like the field was empty."
-description: "max:2048 on a file is 2 MB. PHP can reject the upload first, and Laravel then looks like the field was empty."
+description: "Laravel's max rule on an image file is in kilobytes, so max:2048 means 2 MB. PHP's upload_max_filesize can reject the file first, making the field look empty."
 date: 2026-10-11T11:07:00Z
 snippet: "'cover' => ['nullable', 'image', 'max:2048']"
 categories: [laravel, vuejs]
