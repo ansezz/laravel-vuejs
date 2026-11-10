@@ -117,7 +117,7 @@ export const traps: Trap[] = [
   {
     id: "conflict",
     task: "Tell the author this post changed under them.",
-    guide: "/inertia-error-409-vue",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Read an Inertia 409 after deploy",
     rule: "Do not abort(409) from a controller to mean this record changed. Inertia already uses 409 for the asset version, and the client will reload instead of showing your sentence.",
     lines: [
@@ -157,7 +157,7 @@ export const traps: Trap[] = [
   {
     id: "csrf",
     task: "Stop the 419 on a same-host Inertia form.",
-    guide: "/laravel-vue-419-after-deploy",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Fix a 419 after you deploy",
     rule: "Do not disable VerifyCsrfToken for the whole web group. The token is the check.",
     lines: [

@@ -4,6 +4,7 @@ title: "Laravel and Vue CRUD with Inertia"
 excerpt: "Create, edit, and delete posts from a Vue page, with validation errors, search, and pagination. Continues the official Vue starter kit."
 description: "A Laravel 13 and Vue 3 CRUD with Inertia: controller actions, the Form component, validation errors, search, and pagination."
 seoTitle: "Laravel Vue CRUD with Inertia"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T04:50:00Z
 snippet: "php artisan make:controller PostController"
 categories: [laravel, vuejs]
@@ -362,6 +363,38 @@ The starter kit uses Pest. These tests hit the web routes, so they use the sessi
 
 It does not tell the reader the save worked. That sentence is a [flash](/laravel-vue-flash). It does not upload a file, broadcast a "post created" event, or render the list on the server for Google. Those are the [upload](/laravel-vue-file-upload), [Reverb](/laravel-reverb-vue), and [deploy](/deploy-laravel-vue) guides. Other paginators, live validation, and who may edit a row are the [pagination](/laravel-vue-pagination), [Precognition](/laravel-precognition-vue), and [permissions](/laravel-vue-policies#roles-and-permissions-with-spatie) guides. Keep this controller boring. That is the page people can finish in an afternoon.
 
+## Stop a stale edit from overwriting
+
+Two tabs open the same post. Both save. Without a check, the second save silently overwrites the first. Send the `updated_at` the form was loaded with, and only update the row if it still matches:
+
+```php title="app/Http/Controllers/PostController.php"
+public function update(Request $request, Post $post): RedirectResponse
+{
+    $validated = $request->validate([
+        'title' => ['required', 'string', 'max:120'],
+        'updated_at' => ['required', 'date'],
+    ]);
+
+    $saved = Post::whereKey($post->id)
+        ->where('updated_at', Carbon::parse($validated['updated_at']))
+        ->update(['title' => $validated['title'], 'updated_at' => now()]);
+
+    if ($saved === 0) {
+        throw ValidationException::withMessages([
+            'title' => 'Someone else changed this post. Reload to see their version.',
+        ]);
+    }
+
+    return to_route('posts.edit', $post);
+}
+```
+
+```vue
+<input type="hidden" name="updated_at" :value="post.updated_at" />
+```
+
+The `where` and the `update` are one SQL statement, so two requests can't both pass the check. The test for this setup saves twice with the same timestamp: the first returns 1 row and the second returns 0. The message lands in `form.errors.title` like any other validation error. Don't `abort(409)` here: Inertia uses 409 for [asset version changes](/deploy-laravel-vue#409-means-new-assets). Compare `updated_at` values in the same format, and keep Laravel's default timestamp precision.
+
 ## Recap
 
 - One resource route and one controller cover the screen.
@@ -392,3 +425,5 @@ It does not tell the reader the save worked. That sentence is a [flash](/laravel
 - [Inertia v3: Forms](https://inertiajs.com/docs/v3/the-basics/forms)
 - [Inertia v3: Manual visits](https://inertiajs.com/docs/v3/the-basics/manual-visits)
 - [Laravel 13: Pagination](https://laravel.com/framework/docs/13.x/pagination)
+- [Laravel docs: Eloquent timestamps](https://laravel.com/framework/docs/13.x/eloquent#timestamps)
+- [Laravel docs: Validation](https://laravel.com/framework/docs/13.x/validation)

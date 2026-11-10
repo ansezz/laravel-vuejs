@@ -4,6 +4,7 @@ title: "Laravel API resources for a Vue client"
 excerpt: "A resource is the JSON shape a SPA or Nuxt reads. An Inertia page can keep passing the model. Axios sees the rows on response.data.data."
 description: "Shape Laravel JSON for Vue with PostResource and a paginated collection, and read rows from response.data.data."
 seoTitle: "Laravel API resources for Vue"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T06:50:00Z
 snippet: "php artisan make:resource PostResource"
 categories: [laravel, vuejs]
@@ -113,6 +114,18 @@ Do not call `Storage::url` for a private file and hand the URL to any logged-in 
 
 Do not embed the entire author model. Pass `author: $this->user?->only(['id', 'name'])` when you add that relation. Until the post has a user, leave it out. The [policy guide](/laravel-vue-policies) is what adds `user_id`.
 
+## Version the API under /api/v1
+
+When a mobile app or a partner calls the same data, give the JSON API its own versioned prefix. Install the API routes with `php artisan install:api`, which also installs Sanctum. Then group the routes:
+
+```php title="routes/api.php"
+Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+    Route::apiResource('posts', Api\V1\PostController::class)->only(['index', 'show']);
+});
+```
+
+The URL is `/api/v1/posts`, because `routes/api.php` already adds `/api`. Keep the controllers and resources under `Api\V1` too. A breaking change to a field then becomes a `V2` resource, and old clients keep working. Your Inertia pages don't call these routes. They get props from `routes/web.php` controllers, and those can reuse the same resource classes. Don't point an Inertia `<Link>` at `/api/v1/...`: a JSON body isn't an Inertia response, so the visit fails.
+
 ## Where this stops
 
 <Callout type="heads-up" title="one source per list">
@@ -147,3 +160,5 @@ Inertia pages should not fetch this endpoint to paint the list they already rece
 
 - [Laravel 13: Eloquent API resources](https://laravel.com/framework/docs/13.x/eloquent-resources)
 - [Axios: Response schema](https://axios-http.com/docs/res_schema)
+- [Laravel docs: Route prefixes](https://laravel.com/framework/docs/13.x/routing#route-group-prefixes)
+- [Laravel docs: Routing](https://laravel.com/framework/docs/13.x/routing)

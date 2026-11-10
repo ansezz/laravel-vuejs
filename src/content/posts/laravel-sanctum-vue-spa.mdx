@@ -264,6 +264,37 @@ Do not put that token in `localStorage` for the Vue app that shares your domain.
 
 A third party that must use OAuth, with its own client id, is [Sanctum or Passport](/laravel-sanctum-vs-passport). The separate Vue app still needs its own URLs. That router is [Vue Router on a Laravel API](/vue-router-laravel-spa), and it does not belong in an Inertia app.
 
+## Token abilities
+
+A token issued to a phone app or a CI script can carry abilities:
+
+```php
+$token = $request->user()->createToken('phone', ['posts:read'])->plainTextToken;
+```
+
+Register Sanctum's two middleware aliases, then require abilities on the route:
+
+```php title="bootstrap/app.php"
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
+use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
+
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->alias([
+        'abilities' => CheckAbilities::class,
+        'ability' => CheckForAnyAbility::class,
+    ]);
+})
+```
+
+```php title="routes/api.php"
+Route::middleware(['auth:sanctum', 'abilities:posts:read'])->get('/v1/posts', [PostController::class, 'index']);
+Route::middleware(['auth:sanctum', 'ability:posts:write,posts:admin'])->post('/v1/posts', [PostController::class, 'store']);
+```
+
+`abilities:` needs every listed ability and `ability:` needs any one of them. In the test for this page, a `posts:read` token can read but gets 403 on the post route, while a `posts:admin` token passes. `$request->user()->tokenCan('posts:write')` checks inside an action. A token created without abilities gets `['*']` and can do anything.
+
+There is one trap for the SPA. When the request is authenticated by the session cookie, Sanctum attaches a `TransientToken`, and `tokenCan()` returns **true** for every ability. Abilities therefore limit tokens, not your first-party Vue app. What a user may do to a row is still a [policy](/laravel-vue-policies).
+
 ## A test
 
 <TryIt title="Cover both guards">
@@ -316,3 +347,4 @@ Private broadcast channels from this SPA need a different auth route than a norm
 - [Laravel docs: Sanctum API token authentication](https://laravel.com/framework/docs/13.x/sanctum#api-token-authentication)
 - [Laravel docs: Session](https://laravel.com/framework/docs/13.x/session)
 - [MDN: Set-Cookie Domain](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
+- [Laravel docs: Sanctum token abilities](https://laravel.com/framework/docs/13.x/sanctum#token-abilities)

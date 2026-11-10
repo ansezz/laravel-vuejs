@@ -258,7 +258,7 @@ const token = computed(() => page.flash.mcpToken as string | undefined)
 In our test, the token was in `page.flash` on the visit right after the redirect, and it was gone on the visit after that. It never appeared in `props`. The JSON follows the remote-server shape in [Cursor's `mcp.json` docs](https://cursor.com/docs/context/mcp) (`url` plus `headers`). Other clients use a similar format.
 
 <Callout type="tip" title="Let users revoke tokens">
-List `$request->user()->tokens` on the same page with a delete button. A token pasted into an AI client is a long-lived key to the user's data. See [Sanctum token abilities](/sanctum-token-abilities-vue) if you want an `mcp`-only ability.
+List `$request->user()->tokens` on the same page with a delete button. A token pasted into an AI client is a long-lived key to the user's data. See [Sanctum token abilities](/laravel-sanctum-vue-spa#token-abilities) if you want an `mcp`-only ability.
 </Callout>
 
 ## Try it with the Inspector
@@ -347,7 +347,7 @@ Our lab suite covered:
 
 - [Laravel AI SDK with Vue](/laravel-ai-sdk-vue), to build the agent side inside your own app
 - [Laravel Boost](/laravel-boost-vue), a local MCP server for your coding agent
-- [Sanctum token abilities](/sanctum-token-abilities-vue), to limit what an MCP token can do
+- [Sanctum token abilities](/laravel-sanctum-vue-spa#token-abilities), to limit what an MCP token can do
 - [Laravel policies in Vue](/laravel-vue-policies), to reuse authorization rules inside tools
 
 ## Sources

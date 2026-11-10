@@ -49,7 +49,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "conflict",
-    guide: "/inertia-error-409-vue",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Read an Inertia 409 after deploy",
     reason:
       "Do not abort(409) from a controller to mean this record changed. Inertia already uses 409 for the asset version.",
@@ -70,7 +70,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "csrf",
-    guide: "/laravel-vue-419-after-deploy",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Fix a 419 after you deploy",
     reason:
       "Do not disable VerifyCsrfToken for the whole web group. The token is the check.",

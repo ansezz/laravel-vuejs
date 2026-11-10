@@ -148,6 +148,21 @@ The factory needs `user_id` once the column exists. `assertForbidden` is the ass
 
 Spatie permissions and this policy can both exist. An editor permission can allow `update` even when the user is not the owner, inside the policy, with `$user->can('posts.update')`. Put that combination in the policy so there is still one method the controller calls. Do not check the role in the Vue page.
 
+## Require login first
+
+A policy answers "may this user do this to this row". The question before it is "is anyone logged in", and that belongs on the route:
+
+```php title="routes/web.php"
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('/posts', [PostController::class, 'index'])->name('posts.index');
+    Route::resource('posts', PostController::class)->except('index');
+});
+```
+
+A guest's Inertia visit gets a redirect to the `login` route before the controller runs. Inertia follows it, so the Vue page never mounts and there's nothing to catch in `router.on('error')`. The test for this setup checks both halves: a guest gets the redirect to `/login`, and a signed-in user gets a 200. `verified` sends users with an unverified email to the verification notice.
+
+In Vue, `page.props.auth.user` is for display only, for example showing a name or hiding a menu. It isn't a guard. Don't add Vue Router guards that copy this middleware into an Inertia app. If you call the route with a raw `fetch()` instead of an Inertia visit, you get the login page's HTML back, not JSON.
+
 ## Authorize in the controller
 
 The policy only protects you if every request that changes data asks it. In Laravel 11 and later, the base `Controller` class is empty, so `$this->authorize()` doesn't exist unless you add the `AuthorizesRequests` trait yourself. Use the `Gate` facade instead:
@@ -296,3 +311,5 @@ A user without `posts.publish` gets a 403. Spell the permission the same way in 
 - [Laravel docs: Authorizing actions using policies](https://laravel.com/framework/docs/13.x/authorization#authorizing-actions-using-policies)
 - [spatie/laravel-permission docs: Middleware](https://spatie.be/docs/laravel-permission/v6/basic-usage/middleware)
 - [spatie/laravel-permission on GitHub](https://github.com/spatie/laravel-permission)
+- [Laravel docs: Protecting routes](https://laravel.com/framework/docs/13.x/authentication#protecting-routes)
+- [Inertia docs: Authentication](https://inertiajs.com/docs/v3/security/authentication)

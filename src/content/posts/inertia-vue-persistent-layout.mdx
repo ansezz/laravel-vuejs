@@ -4,6 +4,7 @@ title: "Keep the Vue layout between Inertia visits"
 excerpt: "The Vue starter kit already keeps one layout alive between pages. Wrapping each page in AppLayout builds a new shell every time."
 description: "The Vue starter kit already keeps one layout between visits. Wrapping each page in AppLayout builds a new shell every time."
 seoTitle: "Inertia persistent layouts"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T09:40:00Z
 snippet: "layout: AppLayout"
 categories: [laravel, vuejs]
@@ -113,6 +114,45 @@ Scroll the sidebar halfway down, then click to another page that uses `AppLayout
 
 </TryIt>
 
+## Shared props for the layout
+
+Data every page needs, such as the signed-in user, the app name or flash messages, goes in `HandleInertiaRequests::share()`:
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+public function share(Request $request): array
+{
+    return [
+        ...parent::share($request),
+        'name' => config('app.name'),
+        'auth' => ['user' => $request->user()],
+        'unreadCount' => fn () => $request->user()?->unreadNotifications()->count(),
+    ];
+}
+```
+
+Wrap anything that queries the database in a closure. Inertia only calls it when it builds the props. A partial reload that asks for other keys skips it, and the test for this setup confirms the closure runs once on the full visit and not again on the partial reload. Shared props are in every response and in the page's HTML, so never share a secret or an API token. Data for a single page still belongs in that page's controller.
+
+### What the layout can read
+
+The layout reads shared props through `usePage()`:
+
+```vue title="resources/js/layouts/AppLayout.vue"
+<script setup lang="ts">
+import { computed } from "vue";
+import { usePage } from "@inertiajs/vue3";
+
+const page = usePage();
+const user = computed(() => page.props.auth.user);
+</script>
+
+<template>
+  <header>{{ user?.name }}</header>
+  <slot />
+</template>
+```
+
+A prop returned by one controller, such as `post`, is on `page.props` only while that page is showing. Type the layout against the shared props, not against page props. When the layout needs something from the page, such as breadcrumbs, set it through the page's `defineOptions({ layout: ... })`, as shown above.
+
 ## Where this stops
 
 This page does not draw the sidebar, and it does not add a layout package. Settings already nest two layouts in the array above. The logged-in user inside that shell is the [setup guide](/application-setup).
@@ -143,3 +183,5 @@ This page does not draw the sidebar, and it does not add a layout package. Setti
 
 - [Inertia v3: Layouts](https://inertiajs.com/docs/v3/the-basics/layouts)
 - [Laravel Vue starter kit](https://github.com/laravel/vue-starter-kit)
+- [Inertia docs: Shared data](https://inertiajs.com/docs/v3/data-props/shared-data)
+- [Inertia docs: Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads)
