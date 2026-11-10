@@ -36,7 +36,7 @@ public static function shouldBeStrict(bool $shouldBeStrict = true)
 }
 ```
 
-Why most people miss it: the [13.x docs](https://laravel.com/docs/13.x/eloquent#configuring-eloquent-strictness) document the first two switches and never mention the one-liner or the third switch. You find `shouldBeStrict()` by reading the source, or you don't find it.
+Why most people miss it: the [13.x docs](https://laravel.com/framework/docs/13.x/eloquent#configuring-eloquent-strictness) document the first two switches and never mention the one-liner or the third switch. You find `shouldBeStrict()` by reading the source, or you don't find it.
 
 <Diagram name="laravel-model-should-be-strict" alt="Model::shouldBeStrict() in AppServiceProvider turns on three checks. preventLazyLoading fires when you read a relation on a model that came from a list of two or more. preventSilentlyDiscardingAttributes fires when create, fill or update gets a key that is not fillable. preventAccessingMissingAttributes fires when you read a column you did not select, or a typo, on a fetched model. Each check then asks: is a handler registered? If no, Laravel throws LazyLoadingViolationException, MassAssignmentException or MissingAttributeException. If yes, it calls your handler so you can log and carry on." caption="One call, three checks, and you choose between throw and log." />
 
@@ -173,7 +173,7 @@ public function boot(): void
 }
 ```
 
-The exception as a third argument is new: [PR #61504](https://github.com/laravel/framework/pull/61504) shipped in Laravel 13.32. On older versions, build it yourself (`new LazyLoadingViolationException($model, $relation)`), as the [docs example](https://laravel.com/docs/13.x/eloquent-relationships#preventing-lazy-loading) does with a plain `info()` log.
+The exception as a third argument is new: [PR #61504](https://github.com/laravel/framework/pull/61504) shipped in Laravel 13.32. On older versions, build it yourself (`new LazyLoadingViolationException($model, $relation)`), as the [docs example](https://laravel.com/framework/docs/13.x/eloquent-relationships#preventing-lazy-loading) does with a plain `info()` log.
 
 What the handlers do instead of throwing, measured in the lab:
 
@@ -256,13 +256,13 @@ If you are starting a new Laravel app today, add it before the first model. If t
 - [Laravel automatic eager loading](/laravel-automatic-eager-loading), the other half of the N+1 story
 - [Form requests with Inertia](/laravel-form-request-inertia), where validated data meets `#[Fillable]`
 - [API resources for Vue](/laravel-api-resources-vue), to keep Inertia props to the fields you chose
-- [Laravel docs: Configuring Eloquent strictness](https://laravel.com/docs/13.x/eloquent#configuring-eloquent-strictness)
+- [Laravel docs: Configuring Eloquent strictness](https://laravel.com/framework/docs/13.x/eloquent#configuring-eloquent-strictness)
 
 ## Sources
 
-- [Laravel 13 docs: Configuring Eloquent strictness](https://laravel.com/docs/13.x/eloquent#configuring-eloquent-strictness)
-- [Laravel 13 docs: Mass assignment exceptions](https://laravel.com/docs/13.x/eloquent#mass-assignment-exceptions)
-- [Laravel 13 docs: Preventing lazy loading](https://laravel.com/docs/13.x/eloquent-relationships#preventing-lazy-loading)
+- [Laravel 13 docs: Configuring Eloquent strictness](https://laravel.com/framework/docs/13.x/eloquent#configuring-eloquent-strictness)
+- [Laravel 13 docs: Mass assignment exceptions](https://laravel.com/framework/docs/13.x/eloquent#mass-assignment-exceptions)
+- [Laravel 13 docs: Preventing lazy loading](https://laravel.com/framework/docs/13.x/eloquent-relationships#preventing-lazy-loading)
 - [laravel/framework PR #44283: `preventAccessingMissingAttributes()` and `shouldBeStrict()` (Laravel 9.35)](https://github.com/laravel/framework/pull/44283)
 - [laravel/framework PR #44664: handlers for discarded and missing attribute violations](https://github.com/laravel/framework/pull/44664)
 - [laravel/framework v13.32.0 release (PR #61504: pass the exception to violation callbacks)](https://github.com/laravel/framework/releases/tag/v13.32.0)

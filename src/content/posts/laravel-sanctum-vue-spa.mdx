@@ -137,7 +137,7 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 ```
 
-[Laravel Fortify](https://laravel.com/docs/13.x/fortify) can own `/login` instead of the closure above. Use it when you also need registration, password reset, and two-factor. The cookie rules do not change.
+[Laravel Fortify](https://laravel.com/framework/docs/13.x/fortify) can own `/login` instead of the closure above. Use it when you also need registration, password reset, and two-factor. The cookie rules do not change.
 
 ## The Vue side
 
@@ -297,6 +297,6 @@ Private broadcast channels from this SPA need a different auth route than a norm
 
 ## Sources
 
-- [Laravel 13: Sanctum](https://laravel.com/docs/13.x/sanctum)
-- [Laravel 13: Sanctum, SPA authentication](https://laravel.com/docs/13.x/sanctum#spa-authentication)
+- [Laravel 13: Sanctum](https://laravel.com/framework/docs/13.x/sanctum)
+- [Laravel 13: Sanctum, SPA authentication](https://laravel.com/framework/docs/13.x/sanctum#spa-authentication)
 - [Axios: Request config](https://axios-http.com/docs/req_config)

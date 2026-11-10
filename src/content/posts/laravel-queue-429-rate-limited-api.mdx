@@ -88,7 +88,7 @@ Each test dispatched to the `database` queue and ran `queue:work --once` with a 
 
 ## Releases burn Tries
 
-The [queue docs](https://laravel.com/docs/13.x/queues#max-attempts) list a manual `release()` and middleware releases as attempts, and our run matched. With `#[Tries(3)]` and a CRM that kept answering 429, the third release was the last. On the next pickup, Laravel didn't call `handle()` and failed the job:
+The [queue docs](https://laravel.com/framework/docs/13.x/queues#max-attempts) list a manual `release()` and middleware releases as attempts, and our run matched. With `#[Tries(3)]` and a CRM that kept answering 429, the third release was the last. On the next pickup, Laravel didn't call `handle()` and failed the job:
 
 ```text
 Illuminate\Queue\MaxAttemptsExceededException:
@@ -122,7 +122,7 @@ public function retryUntil(): \DateTime
 }
 ```
 
-The docs say [`retryUntil` takes precedence](https://laravel.com/docs/13.x/queues#time-based-attempts) over `Tries`. With `#[Tries(1)]` and `retryUntil()`, our job was released five times with no failure. The first pickup after the deadline failed it. This is the setup the docs recommend for the `ThrottlesExceptions` middleware.
+The docs say [`retryUntil` takes precedence](https://laravel.com/framework/docs/13.x/queues#time-based-attempts) over `Tries`. With `#[Tries(1)]` and `retryUntil()`, our job was released five times with no failure. The first pickup after the deadline failed it. This is the setup the docs recommend for the `ThrottlesExceptions` middleware.
 
 ## Fix 3: don't call the API when you know you're over
 
@@ -202,9 +202,9 @@ Store the sync state on the order in `failed()`, for example `$order->update(['c
 
 ## Sources
 
-- [Laravel docs: Queues, max attempts and timeout](https://laravel.com/docs/13.x/queues#max-job-attempts-and-timeout)
-- [Laravel docs: Queues, rate limiting middleware](https://laravel.com/docs/13.x/queues#rate-limiting)
-- [Laravel docs: Queues, testing job / queue interactions](https://laravel.com/docs/13.x/queues#testing-job-queue-interactions)
+- [Laravel docs: Queues, max attempts and timeout](https://laravel.com/framework/docs/13.x/queues#max-job-attempts-and-timeout)
+- [Laravel docs: Queues, rate limiting middleware](https://laravel.com/framework/docs/13.x/queues#rate-limiting)
+- [Laravel docs: Queues, testing job / queue interactions](https://laravel.com/framework/docs/13.x/queues#testing-job-queue-interactions)
 - [Source: `Illuminate\Queue\Worker::calculateBackoff`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Queue/Worker.php)
 - [RFC 9110: Retry-After](https://www.rfc-editor.org/rfc/rfc9110#field.retry-after)
 - [MDN: 429 Too Many Requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/429)

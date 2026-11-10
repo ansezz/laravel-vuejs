@@ -25,7 +25,7 @@ Your dashboard prop hits `Cache::remember` with a 60-second TTL. At second 61, o
 
 ## What Cache::flexible is and why people miss it
 
-`Cache::flexible` arrived in Laravel 11.23 (September 2024), in the same Laracon release as `defer()` and `Concurrency`. It lives on the [cache docs](https://laravel.com/docs/13.x/cache#swr) under "Stale While Revalidate", one heading below `remember`. Easy to scroll past when you already "know" the Cache facade.
+`Cache::flexible` arrived in Laravel 11.23 (September 2024), in the same Laracon release as `defer()` and `Concurrency`. It lives on the [cache docs](https://laravel.com/framework/docs/13.x/cache#swr) under "Stale While Revalidate", one heading below `remember`. Easy to scroll past when you already "know" the Cache facade.
 
 The idea comes from HTTP's `stale-while-revalidate`: serve what you have, refresh in the background, and only make someone wait when the entry is truly gone.
 
@@ -261,12 +261,12 @@ If you already `Cache::remember` a count or aggregate for an Inertia page, you c
 - [Laravel defer(): run code after the response](/laravel-defer-helper-after-response), the helper flexible uses for refreshes
 - [Cache a prop and forget it on write](/laravel-cache-remember-vue), when plain `remember` is the right tool
 - [Inertia partial reloads](/inertia-partial-reloads), so slow props are not refetching on every visit
-- [Laravel docs: Stale while revalidate](https://laravel.com/docs/13.x/cache#swr)
+- [Laravel docs: Stale while revalidate](https://laravel.com/framework/docs/13.x/cache#swr)
 
 ## Sources
 
-- [Laravel 13 docs: Stale while revalidate (`Cache::flexible`)](https://laravel.com/docs/13.x/cache#swr)
-- [Laravel 13 docs: Deferred functions](https://laravel.com/docs/13.x/helpers#deferred-functions)
+- [Laravel 13 docs: Stale while revalidate (`Cache::flexible`)](https://laravel.com/framework/docs/13.x/cache#swr)
+- [Laravel 13 docs: Deferred functions](https://laravel.com/framework/docs/13.x/helpers#deferred-functions)
 - [laravel/framework v11.23.0 release (Laracon 2024 PR #52710)](https://github.com/laravel/framework/releases/tag/v11.23.0)
 - [laravel/framework PR #52891: Cache::flexible improvements](https://github.com/laravel/framework/pull/52891)
 - [Source: `Illuminate\Cache\Repository::flexible`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Cache/Repository.php)

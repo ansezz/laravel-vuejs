@@ -39,7 +39,7 @@ select * from "contacts"
 where "team_id" = ? and ("name" like ? or "email" like ? or "phone" like ?)
 ```
 
-Why people miss them: they shipped in point releases, not in a major version's headline list. The [docs section](https://laravel.com/docs/13.x/queries#where-any-all-none-clauses) sits between "Where Not" and "JSON Where", easy to scroll past. And every search tutorial (and every autocomplete trained on them) predates it, so the `where(function ($q) { ... })` closure is pure muscle memory.
+Why people miss them: they shipped in point releases, not in a major version's headline list. The [docs section](https://laravel.com/framework/docs/13.x/queries#where-any-all-none-clauses) sits between "Where Not" and "JSON Where", easy to scroll past. And every search tutorial (and every autocomplete trained on them) predates it, so the `where(function ($q) { ... })` closure is pure muscle memory.
 
 [Under the hood](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Query/Builder.php) it is a loop inside `whereNested()`: each column gets a `where()` joined with `or` (for `whereAny`) or `and` (for `whereAll`). `whereNone` is `whereAny` with `not` in front. The parentheses come from `whereNested()`, which is exactly the part people forget.
 
@@ -266,12 +266,12 @@ The first line has no parentheses around the `or`. The second does. Now grep you
 - [Search one column from a Vue field](/laravel-where-search-vue), the single-column version of this search
 - [Vue onWatcherCleanup](/vue-onwatchercleanup-cancel-stale-requests), for the debounced search box
 - [Laravel + Vue pagination](/laravel-vue-pagination), to keep `?search=` on every page link
-- [Laravel docs: Where Any / All / None clauses](https://laravel.com/docs/13.x/queries#where-any-all-none-clauses)
+- [Laravel docs: Where Any / All / None clauses](https://laravel.com/framework/docs/13.x/queries#where-any-all-none-clauses)
 
 ## Sources
 
-- [Laravel 13 docs: Where Any / All / None clauses](https://laravel.com/docs/13.x/queries#where-any-all-none-clauses)
-- [Laravel 13 docs: Logical grouping](https://laravel.com/docs/13.x/queries#logical-grouping)
+- [Laravel 13 docs: Where Any / All / None clauses](https://laravel.com/framework/docs/13.x/queries#where-any-all-none-clauses)
+- [Laravel 13 docs: Logical grouping](https://laravel.com/framework/docs/13.x/queries#logical-grouping)
 - [laravel/framework PR #50344: Add whereAll and whereAny (Laravel 10.47)](https://github.com/laravel/framework/pull/50344)
 - [laravel/framework PR #52260: Add whereNone (Laravel 11.19)](https://github.com/laravel/framework/pull/52260)
 - [laravel/framework PR #52555: whereAny closures (Laravel 11.22)](https://github.com/laravel/framework/pull/52555)

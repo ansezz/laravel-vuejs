@@ -211,7 +211,7 @@ Why it changed: Laravel 13.0 switched the default `concurrency` from `null` to `
 
 </Callout>
 
-**Config on `Http::` before `pool()` is silently dropped.** `Http::withHeaders(['X-Tenant' => 'acme'])->withToken('secret')->pool(...)` sent neither the header nor the token in our test. Each request in the pool starts fresh. The [docs say it](https://laravel.com/docs/13.x/http-client#customizing-concurrent-requests), and nothing warns you at runtime. Put the config on each request, or share it with a `PendingRequest` macro:
+**Config on `Http::` before `pool()` is silently dropped.** `Http::withHeaders(['X-Tenant' => 'acme'])->withToken('secret')->pool(...)` sent neither the header nor the token in our test. Each request in the pool starts fresh. The [docs say it](https://laravel.com/framework/docs/13.x/http-client#customizing-concurrent-requests), and nothing warns you at runtime. Put the config on each request, or share it with a `PendingRequest` macro:
 
 ```php title="app/Providers/AppServiceProvider.php"
 use Illuminate\Http\Client\PendingRequest;
@@ -321,11 +321,11 @@ Your numbers depend on your network; the gap is what matters. Then search your a
 - [Concurrency::run()](/laravel-concurrency-run-parallel-dashboard), when the slow part is PHP or the database
 - [The defer() helper](/laravel-defer-helper-after-response), for calls the user doesn't need to wait for
 - [Testing with Http::fake()](/laravel-http-fake-test-vue), to cover the failure paths above
-- [Laravel docs: concurrent requests](https://laravel.com/docs/13.x/http-client#concurrent-requests)
+- [Laravel docs: concurrent requests](https://laravel.com/framework/docs/13.x/http-client#concurrent-requests)
 
 ## Sources
 
-- [Laravel 13 docs: HTTP client, concurrent requests](https://laravel.com/docs/13.x/http-client#concurrent-requests)
+- [Laravel 13 docs: HTTP client, concurrent requests](https://laravel.com/framework/docs/13.x/http-client#concurrent-requests)
 - [laravel/framework PR #36948: Handle concurrent asynchronous requests in the HTTP client (Laravel 8.37)](https://github.com/laravel/framework/pull/36948)
 - [laravel/framework PR #56946: Add Http::batch (Laravel 12.32)](https://github.com/laravel/framework/pull/56946)
 - [laravel/framework PR #57555: Concurrency control for Http::pool and Http::batch (Laravel 12.36)](https://github.com/laravel/framework/pull/57555)
