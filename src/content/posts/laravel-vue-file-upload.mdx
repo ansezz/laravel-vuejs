@@ -185,6 +185,33 @@ if ($request->hasFile('cover')) {
 
 Do this in the same request as the database update. A queue is the wrong place for "the user just picked a new avatar" unless the file is large enough that the HTTP request times out.
 
+## The public URL
+
+`storage:link` creates the `public/storage` symlink the [upload form](#the-column-and-the-link) already runs. The path you pass to Vue comes from `Storage::url($path)` when the disk is `public`, for example `/storage/covers/a.jpg`:
+
+```vue
+<img v-if="post.cover_url" :src="post.cover_url" alt="" />
+```
+
+Don't commit `public/storage` as a real directory of uploads. The symlink is local to each machine. Laravel Cloud resets the app disk on each deploy, so don't run this there and expect the next release to keep it. User uploads on Cloud belong in the bucket the [deploy guide](/deploy-laravel-vue) points at.
+
+## Temporary URLs for private files
+
+Keep private objects private. Hand the page a URL that expires, instead of making the bucket public to fix a 403 on the `<img>`:
+
+```php
+'cover' => Storage::disk('s3')->temporaryUrl(
+    $post->cover_path,
+    now()->addMinutes(5),
+),
+```
+
+Generate the URL when you render, not when you upload, and don't store it in the database. Five minutes later the image request fails, which is the point. The disk needs the S3 key in `.env`, not in a `VITE_` variable. The browser never sees that key. It sees the signed URL.
+
+Don't pass `cover_path` to Vue and build the S3 URL in the component. You would publish the bucket layout, and you still could not sign it without the secret. Don't cache the HTML of this page for an hour. The URL inside it dies first.
+
+The `local` disk also supports `temporaryUrl()` when `'serve' => true`, which is the default in the Laravel 13 skeleton. In tests on Laravel 13, that URL contains `signature` and `expires` query parameters. Use it for a private export on one machine; use S3 when more than one server has to read the file.
+
 ## Production
 
 The `public` disk is fine for images you are happy to serve from the app server. For anything private, use a non-public disk and a temporary URL. For more than one server, the local disk is the wrong place: the next request may hit a machine that does not have the file. Point the disk at S3-compatible storage then. The Vue form does not change.
@@ -204,6 +231,8 @@ The `public` disk is fine for images you are happy to serve from the app server.
 - `image` + `max` in kilobytes on the server.
 - Spoof `PUT` with `_method` when a file is attached.
 - Clean up replaced files; move to object storage when you scale.
+- Pass `Storage::url()` for public files; don't commit the `public/storage` symlink.
+- Use `temporaryUrl` for private objects; don't make the bucket public to fix an `<img>` tag.
 
 ## FAQ
 
@@ -212,6 +241,8 @@ The `public` disk is fine for images you are happy to serve from the app server.
   { q: 'Why is the file empty when I update with Inertia?', a: 'PHP does not parse multipart files on a real PUT or PATCH. Send the form as POST with `_method` set to `put`.' },
   { q: 'Is Laravel max:2048 in megabytes?', a: 'No, kilobytes. `max:2048` is about 2 MB for files.' },
   { q: 'Does storing a new file delete the old one?', a: 'No. Delete the previous path with `Storage::disk(\'public\')->delete()` in the same request.' },
+  { q: "Should I commit the public/storage directory?", a: "No. `storage:link` creates a symlink that is local to each machine. Committing `public/storage` as a real directory of uploads will not work on the next server, and Laravel Cloud resets that disk on each deploy." },
+  { q: "Should I make the S3 bucket public so the image tag works?", a: "No. Keep the object private and pass a `temporaryUrl` that expires. Don't send `cover_path` to Vue and try to build the S3 URL in the component: you cannot sign it without the secret." },
 ]} />
 
 ## Next steps
@@ -227,3 +258,5 @@ The `public` disk is fine for images you are happy to serve from the app server.
 - [Inertia v3: File uploads](https://inertiajs.com/docs/v3/the-basics/file-uploads)
 - [Laravel docs: The image rule](https://laravel.com/framework/docs/13.x/validation#rule-image)
 - [Laravel docs: The max rule](https://laravel.com/framework/docs/13.x/validation#rule-max)
+- [Laravel docs: The public disk](https://laravel.com/framework/docs/13.x/filesystem#the-public-disk)
+- [Laravel docs: Temporary URLs](https://laravel.com/framework/docs/13.x/filesystem#temporary-urls)

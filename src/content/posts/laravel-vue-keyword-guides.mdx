@@ -101,7 +101,8 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 
 ## Data
 
-- [Search one column from a Vue field](/laravel-where-search-vue)
+- [A sortable Laravel and Vue table](/laravel-vue-datatable)
+  - [Search one column from a Vue field](/laravel-vue-datatable#search-one-column)
 - [Laravel and Vue pagination](/laravel-vue-pagination)
   - [Order a cursor page by id](/laravel-vue-pagination#newest-first-with-a-cursor)
   - [Paginate an API resource for Vue](/laravel-vue-pagination#paginate-an-api-resource)
@@ -112,14 +113,18 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
   - [Bind a public URL to a slug](/laravel-route-model-binding-vue#bind-by-slug)
 - [Soft deletes in a Laravel + Vue app: the index, a trash screen and restore](/laravel-soft-deletes-index-vue)
   - [Restore a soft-deleted row from Vue](/laravel-soft-deletes-index-vue#restore-and-force-delete)
-- [Upsert rows without a per-row form](/laravel-upsert-vue)
-- [Wrap a Vue save in a transaction](/laravel-db-transaction-vue)
-- [Cache a prop and forget it on write](/laravel-cache-remember-vue)
-- [Show an activity log on a Vue page](/laravel-activity-log-vue)
+- [Laravel and Vue CRUD with Inertia](/laravel-inertia-vue-crud)
+  - [Upsert rows without a per-row form](/laravel-inertia-vue-crud#upsert-a-batch-not-a-form)
+  - [Wrap a Vue save in a transaction](/laravel-inertia-vue-crud#wrap-related-writes-in-a-transaction)
+  - [Show an activity log on a Vue page](/laravel-inertia-vue-crud#an-activity-log-for-the-admin)
+- [Cache::flexible: serve stale cache while it refreshes](/laravel-cache-flexible-swr)
+  - [Cache a prop and forget it on write](/laravel-cache-flexible-swr#forget-a-remembered-key-on-write)
 - [Laravel Pennant feature flags in a Vue app: define, share, gate and test](/laravel-pennant-feature-flag-vue)
-- [Switch the app locale from Vue](/laravel-app-locale-vue)
-- [Format a timestamp in the user's zone](/laravel-app-timezone-vue)
-- [Format money before it reaches Vue](/format-money-vue-laravel)
+- [Laravel and Vue translations](/laravel-vue-i18n)
+  - [Switch the app locale from Vue](/laravel-vue-i18n#save-the-locale-on-the-user)
+- [Laravel API resources for a Vue client](/laravel-api-resources-vue)
+  - [Format a timestamp in the user's zone](/laravel-api-resources-vue#format-timestamps-in-the-users-zone)
+  - [Format money before it reaches Vue](/laravel-api-resources-vue#format-money-on-the-server)
 
 ## Files
 
@@ -127,9 +132,9 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
   - [Download a file through a signed URL](/laravel-signed-email-link-vue#signed-downloads)
 - [Export CSV from Laravel to a Vue button: stream it, chunk it, or queue it](/laravel-csv-export-vue)
   - [Chunk a large export in a job](/laravel-csv-export-vue#the-chunk-bug)
-- [Fix an image 404 with storage:link](/php-artisan-storage-link-vue)
-- [Show a private S3 file for a few minutes](/laravel-s3-temporary-url-vue)
 - [Upload files from Vue to Laravel with Inertia](/laravel-vue-file-upload)
+  - [Fix an image 404 with storage:link](/laravel-vue-file-upload#the-public-url)
+  - [Show a private S3 file for a few minutes](/laravel-vue-file-upload#temporary-urls-for-private-files)
   - [The image max rule is kilobytes](/laravel-vue-file-upload#when-the-file-never-reaches-laravel)
 
 ## Jobs
