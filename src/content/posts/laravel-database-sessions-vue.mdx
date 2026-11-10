@@ -23,7 +23,7 @@ People searching "Laravel database session Vue" stay on the file driver and then
 ## The fix
 
 ```shell
-php artisan session:table
+php artisan make:session-table
 php artisan migrate
 ```
 
@@ -48,3 +48,15 @@ Do not use the file driver on a platform that runs more than one machine, or tha
   { q: 'How do I store sessions in the database?', a: 'File sessions break when two servers handle the next request. database sessions follow the user.' },
   { q: 'What goes wrong with Laravel database session Vue?', a: 'Many developers stay on the file driver and then login sticks on one server and 419s on the other. Do not use the file driver on a platform that runs more than one machine, or that does not keep local disk.' },
 ]} />
+
+## Next steps
+
+- [Authenticate a Vue SPA with Laravel Sanctum](/laravel-sanctum-vue-spa)
+- [Keep the Inertia SSR process running](/inertia-ssr-process-cloud)
+- [Install Telescope for local debugging](/laravel-telescope-dev-only)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Database session driver](https://laravel.com/docs/13.x/session#database)
+- [Laravel docs: Session](https://laravel.com/docs/13.x/session)

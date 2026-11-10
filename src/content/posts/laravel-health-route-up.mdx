@@ -46,3 +46,15 @@ Do not add auth middleware to `/up`. The probe is not a user. Do not build a Vue
   { q: 'How do I point the load balancer at /up?', a: 'Laravel registers /up. A load balancer can hit it. The Vue app should not use it as a homepage.' },
   { q: 'What goes wrong with Laravel health check?', a: 'Many developers build a Vue page that queries the database and then the probe follows a login redirect. Do not point it at `/login` or `/`.' },
 ]} />
+
+## Next steps
+
+- [Deploy a Laravel and Vue app](/deploy-laravel-vue)
+- [Install Telescope for local debugging](/laravel-telescope-dev-only)
+- [Run migrations in the release, not in a request](/laravel-migrate-on-deploy-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Health check route](https://laravel.com/docs/13.x/deployment#the-health-route)
+- [Laravel docs: Deployment](https://laravel.com/docs/13.x/deployment)

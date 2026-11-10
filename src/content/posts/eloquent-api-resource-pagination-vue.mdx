@@ -43,5 +43,18 @@ Do not `PostResource::collection($posts->items())`. You dropped the links. Do no
 
 <FAQ items={[
   { q: 'How do I paginate an API resource for Vue?', a: 'A resource collection of a paginator already includes links and meta. Do not paginate those rows again in Vue.' },
-  { q: 'What goes wrong with Laravel API resource pagination Vue?', a: 'Many developers wrap a paginator and then read `data. Do not `PostResource::collection($posts->items())`.' },
+  { q: 'What goes wrong with Laravel API resource pagination Vue?', a: 'Many developers wrap a paginator and then read `data.data` or rebuild the links. Do not `PostResource::collection($posts->items())`.' },
 ]} />
+
+## Next steps
+
+- [Laravel API resources for a Vue client](/laravel-api-resources-vue)
+- [Laravel and Vue pagination](/laravel-vue-pagination)
+- [Restore a soft-deleted row from Vue](/laravel-restore-soft-delete-vue)
+- [Render simplePaginate without a last page](/simple-paginate-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Resource pagination](https://laravel.com/docs/13.x/eloquent-resources#pagination)
+- [Laravel docs: Pagination](https://laravel.com/docs/13.x/pagination)

@@ -50,5 +50,17 @@ Do not put the provider secret in a `VITE_` variable so the popup can "start OAu
 
 <FAQ items={[
   { q: 'How do I redirect to Socialite instead of a popup?', a: 'Socialite starts with a top-level redirect. A Vue popup loses the session cookie on the way back.' },
-  { q: 'What goes wrong with Socialite Vue popup?', a: 'Many developers open GitHub in `window. Do not put the provider secret in a `VITE_` variable so the popup can "start OAuth itself".' },
+  { q: 'What goes wrong with Socialite Vue popup?', a: 'Many developers open GitHub in `window.open` and then the callback has no session. Do not put the provider secret in a `VITE_` variable so the popup can "start OAuth itself".' },
 ]} />
+
+## Next steps
+
+- [GitHub login with Laravel Socialite and Vue](/laravel-socialite-vue)
+- [Turn on CORS credentials for a separate Vue app](/cors-supports-credentials-vue)
+- [Prefix a Laravel API with v1](/laravel-api-v1-prefix-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Socialite routing](https://laravel.com/docs/13.x/socialite#routing)
+- [Laravel docs: Socialite](https://laravel.com/docs/13.x/socialite)

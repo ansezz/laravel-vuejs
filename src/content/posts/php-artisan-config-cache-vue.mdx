@@ -49,3 +49,15 @@ Do not call `env()` in a Vue prop "just this once". Do not cache config in local
   { q: 'Why does env() return null after config:cache?', a: 'After config:cache, read config(\'app.name\'). env() outside config files returns null.' },
   { q: 'What goes wrong with Laravel env returns null?', a: 'Many developers call `env(\'APP_NAME\')` in a controller after production cached the config. Do not call `env()` in a Vue prop "just this once".' },
 ]} />
+
+## Next steps
+
+- [Deploy a Laravel and Vue app](/deploy-laravel-vue)
+- [Run migrations in the release, not in a request](/laravel-migrate-on-deploy-vue)
+- [Commit .env.example, not .env](/laravel-env-example-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Configuration caching](https://laravel.com/docs/13.x/configuration#configuration-caching)
+- [Laravel docs: Deployment optimization](https://laravel.com/docs/13.x/deployment#optimization)

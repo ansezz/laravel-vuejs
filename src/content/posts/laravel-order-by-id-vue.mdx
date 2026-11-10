@@ -47,3 +47,15 @@ Do not `orderBy('published_at')->orderBy('id')` and then cursor on both unless y
   { q: 'How do I order a cursor page by id?', a: 'cursorPaginate needs a unique order. id is unique. A duplicated published_at skips and repeats rows.' },
   { q: 'What goes wrong with Laravel cursor pagination duplicate?', a: 'Many developers order by `published_at` and then a row appears twice or vanishes. Do not `orderBy(\'published_at\')->orderBy(\'id\')` and then cursor on both unless you have read the guide and the links still match.' },
 ]} />
+
+## Next steps
+
+- [Laravel and Vue pagination](/laravel-vue-pagination)
+- [Search one column from a Vue field](/laravel-where-search-vue)
+- [Eager load a relation for a Vue list](/laravel-eager-load-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Cursor pagination](https://laravel.com/docs/13.x/pagination#cursor-pagination)
+- [Laravel docs: Pagination](https://laravel.com/docs/13.x/pagination)

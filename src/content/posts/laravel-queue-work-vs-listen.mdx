@@ -51,3 +51,16 @@ Do not call `queue:work` from a controller so a Vue button "starts the worker". 
   { q: 'Should I use queue:work or queue:listen?', a: 'queue:work is the long-running worker. queue:listen reloads your code each job and is the local command.' },
   { q: 'What goes wrong with queue:work vs queue:listen?', a: 'Many developers run `queue:listen` under systemd and then wonder why production is slow. Do not add it to a Cloud release because a forum post listed it.' },
 ]} />
+
+## Next steps
+
+- [Show a queued Laravel job in Vue](/laravel-vue-queued-job)
+- [Deploy a Laravel and Vue app](/deploy-laravel-vue)
+- [Show failed jobs to an admin](/laravel-failed-jobs-table-vue)
+- [Record when a schedule last ran](/laravel-schedule-last-run-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Running the queue worker](https://laravel.com/docs/13.x/queues#running-the-queue-worker)
+- [Laravel docs: Supervisor configuration](https://laravel.com/docs/13.x/queues#supervisor-configuration)

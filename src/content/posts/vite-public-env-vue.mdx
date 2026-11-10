@@ -51,3 +51,16 @@ Do not print `import.meta.env` on a production page to debug. It lists every pub
   { q: 'How do I expose a Vite variable without exposing a secret?', a: 'Only VITE_ keys reach import.meta.env. Vite 4+ restarts the dev server itself when .env changes. Secrets stay unprefixed.' },
   { q: 'What goes wrong with VITE env Laravel?', a: 'Many developers add `VITE_OPENAI_API_KEY` and then the key is in the built JavaScript. Do not print `import.meta.env` on a production page to debug.' },
 ]} />
+
+## Next steps
+
+- [Laravel Vite and Vue](/laravel-vite-vue)
+- [Call the Laravel AI SDK from a Vue page](/laravel-ai-sdk-vue)
+- [Log a failure without the password](/laravel-log-stack-vue)
+- [Point Vite HMR at localhost under Sail](/vite-hmr-sail-hostname)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Vite docs: Env variables and modes](https://vite.dev/guide/env-and-mode)
+- [Laravel docs: Vite environment variables](https://laravel.com/docs/13.x/vite#environment-variables)

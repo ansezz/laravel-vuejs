@@ -50,3 +50,16 @@ Do not treat abilities as a substitute for a [policy](/laravel-vue-policies). An
   { q: 'How do I limit a Sanctum token with abilities?', a: 'createToken can take an ability list. The ability middleware belongs on the API route, not on an Inertia page.' },
   { q: 'What goes wrong with Sanctum token abilities?', a: 'Many developers put `abilities:posts:read` on a browser route and then every Inertia page returns 403. Do not call it from an Inertia controller and hide the button based on it.' },
 ]} />
+
+## Next steps
+
+- [Authenticate a Vue SPA with Laravel Sanctum](/laravel-sanctum-vue-spa)
+- [Laravel policies on a Vue page](/laravel-vue-policies)
+- [Issue a Sanctum token without breaking the SPA](/sanctum-api-token-beside-spa)
+- [Turn on CORS credentials for a separate Vue app](/cors-supports-credentials-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Sanctum token abilities](https://laravel.com/docs/13.x/sanctum#token-abilities)
+- [Laravel docs: Sanctum](https://laravel.com/docs/13.x/sanctum)

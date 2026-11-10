@@ -57,3 +57,15 @@ Do not `Http::fake()` with no argument and then assert the prop equals the real 
   { q: 'How do I fake an HTTP call a Vue page depends on?', a: 'Http::fake stubs the outbound request. The Inertia test asserts the prop. It does not call the real host.' },
   { q: 'What goes wrong with Laravel Http::fake?', a: 'Many developers hit the real API from a Pest test because the URL in the fake did not match. Do not `Http::fake()` with no argument and then assert the prop equals the real city\'s name.' },
 ]} />
+
+## Next steps
+
+- [Test a Laravel and Vue app](/test-laravel-vue)
+- [Point Vite HMR at localhost under Sail](/vite-hmr-sail-hostname)
+- [Update Laravel Boost after you upgrade](/laravel-boost-update-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Faking HTTP responses](https://laravel.com/docs/13.x/http-client#faking-responses)
+- [Laravel docs: HTTP client testing](https://laravel.com/docs/13.x/http-client#testing)
