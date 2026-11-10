@@ -4,6 +4,7 @@ title: "A sortable Laravel and Vue table"
 excerpt: "The sort column is an allow-list. The direction is asc or desc. The database orders the rows, and the existing paginator links keep the query string."
 description: "Sort a Laravel and Vue table on the server with an allow-listed column and a direction that is only asc or desc."
 seoTitle: "Sort a Laravel Vue table"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T08:20:00Z
 categories: [laravel, vuejs]
 tags: [laravel, vuejs, inertia]
@@ -158,6 +159,14 @@ it('ignores a sort column that is not allowed', function () {
 
 `password` is not on the post, and it must not reach `orderBy`. The filter prop is the easy assertion. A query exception is the failure mode if the allow-list is missing and the column does not exist.
 
+## Search one column
+
+The query above already applies a bound `like` when the search box is not empty. Two things still go wrong.
+
+`where('title', 'like', '%'.$search.'%')` binds the value. The percent signs are wildcards around a bound string, not a second query language. Don't use `whereRaw` with the request pasted in, and don't interpolate the query string into SQL.
+
+A leading wildcard does not use a normal B-tree index. That's acceptable on a small table and a problem on a large one. Don't `LIKE` against every column "to be helpful" unless you indexed that search on purpose. For a real full-text search, use [Scout's database engine](/laravel-scout-database-engine-vue).
+
 ## Where this stops
 
 Column show and hide, CSV export, and editing a cell in place are different features. They do not belong on this query. Live validation of an edit form is [Precognition](/laravel-precognition-vue). Who may open the row is a [policy](/laravel-vue-policies).
@@ -166,6 +175,7 @@ Column show and hide, CSV export, and editing a cell in place are different feat
 
 - Sort and search in the query; paginate after.
 - Allow-list columns; clamp the direction.
+- Bind a search with `when` and `where`; don't paste the request into `whereRaw`.
 - Keep the query string on every link.
 - Test the rejected column.
 
@@ -175,6 +185,7 @@ Column show and hide, CSV export, and editing a cell in place are different feat
   { q: 'Why does my Vue datatable sort only the current page?', a: 'A client-side table sorts the rows it has. Sort in Laravel with `orderBy` and paginate after, so every page uses the same order.' },
   { q: 'Is it safe to pass the sort column from the URL to orderBy?', a: 'No. Check it against an allow-list of real columns and force the direction to `asc` or `desc`.' },
   { q: 'Why does sorting reset when I go to page 2?', a: 'Add `withQueryString()` to the paginator so `sort`, `dir` and `search` stay on the links.' },
+  { q: "Does a leading wildcard in LIKE use an index?", a: "Usually no. `like '%word%'` cannot use a normal B-tree index. That is fine on a small table and a problem on a large one. Bind the value with `where`, and do not paste the request into `whereRaw`." },
 ]} />
 
 ## Next steps
@@ -188,3 +199,5 @@ Column show and hide, CSV export, and editing a cell in place are different feat
 - [Laravel 13: Queries, ordering](https://laravel.com/framework/docs/13.x/queries#ordering-grouping-limit-and-offset)
 - [Laravel 13: Pagination](https://laravel.com/framework/docs/13.x/pagination)
 - [Inertia v3: Testing](https://inertiajs.com/docs/v3/advanced/testing)
+- [Laravel docs: Conditional clauses](https://laravel.com/framework/docs/13.x/queries#conditional-clauses)
+- [Laravel docs: Where clauses](https://laravel.com/framework/docs/13.x/queries#where-clauses)
