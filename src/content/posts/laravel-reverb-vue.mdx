@@ -4,6 +4,7 @@ title: "Listen for Laravel events in Vue with Reverb"
 excerpt: "Install Reverb, broadcast a public event through the queue, and subscribe from a Vue page with useEchoPublic."
 description: "Laravel Reverb and Vue: install broadcasting, fire a ShouldBroadcast event, and listen with useEchoPublic from Echo Vue."
 seoTitle: "Laravel Reverb and Vue Echo"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T04:20:00Z
 snippet: "php artisan install:broadcasting --reverb"
 categories: [laravel, vuejs]
@@ -101,6 +102,18 @@ Put that in `store` after `Post::create()`. The queued job serializes the model.
 
 </Callout>
 
+## ShouldBroadcast or ShouldBroadcastNow
+
+The event above implements `ShouldBroadcast`, so Laravel queues it. Nothing reaches the browser until a worker is running. Locally, `composer run dev` already starts one; otherwise run `php artisan queue:listen` while you edit.
+
+`ShouldBroadcastNow` runs the broadcast inside the request, before the response is sent. Use it only when the event must go out before the browser can continue, and you accept the cost. A post save is not that case. If the title never appears, check the worker before you rewrite the Vue listener.
+
+<Callout type="gotcha">
+
+Do not put the provider key, or the Reverb secret, in the event payload. Public properties on the event are sent to the browser.
+
+</Callout>
+
 ## The Vue page
 
 ```vue title="resources/js/pages/posts/Index.vue"
@@ -160,12 +173,14 @@ Do not point that authorizer at a bearer token you stored for your own SPA. Fix 
 
 Reverb is a process, like the queue worker. Laravel Cloud can run it as a managed WebSocket cluster and injects the `REVERB_*` variables. On a VPS you run `php artisan reverb:start` under a supervisor and proxy the socket port. The Vue bundle only needs the `VITE_REVERB_*` values from the production env at build time. The [deploy guide](/deploy-laravel-vue) covers the asset build. It does not start Reverb for you.
 
+
 ## Recap
 
 - Reverb is the server, Echo the client, the queue the courier.
 - Restart Vite after `.env` changes.
 - Public channel ↔ `useEchoPublic`; private channel ↔ `useEcho` + `channels.php`.
 - In production, Reverb is another supervised process.
+- `ShouldBroadcast` queues the event; `ShouldBroadcastNow` runs it inside the request.
 
 ## FAQ
 
@@ -173,11 +188,11 @@ Reverb is a process, like the queue worker. Laravel Cloud can run it as a manage
   { q: 'Why does my Laravel Reverb event never reach Vue?', a: 'Check, in order: a queue worker is running, `reverb:start` is running, and the browser has a `VITE_REVERB_APP_KEY` (restart Vite after `.env` changes).' },
   { q: 'What is the difference between useEcho and useEchoPublic?', a: '`useEchoPublic` listens on a public channel. `useEcho` listens on a private channel, so it subscribes to `private-…` and misses public events.' },
   { q: 'Do broadcasts need a queue worker?', a: 'Yes. `ShouldBroadcast` events are queued; without a worker they wait in the `jobs` table.' },
+  { q: "When should I use ShouldBroadcastNow?", a: "When the event must go out before the response, and you accept waiting on the socket. A post save should implement `ShouldBroadcast` and rely on a worker." },
 ]} />
 
 ## Next steps
 
-- [Queue a broadcast instead of blocking the save](/laravel-should-broadcast-vue)
 - [Laravel database notifications on a Vue page](/laravel-vue-notifications)
 - [Deploy a Laravel + Vue app](/deploy-laravel-vue)
 
@@ -186,3 +201,4 @@ Reverb is a process, like the queue worker. Laravel Cloud can run it as a manage
 - [Laravel 13: Broadcasting](https://laravel.com/framework/docs/13.x/broadcasting)
 - [Laravel 13: Reverb](https://laravel.com/framework/docs/13.x/reverb)
 - [Laravel 13: Sanctum, authorizing private broadcast channels](https://laravel.com/framework/docs/13.x/sanctum#authorizing-private-broadcast-channels)
+- [Laravel docs: Defining broadcast events](https://laravel.com/framework/docs/13.x/broadcasting#defining-broadcast-events)

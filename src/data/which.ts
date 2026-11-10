@@ -249,7 +249,7 @@ export const cases: WhichCase[] = [
   {
     id: "worker",
     task: "Run a queued job after the Vue form saves.",
-    guide: "/laravel-queue-work-vs-listen",
+    guide: "/laravel-vue-queued-job",
     guideTitle: "queue:work in production, listen locally",
     rule: "Do not call queue:work from a controller so a Vue button starts the worker. The button dispatches a job.",
     files: [
@@ -525,7 +525,7 @@ export const cases: WhichCase[] = [
   {
     id: "echo",
     task: "Hear a published post in the Vue page.",
-    guide: "/laravel-should-broadcast-vue",
+    guide: "/laravel-reverb-vue",
     guideTitle: "Queue a broadcast instead of blocking the save",
     rule: "Do not listen with useEcho on a public channel.",
     files: [
@@ -922,7 +922,7 @@ export const cases: WhichCase[] = [
   {
     id: "telescope",
     task: "Open Telescope from a Vue admin link.",
-    guide: "/laravel-telescope-dev-only",
+    guide: "/application-setup",
     guideTitle: "Install Telescope for local debugging",
     rule: "Do not return true for every user so a Vue admin link can open Telescope. Leave the viewTelescope gate on local.",
     files: [
