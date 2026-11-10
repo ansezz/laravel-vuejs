@@ -1,0 +1,236 @@
+---
+id: 182
+title: "Inertia deferred props in Vue: render the page first, load slow data after"
+seoTitle: "Inertia Deferred Props in Vue: Inertia::defer() Guide"
+excerpt: "Inertia::defer() and the Vue <Deferred> component: send the page in 16 ms, load slow stats after, group requests, rescue failures and test it with Pest. 7 tests inside."
+description: "Use Inertia::defer() and the Vue Deferred component to render a Laravel page first and load slow props after. Groups, rescue, once() and Pest tests."
+date: 2026-11-10T11:15:00Z
+snippet: "'stats' => Inertia::defer(fn () => Stats::slow())"
+categories: [vuejs, laravel]
+tags: [inertia, vuejs, laravel]
+---
+Your dashboard controller runs one fast query for the page and two slow ones for the charts. Inertia waits for all of them, so the user stares at the old page for 600 ms after every click. Deferred props fix that: Laravel sends the page without the slow props, and the client asks for them in a second request right after it renders.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia 2 or 3 with a slow prop on an otherwise fast page"
+  learn={['What `Inertia::defer()` sends on the first visit and what it skips', 'The Vue `<Deferred>` component, with fallback, reloading and rescue slots', 'Grouping deferred props into parallel requests', 'Testing deferred props with `loadDeferredProps()` in Pest']}
+  tested="Laravel 13.39 · inertia-laravel 3.7.0 · @inertiajs/vue3 3.11.0 · Vue 3.5 · PHP 8.4 · Pest 4 (7 tests, 67 assertions)"
+>
+
+- Wrap the slow prop: `'stats' => Inertia::defer(fn () => ...)`. The first response skips the closure entirely and lists the prop under `deferredProps`.
+- In Vue, wrap the part that needs it in `<Deferred data="stats">` with a `#fallback` slot. Inertia fetches it with a partial reload after the page renders.
+- Pass a group name (`Inertia::defer(fn () => ..., 'charts')`) to fetch some props in a separate, parallel request.
+- Add `rescue: true` (inertia-laravel 3.1+) so one failing prop is reported and left out instead of turning the reload into a 500.
+
+</TLDR>
+
+## The problem: one slow prop holds the whole page
+
+A normal Inertia response resolves every prop before it sends anything. One slow aggregate query is enough to make every visit to that page feel slow, even when the user only wanted the header and a table.
+
+You could move the stats to an API endpoint and fetch them in `onMounted()`. That works, but now you have a second route, a second auth check and a loading state you wrote by hand. Deferred props give you the same split while staying inside Inertia.
+
+Deferred props shipped in Inertia 2.0 and inertia-laravel 2.0.0 (December 2024). The `rescue` option came in [inertia-laravel 3.1.0](https://github.com/inertiajs/inertia-laravel/releases/tag/v3.1.0) (May 2026).
+
+## The fix: Inertia::defer()
+
+```php title="app/Http/Controllers/DashboardController.php"
+use Inertia\Inertia;
+
+public function __invoke(Request $request)
+{
+    return Inertia::render('Dashboard', [
+        'user' => $request->user()->only('id', 'name'),
+        'stats' => Inertia::defer(fn () => Stats::forTeam($request->user()->team_id)), // [!code highlight]
+    ]);
+}
+```
+
+On the first visit, Laravel never calls that closure. The page object it sends has no `stats` prop and one extra key:
+
+```json
+"deferredProps": { "default": ["stats"] }
+```
+
+Once the page is mounted, the client makes a partial reload for `stats` (the same mechanism as `router.reload({ only: ['stats'] })`), and Laravel runs the closure in that second request.
+
+In our lab, a page with two deferred closures that each sleep 300 ms answered the first visit in **16 ms**. Neither closure ran: our call counters stayed at zero until the deferred request came in.
+
+## The Vue side: the Deferred component
+
+```vue title="resources/js/pages/Dashboard.vue"
+<script setup lang="ts">
+import { Deferred } from '@inertiajs/vue3'
+
+defineProps<{
+  user: { id: number; name: string }
+  stats?: { orders: number; revenue: string }
+}>()
+</script>
+
+<template>
+  <h1>Hi {{ user.name }}</h1>
+
+  <Deferred data="stats">
+    <template #fallback>
+      <div class="h-24 animate-pulse rounded-xl bg-muted" />
+    </template>
+
+    <StatsCards :stats="stats!" />
+  </Deferred>
+</template>
+```
+
+`<Deferred>` renders the `#fallback` slot until every key in `data` has arrived, then renders its default slot. Pass an array to wait for more than one prop: `:data="['stats', 'chart']"`.
+
+Type the prop as optional (`stats?:`). On the first render it really is `undefined`, and TypeScript should know that.
+
+<Callout type="gotcha" title="Only the Deferred slot waits">
+
+Code outside `<Deferred>` runs right away. A `computed` that reads `props.stats.orders` at the top of the component throws on the first render. Read deferred props inside the slot, or guard with `props.stats?.orders`.
+
+</Callout>
+
+### Show that a reload is in progress
+
+When you reload a deferred prop later (after a filter change, say), the default slot gets a `reloading` flag. You keep the old numbers on screen and dim them:
+
+```vue
+<Deferred data="stats" #default="{ reloading }">
+  <template #fallback><StatsSkeleton /></template>
+  <StatsCards :stats="stats!" :class="{ 'opacity-50': reloading }" />
+</Deferred>
+```
+
+## Groups: fetch slow props in parallel
+
+By default, every deferred prop on a page arrives in **one** follow-up request, which is as slow as the slowest prop. Give props a group name and each group gets its own request, sent in parallel:
+
+```php
+return Inertia::render('Dashboard', [
+    'stats' => Inertia::defer(fn () => Stats::forTeam($teamId)),            // group "default"
+    'chart' => Inertia::defer(fn () => Revenue::lastNinetyDays($teamId), 'charts'),
+    'feed' => Inertia::defer(fn () => Activity::latest($teamId), 'charts'),
+]);
+```
+
+The first response then lists both groups:
+
+```json
+"deferredProps": { "default": ["stats"], "charts": ["chart", "feed"] }
+```
+
+We checked that loading the `default` group ran only the `stats` closure, and a partial reload for `chart,feed` ran only those two. Group by speed: put the 50 ms props together, and give the 2-second report its own group so it doesn't hold the others back.
+
+## Rescue one failing prop instead of the whole request
+
+Without `rescue`, an exception in a deferred closure fails the whole follow-up request, so every prop in that group is lost. From inertia-laravel 3.1, you can opt in to rescuing it:
+
+```php
+'stats' => Inertia::defer(fn () => ReportApi::stats(), rescue: true),
+```
+
+In our test, the closure threw `RuntimeException('report API down')`. With `rescue: true`, the partial reload still returned 200. `stats` was left out, the other prop in the request was there, the page object listed `"rescuedProps": ["stats"]`, and the exception reached Laravel's exception handler (so it still shows up in your logs or Sentry). Without `rescue`, the same request threw.
+
+On the client, give `<Deferred>` a `#rescue` slot with a retry button:
+
+```vue
+<script setup lang="ts">
+import { Deferred, router } from '@inertiajs/vue3'
+</script>
+
+<template>
+  <Deferred data="stats">
+    <template #fallback><StatsSkeleton /></template>
+    <template #rescue="{ reloading }">
+      <p>Stats are unavailable right now.</p>
+      <button :disabled="reloading" @click="router.reload({ only: ['stats'] })">Retry</button>
+    </template>
+    <StatsCards :stats="stats!" />
+  </Deferred>
+</template>
+```
+
+## Load it once: defer()->once()
+
+Chain `once()` when the data rarely changes and the user moves between pages that share it. The client remembers the value across visits instead of asking again:
+
+```php
+'plans' => Inertia::defer(fn () => Plan::orderBy('price')->get())->once(),
+```
+
+The page object lists the prop under both `deferredProps` and `onceProps`. See the [once props docs](https://inertiajs.com/docs/v3/data-props/once-props) for how expiry and keys work.
+
+## Test deferred props with Pest
+
+inertia-laravel's testing helpers can follow the deferred request for you. `loadDeferredProps()` reads the group list from the first response, makes the partial reload, and gives you the reloaded page:
+
+```php title="tests/Feature/DashboardTest.php"
+use Inertia\Testing\AssertableInertia as Assert;
+
+test('the dashboard sends stats after the first render', function () {
+    $this->actingAs(User::factory()->create())
+        ->get('/dashboard')
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Dashboard')
+            ->has('user')
+            ->missing('stats')                       // not in the first response
+            ->loadDeferredProps(fn (Assert $reload) => $reload
+                ->has('stats.orders')));
+});
+```
+
+Pass a group name to load one group only: `->loadDeferredProps('charts', fn (Assert $reload) => ...)`.
+
+<TryIt title="Try it yourself">
+
+Pick the slowest prop on your busiest page, wrap it in `Inertia::defer()`, and wrap its markup in `<Deferred data="...">` with a skeleton. Open the network tab: the first response should no longer contain the prop, and a second request with an `X-Inertia-Partial-Data` header should bring it in.
+
+</TryIt>
+
+## When not to defer
+
+| Prop | Defer it? |
+|---|---|
+| A slow aggregate, chart or report under the fold | Yes |
+| A third-party API call that can fail | Yes, with `rescue: true` |
+| The data the page is *about* (the post on a post page) | No: you'd show a skeleton for the main content and add a request |
+| Anything you need for `<Head>` (title, meta) | No: it isn't there on the first render or in SSR HTML |
+| Data shared on every page | Usually not; consider [`once()`](https://inertiajs.com/docs/v3/data-props/once-props) instead |
+
+Deferring makes the first paint faster, but the total work is the same and there is one more request. If the slow part is several independent queries, running them in parallel with [Concurrency::run()](/laravel-concurrency-run-parallel-dashboard) may be enough on its own.
+
+## Recap
+
+- `Inertia::defer(fn () => ...)` skips the closure on the first visit and lists the prop in `deferredProps`.
+- `<Deferred data="...">` shows a fallback until the prop arrives. `reloading` dims the old data during later reloads.
+- Groups split deferred props into parallel requests. Group by speed.
+- `rescue: true` (inertia-laravel 3.1+) reports a failure and drops only that prop. Pair it with a `#rescue` slot.
+- `loadDeferredProps()` tests the second request in Pest.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Inertia version has deferred props?', a: 'Inertia 2.0 and inertia-laravel 2.0.0 (December 2024). The `rescue` option needs inertia-laravel 3.1.0 or later. We tested on inertia-laravel 3.7.0 and @inertiajs/vue3 3.11.0.' },
+  { q: 'Do deferred props make the server do less work?', a: 'No. The closure still runs, just in a second request after the page renders. The first paint is faster, the total work is the same, and there is one extra round trip.' },
+  { q: 'Are deferred props included in server-side rendering?', a: 'No. The SSR HTML is built from the first response, which has no deferred props, so the fallback slot is what gets rendered. Don’t defer anything search engines need to see.' },
+  { q: 'How do I reload a deferred prop after a filter changes?', a: 'Call `router.reload({ only: [\'stats\'] })`. The `<Deferred>` slot gets `reloading: true` while the request runs, so you can keep the old data visible and dim it.' },
+  { q: 'Why is my deferred prop undefined in a computed?', a: 'Because it is undefined on the first render. Only the content inside `<Deferred>` waits for it. Read it inside the slot or use optional chaining.' },
+]} />
+
+## Next steps
+
+- [Inertia partial reloads in Vue](/inertia-partial-reloads), the mechanism deferred props are built on
+- [Laravel Concurrency::run()](/laravel-concurrency-run-parallel-dashboard), to make the slow queries themselves faster
+- [Inertia 3.11 live props](/inertia-3-11-live-props), to refresh a prop when a broadcast event arrives
+- [Upgrade from Inertia 2 to 3](/upgrade-inertia-2-to-3)
+
+## Sources
+
+- [Inertia docs: Deferred props](https://inertiajs.com/docs/v3/data-props/deferred-props)
+- [Inertia docs: Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads)
+- [Inertia docs: Once props](https://inertiajs.com/docs/v3/data-props/once-props)
+- [Inertia docs: Testing](https://inertiajs.com/docs/v3/advanced/testing)
+- [inertia-laravel v3.1.0 release: rescue option for deferred props (PR #864)](https://github.com/inertiajs/inertia-laravel/pull/864)
+- [inertia-laravel v2.0.0 release](https://github.com/inertiajs/inertia-laravel/releases/tag/v2.0.0)
+- [Source: `Inertia\DeferProp`](https://github.com/inertiajs/inertia-laravel/blob/3.x/src/DeferProp.php)
