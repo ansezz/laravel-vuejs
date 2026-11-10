@@ -173,7 +173,7 @@ To check how attempts are counted, as in the table above, set `queue.default` to
 
 ## Show it in Vue
 
-Store the sync state on the order in `failed()`, for example `$order->update(['crm_sync' => 'failed'])`, and pass it as a prop. The Vue page then shows a badge and a "retry" button that posts to a route that dispatches the job again. If you want to show failed jobs to admins, see [failed jobs in a Vue admin page](/laravel-failed-jobs-table-vue).
+Store the sync state on the order in `failed()`, for example `$order->update(['crm_sync' => 'failed'])`, and pass it as a prop. The Vue page then shows a badge and a "retry" button that posts to a route that dispatches the job again. If you want to show failed jobs to admins, see [failed jobs in a Vue admin page](/laravel-vue-queued-job#show-failed-jobs-to-an-admin).
 
 ## Recap
 
@@ -198,7 +198,7 @@ Store the sync state on the order in `failed()`, for example `$order->update(['c
 - [Laravel queued jobs with Vue](/laravel-vue-queued-job), the basics of dispatching from a Vue action
 - [Fake HTTP in Laravel tests](/laravel-http-fake-test-vue), for `Http::fake()` and sequences
 - [Sleep::fake() for retry tests](/laravel-sleep-fake-test-retries), when you do retry inside the job
-- [queue:work vs queue:listen](/laravel-queue-work-vs-listen), for running workers
+- [queue:work vs queue:listen](/laravel-vue-queued-job#run-the-queue-worker), for running workers
 
 ## Sources
 

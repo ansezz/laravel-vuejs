@@ -83,7 +83,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "worker",
-    guide: "/laravel-queue-work-vs-listen",
+    guide: "/laravel-vue-queued-job",
     guideTitle: "queue:work in production, listen locally",
     reason:
       "Do not call queue:work from a controller so a Vue button starts the worker. The button dispatches a job.",
@@ -146,7 +146,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "echo",
-    guide: "/laravel-should-broadcast-vue",
+    guide: "/laravel-reverb-vue",
     guideTitle: "Queue a broadcast instead of blocking the save",
     reason: "Do not listen with useEcho on a public channel.",
     find: (line) => {
@@ -264,7 +264,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "telescope",
-    guide: "/laravel-telescope-dev-only",
+    guide: "/application-setup",
     guideTitle: "Install Telescope for local debugging",
     reason:
       "Do not return true for every user so a Vue admin link can open Telescope. Leave the viewTelescope gate on local.",

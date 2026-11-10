@@ -335,7 +335,7 @@ Send `X-Inertia-Version` once Vite has built a manifest, or Inertia answers with
 
 <Callout type="heads-up" title="queue it in production">
 
-Our lab used `ShouldBroadcastNow` to keep the test simple. In a real app use `ShouldBroadcast`, so saving an order doesn't wait for Reverb. We wrote about that in [Queue a broadcast instead of blocking the save](/laravel-should-broadcast-vue).
+Our lab used `ShouldBroadcastNow` to keep the test simple. In a real app use `ShouldBroadcast`, so saving an order doesn't wait for Reverb. We wrote about that in [Queue a broadcast instead of blocking the save](/laravel-reverb-vue#shouldbroadcast-or-shouldbroadcastnow).
 
 </Callout>
 
@@ -383,7 +383,7 @@ Already running Reverb? Live props are the cheaper choice for anything your own 
 ## Next steps
 
 - [Listen for Laravel events in Vue with Reverb](/laravel-reverb-vue): set up Reverb and Echo first.
-- [Queue a broadcast instead of blocking the save](/laravel-should-broadcast-vue): `ShouldBroadcast` vs `ShouldBroadcastNow`.
+- [Queue a broadcast instead of blocking the save](/laravel-reverb-vue#shouldbroadcast-or-shouldbroadcastnow): `ShouldBroadcast` vs `ShouldBroadcastNow`.
 - [Partial reloads in Inertia and Vue](/inertia-partial-reloads): what a live prop does under the hood.
 - [Inertia 3.10: QUERY visits for search pages and filters](/inertia-3-10-query-method): the previous release.
 
