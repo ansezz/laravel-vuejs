@@ -3,7 +3,7 @@ id: 100
 title: "Eager load a relation for a Vue list"
 seoTitle: "Eager load for a Vue list"
 excerpt: "with('author') loads the relation once. Reading it inside a loop is one query per row."
-description: "with('author') loads the relation once. Reading it inside a loop is one query per row."
+description: "Eager load a Laravel relation for a Vue list with with('author') so the page runs two queries instead of one per row, and catch lazy loading early."
 date: 2026-10-11T10:47:00Z
 snippet: "Post::query()->with('author')->paginate(12)"
 categories: [laravel, vuejs]

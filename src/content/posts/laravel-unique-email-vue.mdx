@@ -3,7 +3,7 @@ id: 56
 title: "Ignore the current user on a unique email"
 seoTitle: "Unique email on a Vue profile"
 excerpt: "Rule::unique()->ignore() lets the signed-in user keep their email. A plain unique rule fails on save."
-description: "Rule::unique()->ignore() lets the signed-in user keep their email. A plain unique rule fails on save."
+description: "Validate a unique email in Laravel while users keep their own: Rule::unique('users')->ignore($user->id) on the profile update, errors shown in Vue."
 date: 2026-10-11T10:03:00Z
 snippet: "Rule::unique('users', 'email')->ignore($id)"
 categories: [laravel, vuejs]

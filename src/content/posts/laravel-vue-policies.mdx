@@ -2,7 +2,7 @@
 id: 33
 title: "Laravel policies on a Vue page"
 excerpt: "A policy decides whether this user can update this post. The Vue page receives that boolean. The controller still calls authorize."
-description: "Authorize a single Laravel post with a policy, and pass the same boolean to the Vue edit link."
+description: "Authorize a Laravel model with a policy in the controller, and pass the same can-edit boolean to the Vue page so the edit button matches the server."
 seoTitle: "Laravel policies on a Vue page"
 date: 2026-10-10T07:40:00Z
 snippet: "php artisan make:policy PostPolicy --model=Post"
