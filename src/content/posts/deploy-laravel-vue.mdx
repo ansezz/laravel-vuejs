@@ -4,7 +4,7 @@ title: "Deploy a Laravel and Vue app"
 excerpt: "The production build Laravel Cloud documents, the Inertia SSR bundle, the queue, and the public/hot file that breaks a live site."
 description: "Deploy Laravel and Vue: npm run build or build:ssr, php artisan optimize, a queue worker, and how to keep Vite off the dev server."
 seoTitle: "Deploy a Laravel and Vue app"
-updated: 2026-11-10T12:00:00Z
+updated: 2026-11-10T13:00:00Z
 date: 2026-10-10T04:30:00Z
 snippet: "npm run build"
 categories: [laravel, vuejs]
@@ -15,7 +15,7 @@ Your app works locally, you deploy, and every page is a blank screen trying to l
 
 <TLDR
   audience="Developers shipping a Laravel + Vue starter kit app"
-  learn={['The build commands for every release', 'What must never reach the server', 'How SSR, the queue and migrations fit in']}
+  learn={['The build commands for every release', 'What must never reach the server', 'How SSR, the queue and migrations fit in', 'Trust proxies, database sessions and the /up health route']}
   applies="Laravel 13 · Vue starter kit · Vite · Laravel Cloud · VPS"
 >
 
@@ -126,11 +126,67 @@ If you broadcast with Reverb, that is a second long-running process. The asset b
 
 Point the web server at the `public` directory. The front controller is `public/index.php`. PHP 8.3 or newer, the extensions in [the requirements](/requirements), and a database. Put `public/build` on disk, keep `public/hot` off disk, run migrations, and supervise the queue. That is the same app Cloud builds. The host is the part you are now operating yourself.
 
+## Trust proxies so HTTPS sticks
+
+The load balancer terminates TLS and forwards HTTP to PHP. Laravel then thinks the request is HTTP: generated URLs start with `http`, and `SESSION_SECURE_COOKIE` refuses to send the cookie. An infinite redirect, or a login that will not stick, is usually this, not a Vue bug.
+
+On Laravel 11 and later, tell Laravel which proxies to trust in `bootstrap/app.php`:
+
+```php title="bootstrap/app.php"
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->trustProxies(at: '*');
+})
+```
+
+`at: '*'` is what the Laravel docs recommend when you are behind a cloud load balancer and do not know its IPs, such as AWS ELB. It is the right call when the app is only reachable through that balancer. It is the wrong call when the PHP process is on a public port, because a client can send `X-Forwarded-For` and `X-Forwarded-Proto` itself and Laravel will believe them.
+
+If you know the balancer's addresses, pass them instead:
+
+```php title="bootstrap/app.php"
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->trustProxies(at: [
+        '192.168.1.1',
+        '10.0.0.0/8',
+    ]);
+})
+```
+
+`APP_URL` should still be the `https` URL users type. Trusting proxies does not replace it.
+
+<Callout type="gotcha" title="don't only force the scheme">
+
+Do not set `URL::forceScheme('https')` and also forget the proxy. You can end up with https URLs and a request object that still says the scheme is http. Fix the forwarded headers first. I confirmed this in the lab: until `TrustProxies` is set, a request that arrives with `X-Forwarded-Proto: https` still reports `http` and `secure()` is false. After `$middleware->trustProxies(at: '*')`, the same request is https and `$request->ip()` is the client in `X-Forwarded-For`.
+
+</Callout>
+
+## Store sessions in the database
+
+A file session lives on one machine's disk. The next request that lands on a different server, or on a platform that rebuilds the disk, cannot read it. The cookie is fine. The login looks like a 419.
+
+Laravel 13 already defaults `SESSION_DRIVER` to `database`, and the default users migration creates the `sessions` table. On a fresh starter kit you are done. If you upgraded an older app, or you switched the driver back to `file`, create the table and set the driver:
+
+```bash
+php artisan make:session-table
+php artisan migrate
+```
+
+```ini title=".env"
+SESSION_DRIVER=database
+```
+
+Inertia visits then read the session from the database, including the CSRF token and the logged-in user. One database, many app servers. Redis is also fine when you already run it; the point is a store every server can reach. Feature tests in this lab use `SESSION_DRIVER=array` in `phpunit.xml`, which is the right non-persistent driver for the suite, not for production.
+
+<Callout type="gotcha" title="deleting the sessions table logs everyone out">
+
+Do not use the file driver on a platform that runs more than one machine, or that does not keep local disk. Do not treat "delete the sessions table to clean up" as a routine backup step unless you mean to log everyone out. That part is fine on purpose. Doing it in the middle of the day is the outage.
+
+</Callout>
+
 ## 419 Page Expired after a deploy
 
 A 419 is Laravel's `TokenMismatchException`. The CSRF token the browser sent doesn't match the one in its session. Inertia's HTTP client already reads the `XSRF-TOKEN` cookie and sends it as `X-XSRF-TOKEN` on every request, so you don't need a `csrf-token` meta tag. Inertia's docs ask Laravel apps to remove that tag, because a stale tag stops the token refreshing. When 419s start right after a deploy, the session is usually what changed:
 
-- **The session store was wiped.** The `file` driver on a disk that is rebuilt on every release loses every session. Use `database` or `redis` in production.
+- **The session store was wiped.** The `file` driver on a disk that is rebuilt on every release loses every session. Use `database` or `redis` in production. See [Store sessions in the database](#store-sessions-in-the-database).
 - **`APP_KEY` changed.** Cookies are encrypted with it, so every cookie becomes unreadable. Keep one stable key per environment. When you rotate it, put the old key in `APP_PREVIOUS_KEYS`.
 - **Cookie settings changed.** Check `APP_URL`, `SESSION_DOMAIN` (empty for a single host) and `SESSION_SECURE_COOKIE=true` behind HTTPS.
 
@@ -162,13 +218,91 @@ The 409 is part of the protocol, not an error to handle in `onError`. Two things
 - **Your own `abort(409)`.** If a controller uses 409 to mean "this record changed", Inertia may read it as a version change. Report a stale edit as a validation error instead. The [CRUD guide](/laravel-inertia-vue-crud#stop-a-stale-edit-from-overwriting) shows how.
 
 `Inertia::location($url)` uses the same 409 to send the browser to an external URL, such as an OAuth provider.
+## Point the load balancer at /up
+
+Laravel already registers a health route. In `bootstrap/app.php` it is:
+
+```php title="bootstrap/app.php"
+->withRouting(
+    web: __DIR__.'/../routes/web.php',
+    health: '/up',
+)
+```
+
+`GET /up` returns 200 when the app boots without exceptions, and 500 otherwise. It does not render Inertia. Point the load balancer or the uptime monitor at that path, not at `/login` or `/`. A login page can return 200 while the app is too sick to serve a real request, and it can also return a redirect your probe treats as failure.
+
+To add a deeper check, listen for `Illuminate\Foundation\Events\DiagnosingHealth` and throw if the database or cache is down. Laravel then turns that into a 500. In the lab, a listener that throws made `GET /up` return 500; without it the same route returned 200.
+
+<Callout type="gotcha" title="the probe is not a user">
+
+Do not add auth middleware to `/up`. Do not build a Vue dashboard as the health check. If you need a deeper check, keep it in that listener and keep the public body empty of secrets.
+
+</Callout>
+
+## Run migrations in the release, not in a request
+
+The release already runs `php artisan migrate --force` in [the build](#the-build). `--force` is required when `APP_ENV` is production; it answers yes. Read the migration before you ship it. A `down()` that drops a column is not a small mistake.
+
+Do not also run migrations from the app itself:
+
+- Do not call `Artisan::call('migrate')` from a controller the Vue page can hit. Two deploys, or two curious browsers, should not race that.
+- Do not migrate from a queued job "so the request stays fast". The new code and the old schema would be live together until the job runs.
+- Do not wait for the first visitor so `AppServiceProvider` can migrate in `boot()`. Run the command in the release, before the new code serves traffic.
+
+## Read config(), not env(), after optimize
+
+`php artisan optimize` includes `config:cache`. That command bakes every `config/*.php` file into one cache and stops loading `.env` on each request or Artisan command. After that, `env('APP_NAME')` in a controller, a Vue prop, or any other app code returns `null`, unless the variable is set as a real system-level environment variable. `config('app.name')` still works, because the value was read from `.env` while the cache was built.
+
+I confirmed this in the lab: a key that existed only in `.env` was visible to `env()` before `config:cache`, and `null` afterwards, while `config('app.name')` stayed the same.
+
+Put a new key in a config file first:
+
+```php title="config/services.php"
+'maps_key' => env('MAPS_KEY'),
+```
+
+Then read `config('services.maps_key')`. Change `.env`, then run `php artisan optimize` again. Editing `.env` alone does nothing while the cache exists.
+
+<Callout type="gotcha" title="don't cache config on your laptop">
+
+Do not call `env()` in a Vue prop "just this once". Do not run `config:cache` or `optimize` in local development and then wonder why `.env` edits do nothing. Local should stay uncached. `php artisan optimize:clear` (or `config:clear`) drops the cache. The warning in [the build](#the-build) about freezing `APP_ENV` and `APP_DEBUG` is the same cache.
+
+</Callout>
+
+## Log a failure without the password
+
+Production should write logs you can actually use, without putting secrets in `storage/logs`. The default channel is `stack`. `LOG_STACK=daily` rotates the file; `single` is one growing file. You can also stack `daily` and `slack` so a `critical` line pages the team and everything else stays on disk. Neither choice makes a password acceptable.
+
+Log the fact, not the request body:
+
+```php title="app/Http/Controllers/AuthenticatedSessionController.php"
+use Illuminate\Support\Facades\Log;
+
+Log::warning('login failed', [
+    'email' => $request->string('email')->toString(),
+    'ip' => $request->ip(),
+]);
+```
+
+The second argument is contextual data, as the Laravel docs describe. Use a user id when you have one. Do not write `Log::debug($request->all())`. That is how the password, the CSRF token, the session id and the `Authorization` header land in the log file.
+
+A Vue `onError` can show "Could not sign in". It should not `console.log` the form, for the same reason. The browser console is not private on a shared machine.
+
+<Callout type="gotcha" title="don't ship logs to the page">
+
+Do not send log lines to the Inertia page so an admin can read them in Vue. That is how a log viewer becomes a data leak. Telescope, local only, is the debugging tool.
+
+</Callout>
 
 ## Recap
 
 - One PHP app plus one Vite build.
-- `optimize` after the environment is final.
+- `optimize` after the environment is final. After that, read `config()`, not `env()`.
 - No `public/hot`, no `node_modules` at runtime.
 - Queue and SSR are processes you keep running.
+- Trust the proxy so HTTPS and secure cookies stick. Store sessions in the database or Redis, not on one server's disk.
+- Point probes at `/up`. Run migrations in the release, not from a Vue request. Do not log passwords.
+- A 419 right after a deploy is usually the session store or `APP_KEY`. A 409 is Inertia fetching new assets.
 
 ## FAQ
 
@@ -177,6 +311,8 @@ The 409 is part of the protocol, not an error to handle in `onError`. Two things
   { q: 'Do I need to run php artisan optimize on every deploy?', a: 'Yes, during the build, after `APP_ENV` and `APP_DEBUG` are final. Re-run it after changing environment keys.' },
   { q: 'Should I run storage:link on Laravel Cloud?', a: 'No. Cloud’s disk resets on every deploy; use the attached object storage bucket for uploads.' },
   { q: 'Why does my SSR HTML stay old after deploy?', a: '`npm run build` does not refresh `bootstrap/ssr`. Use `npm run build:ssr` and restart the SSR process.' },
+  { q: 'Why does env() return null after a deploy?', a: '`php artisan optimize` caches config and stops loading `.env`. Read `config(\'app.name\')` in app code, and keep `env()` inside `config/*.php` files.' },
+  { q: 'What should a load balancer probe?', a: 'Point it at `/up`. Laravel returns 200 when the app boots, 500 if a `DiagnosingHealth` listener throws. Do not point it at `/` or `/login`.' },
 ]} />
 
 ## Next steps
@@ -189,6 +325,12 @@ The 409 is part of the protocol, not an error to handle in `onError`. Two things
 
 - [Laravel Cloud: Deploying Laravel](https://laravel.com/cloud/docs/deploy-guides/laravel)
 - [Laravel 13: Deployment](https://laravel.com/framework/docs/13.x/deployment)
+- [Laravel 13: The health route](https://laravel.com/framework/docs/13.x/deployment#the-health-route)
+- [Laravel 13: Configuring trusted proxies](https://laravel.com/framework/docs/13.x/requests#configuring-trusted-proxies)
+- [Laravel 13: Database session driver](https://laravel.com/framework/docs/13.x/session#database)
+- [Laravel 13: Configuration caching](https://laravel.com/framework/docs/13.x/configuration#configuration-caching)
+- [Laravel 13: Running migrations](https://laravel.com/framework/docs/13.x/migrations#running-migrations)
+- [Laravel 13: Logging, contextual information](https://laravel.com/framework/docs/13.x/logging#contextual-information)
 - [Laravel 13: Queues, Supervisor configuration](https://laravel.com/framework/docs/13.x/queues#supervisor-configuration)
 - [Laravel docs: CSRF protection](https://laravel.com/framework/docs/13.x/csrf)
 - [Inertia docs: CSRF protection](https://inertiajs.com/docs/v3/security/csrf-protection)

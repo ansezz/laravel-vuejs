@@ -121,7 +121,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "hours",
     "Hours, the time log",
-    "laravel-migrate-on-deploy-vue",
+    "deploy-laravel-vue",
     "Run migrations in the release, not in a request",
     [
       "Build Hours, a log of time one person spent on tasks. It does not send invoices and it does not take payment.",
