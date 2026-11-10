@@ -135,7 +135,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "relay",
     "Relay, the announcement board",
-    "laravel-should-broadcast-vue",
+    "laravel-reverb-vue",
     "Queue a broadcast instead of blocking the save",
     [
       "Build Relay, an announcement board for one room. Post a note and the board updates for everyone there.",
@@ -165,7 +165,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "lane",
     "Lane, the card board",
-    "laravel-queue-work-vs-listen",
+    "laravel-vue-queued-job",
     "queue:work in production, listen locally",
     [
       "Build Lane, a board of cards for one project. Columns are todo, doing, and done.",

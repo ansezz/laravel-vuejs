@@ -3,7 +3,7 @@ id: 2
 title: "Set up a Laravel 13 + Vue 3 app in ten minutes"
 excerpt: "Create a project with the official Vue starter kit, then add your first model, controller and typed Vue page with Inertia. Every command you need, start to finish."
 date: 2019-05-18T02:35:03Z
-updated: 2026-10-10T00:00:00Z
+updated: 2026-11-10T12:00:00Z
 snippet: "laravel new blog"
 featured: true
 categories: [laravel, vuejs]
@@ -249,12 +249,89 @@ php artisan test
 
 </TryIt>
 
+## Register routes and middleware
+
+Laravel 11 and newer register routes, middleware, and the health URL in `bootstrap/app.php`. The starter kit already has this file. You do not get `app/Http/Kernel.php`.
+
+```php
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+    ->withMiddleware(function (Middleware $middleware) {
+        //
+    })
+    ->withExceptions(function (Exceptions $exceptions) {
+        //
+    })->create();
+```
+
+Web routes, including Inertia, stay in `routes/web.php`. Middleware aliases go in the `withMiddleware` callback. You do not get a `$routeMiddleware` array anymore.
+
+<Callout type="gotcha">
+
+Do not copy a `Kernel.php` from a Laravel 10 tutorial into this app. The framework will not read it. Do not point the Vue pages at `routes/api.php` so they "go through bootstrap". They are web routes.
+
+</Callout>
+
+## Format PHP with Pint before you commit
+
+```shell
+vendor/bin/pint --dirty
+```
+
+`--dirty` limits Pint to git's dirty files. Commit after you have looked at the diff. Pint rewrites spacing and imports. It does not change a query's meaning on purpose, but you still read the diff.
+
+Vue, TypeScript, and CSS are not Pint's job. The kit's frontend formatter, if you have one, is a different command.
+
+<Callout type="gotcha">
+
+Do not commit `vendor/`. Pint lives there after `composer install`. CI can run `vendor/bin/pint --test` so a bad format fails the build without rewriting the branch.
+
+</Callout>
+
+## Install Telescope for local debugging
+
+Telescope records request bodies, including Inertia props and the session. That is useful on your machine. It is not a product feature, and the Vue page should not iframe it.
+
+```shell
+composer require laravel/telescope --dev
+php artisan telescope:install
+php artisan migrate
+```
+
+The published `TelescopeServiceProvider` gates `viewTelescope`. Leave that gate on `local`. Do not return true for every user so a Vue admin link can open it. Do not require Telescope without `--dev` and then try to prune it later. CI does not need the UI.
+
+## Commit an env example, not the secrets file
+
+`.env` has the app key and the database password. It stays off the git remote. Commit `.env.example` instead, with the key names and empty secrets:
+
+```ini
+APP_NAME=Laravel
+APP_KEY=
+APP_URL=http://localhost
+
+VITE_APP_NAME="${APP_NAME}"
+```
+
+A teammate copies it to `.env` and fills it in. `APP_KEY` is generated with `php artisan key:generate`. You do not invent one and you do not reuse production's. Vite only sees `VITE_` keys; the [Vite guide](/laravel-vite-vue) is which of those values the browser is allowed to see.
+
+<Callout type="gotcha">
+
+Do not prefix a secret with `VITE_` so the example "also works in Vue". That ships the secret. Do not add `.env` to the repo and gitignore it later. It is already in history. Rotate the key that leaked.
+
+</Callout>
+
 ## Recap
 
 - `laravel new blog` + Vue starter kit = auth, Inertia 3, Vue 3, TypeScript and Tailwind on day one.
 - `composer run dev` runs everything you need locally.
 - `make:model Post -mfs` gives you the migration, factory and seeder in one go.
 - Controllers send props with `Inertia::render`; pages type them with `defineProps`.
+- Routes and middleware live in `bootstrap/app.php`, not `Http/Kernel.php`.
+- Format PHP with `vendor/bin/pint --dirty`, keep Telescope and `.env` off the remote, and commit `.env.example`.
 
 ## FAQ
 
@@ -263,6 +340,9 @@ php artisan test
   { q: 'Do I need to build an API for the Vue page?', a: 'No. With Inertia, the controller passes data to the page as props. You only need an API for other clients.' },
   { q: 'How do I use PHPUnit instead of Pest?', a: 'Pass `--phpunit` to `laravel new`. The installer does not ask about the testing framework.' },
   { q: 'Which database does a new Laravel app use?', a: 'SQLite, created for you by the installer. Switch to MySQL, MariaDB or PostgreSQL when production needs it.' },
+  { q: "Do I need app/Http/Kernel.php in Laravel 13?", a: "No. Register routes, middleware, and the health URL in `bootstrap/app.php`. The framework will not read a `Kernel.php` copied from a Laravel 10 tutorial." },
+  { q: "Should I commit .env so the next laptop works?", a: "No. Commit `.env.example` with empty secrets. Generate a new `APP_KEY` on each machine with `php artisan key:generate`." },
+  { q: "Can I install Telescope in production to watch Inertia requests?", a: "No. Keep it a dev dependency and leave the `viewTelescope` gate on `local`. It records request bodies, including passwords if you are not careful." },
 ]} />
 
 ## Next steps
@@ -281,3 +361,12 @@ Looking for the original Laravel 5 + Nuxt 2 setup of this site? It is in the rep
 - [Inertia v3: Pages](https://inertiajs.com/docs/v3/the-basics/pages)
 - [Inertia v3: Testing](https://inertiajs.com/docs/v3/advanced/testing)
 - [Laravel Vue starter kit](https://github.com/laravel/vue-starter-kit)
+- [Laravel docs: Routing](https://laravel.com/framework/docs/13.x/routing)
+- [Laravel docs: Middleware](https://laravel.com/framework/docs/13.x/middleware)
+- [Laravel 11 release notes: application structure](https://laravel.com/docs/11.x/releases#structure)
+- [Laravel docs: Pint](https://laravel.com/framework/docs/13.x/pint)
+- [laravel/pint on GitHub](https://github.com/laravel/pint)
+- [Laravel docs: Telescope local only installation](https://laravel.com/framework/docs/13.x/telescope#local-only-installation)
+- [Laravel docs: Telescope](https://laravel.com/framework/docs/13.x/telescope)
+- [Laravel docs: Environment configuration](https://laravel.com/framework/docs/13.x/configuration#environment-configuration)
+- [Vite docs: Env variables](https://vite.dev/guide/env-and-mode)
