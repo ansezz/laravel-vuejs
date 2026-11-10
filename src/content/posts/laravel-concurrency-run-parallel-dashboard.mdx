@@ -238,11 +238,11 @@ Change `400_000` to `100_000` and watch the concurrent version lose (we got 200 
 - [Laravel defer(): run code after the response](/laravel-defer-helper-after-response)
 - [Cache::flexible: serve stale cache while it refreshes](/laravel-cache-flexible-swr)
 - [Laravel Context: one request id everywhere](/laravel-context-request-id-logs-queued-jobs)
-- [Laravel docs: Concurrency](https://laravel.com/docs/13.x/concurrency)
+- [Laravel docs: Concurrency](https://laravel.com/framework/docs/13.x/concurrency)
 
 ## Sources
 
-- [Laravel docs: Concurrency](https://laravel.com/docs/13.x/concurrency) (drivers, named results, timeouts, `defer`)
+- [Laravel docs: Concurrency](https://laravel.com/framework/docs/13.x/concurrency) (drivers, named results, timeouts, `defer`)
 - [`Illuminate\Concurrency\ProcessDriver`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Concurrency/ProcessDriver.php), which starts `invoke-serialized-closure` and passes the Context
 - [laravel/serializable-closure README](https://github.com/laravel/serializable-closure#readme), on closures defined on the same line
 - [Laravel 11.23 release](https://github.com/laravel/framework/releases/tag/v11.23.0) (Concurrency, `defer()`, `Cache::flexible`)

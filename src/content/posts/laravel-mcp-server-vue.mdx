@@ -202,7 +202,7 @@ Mcp::web('/mcp/tasks', TaskServer::class)
 
 Your `User` model needs Sanctum's `HasApiTokens` trait. Without a token, a `tools/list` POST gets **401** before any tool code runs. With `Authorization: Bearer <token>`, `initialize` returns the server's name and version, and `tools/list` returns only the tools that user may see.
 
-Sanctum is the simplest option. If you need clients that only support OAuth, the [MCP docs](https://laravel.com/docs/13.x/mcp#authentication) cover Passport and OAuth 2.1. They recommend staying on Sanctum until a client actually requires OAuth.
+Sanctum is the simplest option. If you need clients that only support OAuth, the [MCP docs](https://laravel.com/framework/docs/13.x/mcp#authentication) cover Passport and OAuth 2.1. They recommend staying on Sanctum until a client actually requires OAuth.
 
 ## A Vue page that hands out the token
 
@@ -352,9 +352,9 @@ Our lab suite covered:
 
 ## Sources
 
-- [Laravel docs: MCP](https://laravel.com/docs/13.x/mcp) (servers, tools, authentication, testing)
+- [Laravel docs: MCP](https://laravel.com/framework/docs/13.x/mcp) (servers, tools, authentication, testing)
 - [laravel/mcp on GitHub](https://github.com/laravel/mcp)
-- [Laravel docs: Sanctum API token authentication](https://laravel.com/docs/13.x/sanctum#api-token-authentication)
+- [Laravel docs: Sanctum API token authentication](https://laravel.com/framework/docs/13.x/sanctum#api-token-authentication)
 - [MCP specification: transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
 - [MCP security best practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)
 - [Cursor docs: MCP configuration](https://cursor.com/docs/context/mcp)

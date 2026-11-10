@@ -34,7 +34,7 @@ public function comments(): HasMany
 }
 ```
 
-Why most people miss it: `with('comments')` feels like it should already know the parent. It doesn't. Eloquent fills `$post->comments` but leaves each comment's `post` relation empty, so the first `$comment->post` goes back to the database. The [docs section](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children) sits under "One to Many", between two code samples, and the method name gives nothing away.
+Why most people miss it: `with('comments')` feels like it should already know the parent. It doesn't. Eloquent fills `$post->comments` but leaves each comment's `post` relation empty, so the first `$comment->post` goes back to the database. The [docs section](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children) sits under "One to Many", between two code samples, and the method name gives nothing away.
 
 Under the hood it is small. [The trait](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Eloquent/Relations/Concerns/SupportsInverseRelations.php) registers an `afterQuery` callback that calls `setRelation('post', $post)` on every child. No join, no extra query, just a pointer to the model you already hold.
 
@@ -219,12 +219,12 @@ If you already use [automatic eager loading](/laravel-automatic-eager-loading), 
 - [Laravel automatic eager loading](/laravel-automatic-eager-loading), the other one-line N+1 fix
 - [Laravel Model::shouldBeStrict()](/laravel-model-should-be-strict), to catch the N+1 you haven't found yet
 - [API resources for Vue](/laravel-api-resources-vue), to keep Inertia props to the fields you chose
-- [Laravel docs: Automatically hydrating parent models on children](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
+- [Laravel docs: Automatically hydrating parent models on children](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
 
 ## Sources
 
-- [Laravel 13 docs: Automatically hydrating parent models on children](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
-- [Laravel 13 docs: Automatically hydrating pivot relationships](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-pivot-relationships)
+- [Laravel 13 docs: Automatically hydrating parent models on children](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
+- [Laravel 13 docs: Automatically hydrating pivot relationships](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatically-hydrating-pivot-relationships)
 - [laravel/framework PR #51582: Eloquent inverse relations (Laravel 11.22)](https://github.com/laravel/framework/pull/51582)
 - [laravel/framework PR #52461: Handle circular references in model serialization (Laravel 11.22)](https://github.com/laravel/framework/pull/52461)
 - [laravel/framework v11.22.0 release](https://github.com/laravel/framework/releases/tag/v11.22.0)

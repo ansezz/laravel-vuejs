@@ -34,7 +34,7 @@ Your users want a search box. The usual advice is to run Meilisearch or pay for 
 | Facets, geo search, synonyms | No | Yes |
 | Extra infrastructure and a sync queue | None | A server or SaaS, plus queued indexing |
 
-The [Scout docs](https://laravel.com/docs/13.x/scout#database-engine) put it this way: the database engine is "all you need" for most applications, and it currently supports MySQL and PostgreSQL. The database engine has existed since Scout 9.4 ([PR #564](https://github.com/laravel/scout/pull/564), January 2022). We tested it on Scout 11.9.0.
+The [Scout docs](https://laravel.com/framework/docs/13.x/scout#database-engine) put it this way: the database engine is "all you need" for most applications, and it currently supports MySQL and PostgreSQL. The database engine has existed since Scout 9.4 ([PR #564](https://github.com/laravel/scout/pull/564), January 2022). We tested it on Scout 11.9.0.
 
 ## Set it up
 
@@ -218,9 +218,9 @@ On a MySQL or Postgres app: `composer require laravel/scout`, set `SCOUT_DRIVER=
 
 ## Sources
 
-- [Laravel docs: Scout, database engine](https://laravel.com/docs/13.x/scout#database-engine)
-- [Laravel docs: Scout, where clauses](https://laravel.com/docs/13.x/scout#where-clauses) and [pagination](https://laravel.com/docs/13.x/scout#pagination)
-- [Laravel docs: Full text indexes](https://laravel.com/docs/13.x/migrations#available-index-types)
+- [Laravel docs: Scout, database engine](https://laravel.com/framework/docs/13.x/scout#database-engine)
+- [Laravel docs: Scout, where clauses](https://laravel.com/framework/docs/13.x/scout#where-clauses) and [pagination](https://laravel.com/framework/docs/13.x/scout#pagination)
+- [Laravel docs: Full text indexes](https://laravel.com/framework/docs/13.x/migrations#available-index-types)
 - [laravel/scout PR #564: Add a DatabaseEngine (v9.4.0)](https://github.com/laravel/scout/pull/564)
 - [Source: `Laravel\Scout\Engines\DatabaseEngine`](https://github.com/laravel/scout/blob/11.x/src/Engines/DatabaseEngine.php)
 - [PostgreSQL docs: Controlling text search (websearch_to_tsquery, ts_rank)](https://www.postgresql.org/docs/current/textsearch-controls.html)

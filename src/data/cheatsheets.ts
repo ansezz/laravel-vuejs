@@ -1,5 +1,5 @@
 // Cheat sheets: one source for the /cheatsheets/<slug> pages and the branded PDFs (scripts/cheatsheets-pdf.mjs).
-// Every API here was checked against the official docs on the "checked" date (laravel.com/docs/13.x,
+// Every API here was checked against the official docs on the "checked" date (laravel.com/framework/docs/13.x,
 // inertiajs.com/docs/v3, vuejs.org). Keep snippets short: they must fit two A4 pages.
 
 export type CheatItem = { title: string; lang: 'php' | 'vue' | 'ts' | 'js' | 'bash'; code: string; note?: string }
@@ -27,9 +27,9 @@ const eloquent: CheatSheet = {
   checked: '2026-10-15',
   published: '2026-10-15',
   sources: [
-    { label: 'Eloquent: Getting Started', url: 'https://laravel.com/docs/13.x/eloquent' },
-    { label: 'Eloquent: Relationships', url: 'https://laravel.com/docs/13.x/eloquent-relationships' },
-    { label: 'Eloquent: Mutators & Casting', url: 'https://laravel.com/docs/13.x/eloquent-mutators' },
+    { label: 'Eloquent: Getting Started', url: 'https://laravel.com/framework/docs/13.x/eloquent' },
+    { label: 'Eloquent: Relationships', url: 'https://laravel.com/framework/docs/13.x/eloquent-relationships' },
+    { label: 'Eloquent: Mutators & Casting', url: 'https://laravel.com/framework/docs/13.x/eloquent-mutators' },
   ],
   sections: [
     {
@@ -504,7 +504,7 @@ const aiSdk: CheatSheet = {
   checked: '2026-10-17',
   published: '2026-10-19',
   sources: [
-    { label: 'Laravel docs: AI SDK', url: 'https://laravel.com/docs/13.x/ai-sdk' },
+    { label: 'Laravel docs: AI SDK', url: 'https://laravel.com/framework/docs/13.x/ai-sdk' },
     { label: 'laravel/ai releases', url: 'https://github.com/laravel/ai/releases' },
     { label: 'laravel/ai source (1.x)', url: 'https://github.com/laravel/ai/tree/1.x/src' },
   ],
@@ -697,7 +697,7 @@ const validation: CheatSheet = {
   checked: '2026-10-17',
   published: '2026-10-19',
   sources: [
-    { label: 'Laravel docs: Validation', url: 'https://laravel.com/docs/13.x/validation' },
+    { label: 'Laravel docs: Validation', url: 'https://laravel.com/framework/docs/13.x/validation' },
     { label: 'Illuminate\\Validation\\Rule (13.x source)', url: 'https://github.com/laravel/framework/blob/13.x/src/Illuminate/Validation/Rule.php' },
     { label: 'Laravel 13.36 rule builders (PR #61833)', url: 'https://github.com/laravel/framework/pull/61833' },
     { label: 'Inertia docs: Forms and validation', url: 'https://inertiajs.com/docs/v3/the-basics/forms' },

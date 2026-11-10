@@ -27,7 +27,7 @@ A new post lands and everyone else's list stays stale until they refresh. Reverb
 
 Polling the [posts list](/laravel-inertia-vue-crud) every few seconds works until it does not. Reverb is Laravel's WebSocket server. Echo is the client. A Vue page can subscribe with `useEchoPublic` from `@laravel/echo-vue` and update when a PHP event fires.
 
-The official write-up is the [broadcasting docs](https://laravel.com/docs/13.x/broadcasting). This page is the short path for a Vue starter kit.
+The official write-up is the [broadcasting docs](https://laravel.com/framework/docs/13.x/broadcasting). This page is the short path for a Vue starter kit.
 
 <Steps>
 
@@ -148,7 +148,7 @@ Create a post from another window. The title should appear without a reload. If 
 
 ## Private channels and a separate SPA
 
-An Inertia app on the same origin can use the defaults `install:broadcasting` wrote. A Vue SPA on another port is the Sanctum case. Private channels then authorize through `/api/broadcasting/auth`, and Echo needs a custom authorizer that uses the credentialed Axios instance. The setup is in the [Sanctum broadcasting section](https://laravel.com/docs/13.x/sanctum#authorizing-private-broadcast-channels) and depends on the cookie login from [the Sanctum guide](/laravel-sanctum-vue-spa).
+An Inertia app on the same origin can use the defaults `install:broadcasting` wrote. A Vue SPA on another port is the Sanctum case. Private channels then authorize through `/api/broadcasting/auth`, and Echo needs a custom authorizer that uses the credentialed Axios instance. The setup is in the [Sanctum broadcasting section](https://laravel.com/framework/docs/13.x/sanctum#authorizing-private-broadcast-channels) and depends on the cookie login from [the Sanctum guide](/laravel-sanctum-vue-spa).
 
 <Callout type="gotcha">
 
@@ -183,6 +183,6 @@ Reverb is a process, like the queue worker. Laravel Cloud can run it as a manage
 
 ## Sources
 
-- [Laravel 13: Broadcasting](https://laravel.com/docs/13.x/broadcasting)
-- [Laravel 13: Reverb](https://laravel.com/docs/13.x/reverb)
-- [Laravel 13: Sanctum, authorizing private broadcast channels](https://laravel.com/docs/13.x/sanctum#authorizing-private-broadcast-channels)
+- [Laravel 13: Broadcasting](https://laravel.com/framework/docs/13.x/broadcasting)
+- [Laravel 13: Reverb](https://laravel.com/framework/docs/13.x/reverb)
+- [Laravel 13: Sanctum, authorizing private broadcast channels](https://laravel.com/framework/docs/13.x/sanctum#authorizing-private-broadcast-channels)
