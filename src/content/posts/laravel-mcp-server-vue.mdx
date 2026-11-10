@@ -1,0 +1,360 @@
+---
+id: 185
+title: "Laravel MCP server: let AI agents use your Laravel + Vue app, safely"
+seoTitle: "Laravel MCP Server: Tools, Sanctum Auth and Tests"
+excerpt: "Build a Laravel MCP server with laravel/mcp: tools with schemas and validation, Sanctum tokens, per-user tools, a Vue page that issues the token, and tests. 11 tests."
+description: "Build an MCP server in Laravel with laravel/mcp: tools, input schemas, validation, Sanctum bearer auth, conditional tools, a Vue token page and Pest tests."
+date: 2026-11-10T11:35:00Z
+snippet: "Mcp::web('/mcp/tasks', TaskServer::class)->middleware('auth:sanctum')"
+categories: [laravel, vuejs]
+tags: [laravel, vuejs, sanctum, inertia, php, testing]
+---
+Your users already work in Claude, ChatGPT or Cursor, and they want the agent to "check my open tasks" or "mark the invoice job done" in your app. The [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) is the standard way to offer that. [`laravel/mcp`](https://github.com/laravel/mcp) is Laravel's first-party package for it: you write tools as small PHP classes, register a route, and protect it with the same Sanctum tokens you already use.
+
+<TLDR
+  audience="Laravel + Vue developers who want AI clients to read and change data in their app"
+  learn={['Creating an MCP server and tools with laravel/mcp', 'Input schemas, validation messages written for the model, and tool annotations', 'Protecting a web MCP server with Sanctum tokens and showing per-user tools', 'A Vue settings page that shows the token once, plus Pest tests over real JSON-RPC']}
+  tested="Laravel 13.40 · laravel/mcp 1.1.2 · laravel/sanctum 4.3 · inertia-laravel 3.7 · PHP 8.4 · Pest 4 (11 tests, 28 assertions)"
+>
+
+- `composer require laravel/mcp`, then `php artisan vendor:publish --tag=ai-routes` to get `routes/ai.php`.
+- A server class lists tools. Each tool has a `handle(Request $request): Response`, an optional `schema()` and attributes such as `#[Description]` and `#[IsReadOnly]`.
+- `Mcp::web('/mcp/tasks', TaskServer::class)->middleware('auth:sanctum')` gives you an HTTP endpoint. `$request->user()` works inside tools.
+- Return `Response::error()` for things the model can fix. Use `shouldRegister()` to hide tools a user isn't allowed to see. Test with `TaskServer::actingAs($user)->tool(...)`.
+
+</TLDR>
+
+## What we're building
+
+A task app that exposes three tools to an AI client:
+
+| Tool | What it does | Who sees it |
+|---|---|---|
+| `list-open-tasks-tool` | Lists the user's open tasks | Every signed-in user |
+| `complete-task` | Marks one of the user's tasks done | Every signed-in user |
+| `team-stats-tool` | Counts open tasks across the team | Admins only |
+
+The AI client calls these over HTTP with a Sanctum token that the user copies from a Vue settings page.
+
+## Install and publish the routes
+
+```bash
+composer require laravel/mcp
+php artisan vendor:publish --tag=ai-routes
+php artisan make:mcp-server TaskServer
+php artisan make:mcp-tool ListOpenTasksTool
+php artisan make:mcp-tool CompleteTaskTool
+```
+
+The publish step creates `routes/ai.php`. Servers go in `app/Mcp/Servers` and tools in `app/Mcp/Tools`. `laravel/mcp` 1.0.0 shipped on 14 September 2026; we tested 1.1.2.
+
+## The server
+
+```php title="app/Mcp/Servers/TaskServer.php"
+namespace App\Mcp\Servers;
+
+use App\Mcp\Tools\CompleteTaskTool;
+use App\Mcp\Tools\ListOpenTasksTool;
+use App\Mcp\Tools\TeamStatsTool;
+use Laravel\Mcp\Server;
+use Laravel\Mcp\Server\Attributes\Instructions;
+use Laravel\Mcp\Server\Attributes\Name;
+use Laravel\Mcp\Server\Attributes\Version;
+
+#[Name('Tasks')]
+#[Version('1.0.0')]
+#[Instructions("Read and complete the signed-in user's tasks.")]
+class TaskServer extends Server
+{
+    protected array $tools = [
+        ListOpenTasksTool::class,
+        CompleteTaskTool::class,
+        TeamStatsTool::class,
+    ];
+}
+```
+
+`Instructions` is sent to the client on `initialize`. Write it for the model: what the server is for and when to use it.
+
+## A read-only tool
+
+```php title="app/Mcp/Tools/ListOpenTasksTool.php"
+namespace App\Mcp\Tools;
+
+use App\Models\Task;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
+
+#[Description("Lists the signed-in user's open tasks, newest first.")]
+#[IsReadOnly]
+class ListOpenTasksTool extends Tool
+{
+    public function handle(Request $request): Response
+    {
+        $tasks = Task::where('user_id', $request->user()->id)
+            ->where('done', false)
+            ->latest('id')
+            ->get(['id', 'title']);
+
+        if ($tasks->isEmpty()) {
+            return Response::text('No open tasks.');
+        }
+
+        return Response::text(
+            $tasks->map(fn ($t) => "#{$t->id} {$t->title}")->implode("\n")
+        );
+    }
+}
+```
+
+Always scope queries to `$request->user()`. The model picks the arguments, so treat every tool like a public API endpoint.
+
+`#[IsReadOnly]` is sent as `readOnlyHint: true` in `tools/list`. Clients use these hints to decide whether to ask the user before running a tool. The other hints are `#[IsDestructive]`, `#[IsIdempotent]` and `#[IsOpenWorld]`.
+
+<Callout type="gotcha" title="The default tool name keeps the Tool suffix">
+The docs say `CurrentWeatherTool` becomes `current-weather`. In laravel/mcp 1.1.2 the name is `Str::kebab(class_basename($this))`, so `ListOpenTasksTool` is listed as **`list-open-tasks-tool`**, and the title is "List Open Tasks Tool". If you want a clean name, set it yourself with `#[Name('complete-task')]`, as in the next tool.
+</Callout>
+
+## A tool that changes data
+
+```php title="app/Mcp/Tools/CompleteTaskTool.php"
+namespace App\Mcp\Tools;
+
+use App\Models\Task;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Attributes\Name;
+use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
+
+#[Name('complete-task')]
+#[Description("Marks one of the user's tasks as done. Pass the numeric task id from list-open-tasks.")]
+#[IsIdempotent]
+class CompleteTaskTool extends Tool
+{
+    public function handle(Request $request): Response
+    {
+        $data = $request->validate(
+            ['task_id' => ['required', 'integer']],
+            ['task_id.required' => 'Pass task_id, the number after # in list-open-tasks.'],
+        );
+
+        $task = Task::where('user_id', $request->user()->id)->find($data['task_id']);
+
+        if (! $task) {
+            return Response::error("Task {$data['task_id']} is not one of your tasks.");
+        }
+
+        $task->update(['done' => true]);
+
+        return Response::text("Done: #{$task->id} {$task->title}");
+    }
+
+    public function schema(JsonSchema $schema): array
+    {
+        return [
+            'task_id' => $schema->integer()->description('The task id.')->required(),
+        ];
+    }
+}
+```
+
+Two kinds of failure, and they look different on the wire:
+
+- **Validation fails, or `Response::error()` is returned:** the HTTP status is still 200. The JSON-RPC result has `isError: true` and your message as text. The model reads that message and can retry, so write it as an instruction ("Pass task_id, the number after #…"), not "The task id field is required."
+- **Another user's task id:** we return `Response::error()` and change nothing. Our test checks that Bob's task stays open when Ana's token asks to complete it.
+
+## Hide tools per user with shouldRegister
+
+```php title="app/Mcp/Tools/TeamStatsTool.php"
+#[Description('Counts open tasks across all users. Admins only.')]
+#[IsReadOnly]
+class TeamStatsTool extends Tool
+{
+    public function shouldRegister(Request $request): bool
+    {
+        return $request->user()?->is_admin ?? false;
+    }
+
+    public function handle(Request $request): Response
+    {
+        return Response::text('Open tasks: '.Task::where('done', false)->count());
+    }
+}
+```
+
+When `shouldRegister()` returns false, the tool isn't in `tools/list`. If a client calls it anyway, the server answers HTTP 400 with JSON-RPC error `-32602` and "Tool [team-stats-tool] not found." It never runs.
+
+## Protect the endpoint with Sanctum
+
+```php title="routes/ai.php"
+use App\Mcp\Servers\TaskServer;
+use Laravel\Mcp\Facades\Mcp;
+
+Mcp::web('/mcp/tasks', TaskServer::class)
+    ->middleware(['auth:sanctum', 'throttle:60,1']);
+```
+
+Your `User` model needs Sanctum's `HasApiTokens` trait. Without a token, a `tools/list` POST gets **401** before any tool code runs. With `Authorization: Bearer <token>`, `initialize` returns the server's name and version, and `tools/list` returns only the tools that user may see.
+
+Sanctum is the simplest option. If you need clients that only support OAuth, the [MCP docs](https://laravel.com/docs/13.x/mcp#authentication) cover Passport and OAuth 2.1. They recommend staying on Sanctum until a client actually requires OAuth.
+
+## A Vue page that hands out the token
+
+Users need a token to paste into their AI client. Create it in a controller and send it with [Inertia flash data](/inertia-flash-error-vue). Flash data shows up on the next page only and isn't saved in browser history, which suits a secret you show once.
+
+```php title="routes/web.php"
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+
+Route::middleware('auth')->group(function () {
+    Route::get('/settings/mcp', fn () => Inertia::render('settings/Mcp', [
+        'endpoint' => url('/mcp/tasks'),
+    ]));
+
+    Route::post('/settings/mcp-token', function (Request $request) {
+        $token = $request->user()->createToken('mcp-client')->plainTextToken;
+
+        return Inertia::flash('mcpToken', $token)->back();
+    });
+});
+```
+
+```vue title="resources/js/pages/settings/Mcp.vue"
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Form, usePage } from '@inertiajs/vue3'
+
+defineProps<{ endpoint: string }>()
+const page = usePage()
+const token = computed(() => page.flash.mcpToken as string | undefined)
+</script>
+
+<template>
+  <section class="space-y-4">
+    <h2 class="text-lg font-semibold">Connect an AI client</h2>
+    <p>Endpoint: <code>{{ endpoint }}</code></p>
+
+    <Form action="/settings/mcp-token" method="post">
+      <button type="submit">Create a token</button>
+    </Form>
+
+    <div v-if="token">
+      <p>Copy this now. It won't be shown again.</p>
+      <pre>{{ JSON.stringify({ mcpServers: { tasks: {
+        url: endpoint,
+        headers: { Authorization: `Bearer ${token}` },
+      } } }, null, 2) }}</pre>
+    </div>
+  </section>
+</template>
+```
+
+In our test, the token was in `page.flash` on the visit right after the redirect, and it was gone on the visit after that. It never appeared in `props`. The JSON follows the remote-server shape in [Cursor's `mcp.json` docs](https://cursor.com/docs/context/mcp) (`url` plus `headers`). Other clients use a similar format.
+
+<Callout type="tip" title="Let users revoke tokens">
+List `$request->user()->tokens` on the same page with a delete button. A token pasted into an AI client is a long-lived key to the user's data. See [Sanctum token abilities](/sanctum-token-abilities-vue) if you want an `mcp`-only ability.
+</Callout>
+
+## Try it with the Inspector
+
+```bash
+php artisan mcp:inspector mcp/tasks
+```
+
+This opens the MCP Inspector against your web server. Add the `Authorization` header in the Inspector's connection settings, since the route requires a token.
+
+## Test it
+
+`laravel/mcp` ships test helpers: you call a tool on its server and assert on the response.
+
+```php title="tests/Feature/TaskServerTest.php"
+use App\Mcp\Servers\TaskServer;
+use App\Mcp\Tools\CompleteTaskTool;
+use App\Mcp\Tools\ListOpenTasksTool;
+
+test('lists only my open tasks', function () {
+    TaskServer::actingAs($ana)->tool(ListOpenTasksTool::class)
+        ->assertOk()
+        ->assertSee('Ship the invoices page')
+        ->assertDontSee('Bob private task');
+});
+
+test('validation errors reach the model', function () {
+    TaskServer::actingAs($ana)->tool(CompleteTaskTool::class, [])
+        ->assertHasErrors(['Pass task_id, the number after # in list-open-tasks.']);
+});
+```
+
+To cover the HTTP layer as well, post real JSON-RPC to the route:
+
+```php
+$token = $ana->createToken('test')->plainTextToken;
+
+$this->postJson('/mcp/tasks', [
+    'jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => [],
+], ['Authorization' => "Bearer $token"])
+    ->assertOk()
+    ->assertJsonPath('result.tools.0.annotations.readOnlyHint', true);
+```
+
+Our lab suite covered:
+
+- the default names
+- per-user scoping
+- validation errors
+- refusing another user's task
+- completing a task
+- a 401 without a token
+- `initialize` and `tools/list` with a token
+- the admin-only tool
+- `isError` on a failed call
+- the 400 for a hidden tool
+- the Inertia flash of the token
+
+## Gotchas we hit
+
+- **Tool names come from class names.** `FooTool` is listed as `foo-tool`. Renaming a class renames the tool, which breaks prompts and client configs that rely on it. Set `#[Name]` on anything public.
+- **Tool errors are HTTP 200.** Don't assert `assertStatus(4xx)` for a validation failure. Check `result.isError` instead. Only protocol errors, like an unknown tool, return 4xx.
+- **Descriptions matter.** The model only sees the name, the description and the schema. A vague description means the model calls the wrong tool or skips it.
+- **Rate-limit the route.** One prompt can make an agent call tools in a loop. `throttle` middleware on `Mcp::web` works like it does on any route.
+- **Local servers are for dev tools.** `Mcp::local()` runs over stdio through `php artisan mcp:start`. That's how [Laravel Boost](/laravel-boost-vue) works. For your users, use `Mcp::web()`.
+
+## Recap
+
+- `laravel/mcp` turns small `Tool` classes into an MCP server. `routes/ai.php` registers it.
+- Use schemas, validation messages written for the model, and annotations such as `#[IsReadOnly]` to tell the client what each tool does.
+- `->middleware('auth:sanctum')` plus `$request->user()` scoping makes it a per-user API. `shouldRegister()` hides tools a user may not use.
+- Send the token to Vue with `Inertia::flash()` so it's shown once and never stored in history.
+- `Server::actingAs($user)->tool()` tests the logic. A JSON-RPC `postJson` tests auth and the wire format.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'What is laravel/mcp?', a: 'Laravel’s first-party package for building Model Context Protocol servers (and clients). You define tools, resources and prompts as PHP classes and register them in routes/ai.php with Mcp::web() or Mcp::local().' },
+  { q: 'How do I authenticate an MCP server in Laravel?', a: 'Add auth:sanctum to the Mcp::web() route and give the client an Authorization: Bearer token. For clients that require OAuth, use Passport and the OAuth 2.1 support in laravel/mcp.' },
+  { q: 'What is the difference between Mcp::web and Mcp::local?', a: 'Mcp::web() exposes the server over HTTP POST for remote clients. Mcp::local() registers an Artisan command (mcp:start) that a client launches over stdio, which suits local developer tools.' },
+  { q: 'How do I hide an MCP tool from some users?', a: 'Implement shouldRegister(Request $request) on the tool and return false. The tool is removed from tools/list, and calling it returns a JSON-RPC "not found" error.' },
+  { q: 'How do I test a Laravel MCP tool?', a: 'Call YourServer::tool(YourTool::class, [...args]), optionally after actingAs($user), and chain assertOk(), assertSee() or assertHasErrors(). For the HTTP layer, postJson a JSON-RPC body to the route.' },
+]} />
+
+## Next steps
+
+- [Laravel AI SDK with Vue](/laravel-ai-sdk-vue), to build the agent side inside your own app
+- [Laravel Boost](/laravel-boost-vue), a local MCP server for your coding agent
+- [Sanctum token abilities](/sanctum-token-abilities-vue), to limit what an MCP token can do
+- [Laravel policies in Vue](/laravel-vue-policies), to reuse authorization rules inside tools
+
+## Sources
+
+- [Laravel docs: MCP](https://laravel.com/docs/13.x/mcp) (servers, tools, authentication, testing)
+- [laravel/mcp on GitHub](https://github.com/laravel/mcp)
+- [Laravel docs: Sanctum API token authentication](https://laravel.com/docs/13.x/sanctum#api-token-authentication)
+- [MCP specification: transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [MCP security best practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices)
+- [Cursor docs: MCP configuration](https://cursor.com/docs/context/mcp)
