@@ -171,7 +171,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "proxy",
-    guide: "/laravel-trust-proxies-https",
+    guide: "/deploy-laravel-vue#trust-proxies-so-https-sticks",
     guideTitle: "Trust proxies so HTTPS sticks",
     reason: "Do not call trustProxies(at: '*') on a machine exposed directly.",
     find: (line) => {
@@ -251,7 +251,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "migrate",
-    guide: "/laravel-migrate-on-deploy-vue",
+    guide: "/deploy-laravel-vue#run-migrations-in-the-release-not-in-a-request",
     guideTitle: "Run migrations in the release, not in a request",
     reason:
       "Do not call Artisan::call('migrate') from a controller the Vue page can hit. Two deploys, or two curious browsers, should not race that.",

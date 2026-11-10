@@ -4,6 +4,7 @@ title: "Laravel Sail with Vue and Vite"
 excerpt: "Sail runs PHP, the database, and npm in Docker. The Vue dev server is a Sail command, and HMR fails when the browser cannot see that container."
 description: "Run a Laravel and Vue app with Sail: sail:install, sail up, migrations, npm run dev, and the documented HMR host."
 seoTitle: "Laravel Sail and Vue"
+updated: 2026-11-10T13:00:00Z
 date: 2026-10-10T05:40:00Z
 snippet: "php artisan sail:install"
 categories: [laravel, vuejs]
@@ -100,6 +101,8 @@ export default defineConfig({
 Restart `./vendor/bin/sail npm run dev` after the change. If the browser still requests a host that only exists inside Docker, the HMR host is the line that is wrong. The Laravel docs are the place that lists that setting. This page does not add other server flags.
 
 `public/hot` appears while that dev server is running. It must not be deployed. The [deploy guide](/deploy-laravel-vue) covers that file.
+
+Do not delete `public/hot` by hand while the dev server is still running and expect it to stay gone. Vite writes the file back. Do not set `server.hmr.host` to a name that only resolves inside the container. The browser on the host is the thing opening the WebSocket, so the hostname has to work from there.
 
 ## Where this stops
 
