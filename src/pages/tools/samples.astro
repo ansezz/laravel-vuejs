@@ -8,7 +8,7 @@ const lead = 'Lines the setup guide prints. A method or a class body is not a wh
   <p class="pkg-set-note">{lead}</p>
   {GUIDE_SAMPLES.map(sample => (
     <div class="sample-card">
-      <h3>{sample.thing}</h3>
+      <h2>{sample.thing}</h2>
       <p class="pkg-set-note"><span class="sample-path">{sample.path}</span>. {sample.extent} <a href={sample.sourcePath}>Source</a></p>
       <CodeSample lang={sample.lang} code={sample.code} label={`Copy ${sample.thing}`} />
     </div>

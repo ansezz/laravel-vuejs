@@ -54,6 +54,8 @@ export default {
       url.hostname = APEX
       return Response.redirect(url.toString(), 301)
     }
+    // Legacy duplicate of the terms page: one URL per page, so search engines don't split it across two.
+    if (url.pathname === '/page/term-conditions') return Response.redirect(new URL('/page/terms-and-conditions', url).toString(), 301)
     // OG images moved from PNG to JPEG; keep old share-card URLs working.
     const og = url.pathname.match(/^\/og\/([a-z0-9-]+)\.png$/)
     if (og) return Response.redirect(new URL(`/og/${og[1]}.jpg`, url).toString(), 301)
