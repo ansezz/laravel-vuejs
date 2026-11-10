@@ -3,6 +3,7 @@ id: 156
 title: "Cache::flexible: serve stale cache while it refreshes"
 seoTitle: "Laravel Cache::flexible: Stale-While-Revalidate"
 excerpt: "Hidden gem: Cache::flexible serves slightly stale data instantly and refreshes after the response. No user waits on a cache miss. Tested on Laravel 13.35."
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-15T02:30:00Z
 snippet: "Cache::flexible('stats', [5, 30], fn () => …)"
 categories: [laravel, vuejs]
@@ -227,6 +228,25 @@ Cache::flexible('demo', [1, 3], $fn); // expired, ~80 ms, n-3
 
 </TryIt>
 
+## Forget a remembered key on write
+
+`Cache::flexible` is the right default for a dashboard number that can be slightly stale. Plain `Cache::remember` is the right tool when the next request must not see the old value, as long as you forget the key in the same request that writes:
+
+```php
+$stats = Cache::remember('stats.posts', now()->addMinutes(5), function () {
+    return ['count' => Post::query()->count()];
+});
+```
+
+Pass `$stats` as a prop. When a post is created or deleted, forget the key in that same request:
+
+```php
+Post::create([...]);
+Cache::forget('stats.posts');
+```
+
+Five minutes is a choice for a homepage count, not for an editor's list. Don't cache one user's drafts under a global key, and don't `Cache::remember` a paginator that called `where('user_id', auth()->id())` under a key with no user id in it. Don't cache the rendered Inertia page in a way that includes the CSRF token. That token belongs to one session.
+
 ## How useful is this?
 
 | | Score |
@@ -244,6 +264,7 @@ If you already `Cache::remember` a count or aggregate for an Inertia page, you c
 - Fresh hits return immediately. Stale hits return immediately and refresh via `defer()` after the response. Only a full miss makes the user wait.
 - Concurrent stale refreshes share a named deferred callback and a cache lock.
 - Keep it for aggregates and public stats; keep exact data on `remember` or uncached queries.
+- When the next request must not see a stale count, `Cache::remember` the public number and `forget` that key in the same write.
 - It shipped in Laravel 11.23 and was tested here on Laravel 13.35.
 
 ## FAQ
@@ -254,12 +275,13 @@ If you already `Cache::remember` a count or aggregate for an Inertia page, you c
   { q: 'Which Laravel version do I need?', a: '`Cache::flexible` arrived in Laravel 11.23 (Laracon 2024 PR #52710). Everything here was tested on Laravel 13.35 with the database cache store.' },
   { q: 'How is this different from defer() alone?', a: '`defer()` runs arbitrary work after the response. `Cache::flexible` uses `defer()` only for the stale refresh path, and still returns a value to the current request. See [Laravel defer()](/laravel-defer-helper-after-response).' },
   { q: 'Can I use it with cache tags?', a: 'Yes, call `flexible` on a tagged repository (`Cache::tags([...])->flexible(...)`) on drivers that support tags. Invalidation still goes through your usual `tags()->flush()` or `forget()` flow.' },
+  { q: "When should I use Cache::remember instead of Cache::flexible?", a: "When the next request must not see the old value. Remember the public number, then `Cache::forget` the key in the same request that writes. Flexible is for aggregates that can be slightly stale." },
 ]} />
 
 ## Next steps
 
 - [Laravel defer(): run code after the response](/laravel-defer-helper-after-response), the helper flexible uses for refreshes
-- [Cache a prop and forget it on write](/laravel-cache-remember-vue), when plain `remember` is the right tool
+- [Forget a remembered key on write](#forget-a-remembered-key-on-write), when plain `remember` is the right tool
 - [Inertia partial reloads](/inertia-partial-reloads), so slow props are not refetching on every visit
 - [Laravel docs: Stale while revalidate](https://laravel.com/framework/docs/13.x/cache#swr)
 
@@ -270,3 +292,5 @@ If you already `Cache::remember` a count or aggregate for an Inertia page, you c
 - [laravel/framework v11.23.0 release (Laracon 2024 PR #52710)](https://github.com/laravel/framework/releases/tag/v11.23.0)
 - [laravel/framework PR #52891: Cache::flexible improvements](https://github.com/laravel/framework/pull/52891)
 - [Source: `Illuminate\Cache\Repository::flexible`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Cache/Repository.php)
+- [Laravel docs: Cache](https://laravel.com/framework/docs/13.x/cache)
+- [Laravel docs: Retrieve and store](https://laravel.com/framework/docs/13.x/cache#retrieve-store)

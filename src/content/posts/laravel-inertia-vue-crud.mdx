@@ -359,6 +359,75 @@ All three should pass. Then break the `when()` in `index` and watch the search t
 
 The starter kit uses Pest. These tests hit the web routes, so they use the session and the CSRF middleware that a browser would use. Feature tests do not need a CSRF token.
 
+## Wrap related writes in a transaction
+
+The single-table `store` above creates one row and redirects. When the save also writes relations, wrap those writes in `DB::transaction` and redirect after the closure returns:
+
+```php title="app/Http/Controllers/PostController.php"
+$post = DB::transaction(function () use ($request, $validated) {
+    $post = Post::create([
+        'title' => $validated['title'],
+        'user_id' => $request->user()->id,
+    ]);
+
+    $post->tags()->sync($validated['tag_ids'] ?? []);
+
+    return $post;
+});
+
+return to_route('posts.show', $post);
+```
+
+If `sync` throws, the post is not left behind. Validation stays outside the transaction, so you don't hold a lock while you debate the request.
+
+Don't redirect inside the closure. The redirect throws a `HttpResponseException`, and the commit then depends on how that exception is handled. Don't catch `\Throwable` inside the closure and return a Vue error string. Let it roll back. Send a field error only when you know the failure is the user's input. Don't start a transaction in the Vue page.
+
+If you need to notify or forget a cache key only after the commit succeeds, call `DB::afterCommit` inside the closure. Those callbacks run after the commit and are dropped on rollback.
+
+## Upsert a batch, not a form
+
+A form that creates or edits one post should still use `create` or `update`. `upsert` is a batch import by a unique key:
+
+```php
+Post::upsert([
+    ['slug' => 'hello', 'title' => 'Hello', 'user_id' => $request->user()->id],
+    ['slug' => 'world', 'title' => 'World', 'user_id' => $request->user()->id],
+], uniqueBy: ['slug'], update: ['title']);
+```
+
+`uniqueBy` must match a unique index. MySQL and MariaDB ignore that argument and use the table's unique indexes to find the row. `update` is the column list that changes when the key already exists.
+
+Eloquent sets `created_at` and `updated_at` itself when timestamps are enabled, and it keeps `created_at` when the row already existed. Observers and model events do not run, so a policy listener or a slug hook on `saving` never sees the batch. Validate each row before this call: `upsert` is not a validator.
+
+Don't point an Inertia form at `upsert` for one title. You lose the model events, and the id comes back differently. Don't post the whole table from Vue on every keystroke.
+
+## An activity log for the admin
+
+When you want a trail of who changed a post, log a sentence and the subject from the controller. Don't log `$request->all()`: that stores the password.
+
+[spatie/laravel-activitylog](https://spatie.be/docs/laravel-activitylog) is the package this usually means:
+
+```bash
+composer require spatie/laravel-activitylog
+php artisan vendor:publish --provider="Spatie\Activitylog\ActivitylogServiceProvider" --tag="activitylog-migrations"
+php artisan migrate
+```
+
+```php
+activity()
+    ->performedOn($post)
+    ->causedBy($request->user())
+    ->log('updated the post');
+```
+
+Pass the latest rows to an admin page only, and [authorize](/laravel-vue-policies) who may open it:
+
+```php
+'activity' => Activity::query()->latest('id')->limit(20)->get(['id', 'description', 'created_at']),
+```
+
+Don't put the `properties` JSON on a page any user can open until you have read what you stored. Don't log attribute changes on `User` without an except list. Tokens and passwords don't belong in `activity_log`.
+
 ## What this page does not do
 
 It does not tell the reader the save worked. That sentence is a [flash](/laravel-vue-flash). It does not upload a file, broadcast a "post created" event, or render the list on the server for Google. Those are the [upload](/laravel-vue-file-upload), [Reverb](/laravel-reverb-vue), and [deploy](/deploy-laravel-vue) guides. Other paginators, live validation, and who may edit a row are the [pagination](/laravel-vue-pagination), [Precognition](/laravel-precognition-vue), and [permissions](/laravel-vue-policies#roles-and-permissions-with-spatie) guides. Keep this controller boring. That is the page people can finish in an afternoon.
@@ -402,6 +471,9 @@ The `where` and the `update` are one SQL statement, so two requests can't both p
 - Rows live on `posts.data` once you paginate.
 - Inertia 3’s `<Form>` handles both create and edit with server errors.
 - Pest proves create, validation and search.
+- Redirect after a `DB::transaction`, not inside it.
+- Use `upsert` for a batch import, not for one form save.
+- Log an activity sentence and the subject; never `$request->all()`.
 
 ## FAQ
 
@@ -410,6 +482,9 @@ The `where` and the `update` are one SQL statement, so two requests can't both p
   { q: 'Why does my Inertia list render nothing after adding pagination?', a: 'A paginator wraps rows in `data`. Loop over `posts.data` instead of `posts`.' },
   { q: 'Why do I not get a 422 from Laravel validation in Inertia?', a: 'A failed validation redirects back with errors in the session; Inertia follows the redirect and puts them in `errors`.' },
   { q: 'Should I use useForm or the Form component?', a: 'Use `<Form>` when the fields are inputs. Keep `useForm` for screens that build the payload in code.' },
+  { q: "Should I redirect inside DB::transaction?", a: "No. Do the writes in the closure and redirect after it returns. A redirect throws, and the commit then depends on how that exception is handled. Use `DB::afterCommit` for work that should run only after a successful commit." },
+  { q: "Does Eloquent upsert set timestamps?", a: "Yes. When timestamps are enabled, Eloquent sets `created_at` and `updated_at` itself and keeps `created_at` on an existing row. Model events and observers do not run, so a normal Vue form should still use `create` or `update`." },
+  { q: "Can I log the whole request in an activity log?", a: "No. Logging `$request->all()` stores passwords and tokens. Log a sentence, the subject, and the user, and only show the latest rows on an authorized admin page." },
 ]} />
 
 ## Next steps
@@ -427,3 +502,9 @@ The `where` and the `update` are one SQL statement, so two requests can't both p
 - [Laravel 13: Pagination](https://laravel.com/framework/docs/13.x/pagination)
 - [Laravel docs: Eloquent timestamps](https://laravel.com/framework/docs/13.x/eloquent#timestamps)
 - [Laravel docs: Validation](https://laravel.com/framework/docs/13.x/validation)
+- [Laravel docs: Database transactions](https://laravel.com/framework/docs/13.x/database#database-transactions)
+- [Laravel docs: Database](https://laravel.com/framework/docs/13.x/database)
+- [Laravel docs: Upserts](https://laravel.com/framework/docs/13.x/eloquent#upserts)
+- [Laravel docs: Query builder upserts](https://laravel.com/framework/docs/13.x/queries#upserts)
+- [spatie/laravel-activitylog docs](https://spatie.be/docs/laravel-activitylog)
+- [spatie/laravel-activitylog on GitHub](https://github.com/spatie/laravel-activitylog)
