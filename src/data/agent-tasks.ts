@@ -249,7 +249,7 @@ export const stationOrder = [
   "pinia-laravel-inertia",
   "laravel-reverb-vue",
   "laravel-socialite-vue",
-  "laravel-vue-permissions",
+  "laravel-vue-policies",
   "laravel-breeze-jetstream-vue",
   "laravel-api-resources-vue",
   "laravel-vue-datatable",

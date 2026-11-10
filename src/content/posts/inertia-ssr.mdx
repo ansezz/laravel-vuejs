@@ -4,6 +4,7 @@ title: "Server-render a Laravel and Vue Inertia app"
 excerpt: "Public pages that need HTML on the first response use the SSR bundle and a process that stays up. An app that is entirely behind login can skip it."
 description: "Server-render Inertia with npm run build:ssr, inertia:start-ssr, and a Vue page that does not read window during setup."
 seoTitle: "Inertia server rendering"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T07:50:00Z
 snippet: "npm run build:ssr"
 categories: [laravel, vuejs]
@@ -61,6 +62,19 @@ php artisan inertia:stop-ssr
 `public/hot` still must not be on the server. SSR does not make a dev server safe to deploy.
 
 </Callout>
+
+## Keep the SSR process running
+
+`npm run build` builds the client bundle only. The server bundle comes from `npm run build:ssr`, which the starter kit defines to build both the client and the SSR bundle. Run it on every deploy, then restart the Node process so it loads the new bundle:
+
+```bash
+npm run build:ssr
+php artisan inertia:stop-ssr   # the supervisor starts it again
+```
+
+In production, run `php artisan inertia:start-ssr` under a process monitor such as Supervisor, the same way you run queue workers. If the process dies, Inertia falls back to client-side rendering: the page still works, but the first response no longer contains your page HTML, and that's what search engines and link previews read. Check it after a deploy with `php artisan inertia:check-ssr`, or with `curl` and a search for a heading from the page.
+
+If you change the port, update `inertia.ssr.url` in `config/inertia.php` too, or Laravel keeps calling the old address.
 
 ## window is not there
 
@@ -139,3 +153,4 @@ The supervise step on a VPS, `php artisan optimize`, and the queue are the deplo
 
 - [Inertia v3: Server-side rendering](https://inertiajs.com/docs/v3/advanced/server-side-rendering)
 - [Laravel Vue starter kit](https://github.com/laravel/vue-starter-kit)
+- [Laravel docs: Deployment](https://laravel.com/framework/docs/13.x/deployment)

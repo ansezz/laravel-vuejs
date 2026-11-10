@@ -4,6 +4,7 @@ title: "Call the Laravel AI SDK from a Vue page"
 seoTitle: "Laravel AI SDK on a Vue page"
 excerpt: "Install laravel/ai, prompt one agent from a controller, and show the reply on an Inertia Vue page. The provider key stays on the server."
 description: "Install laravel/ai, prompt one agent from a controller, and show the reply on an Inertia Vue page. The provider key stays on the server."
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-11T16:00:00Z
 snippet: "composer require laravel/ai"
 categories: [laravel, vuejs]
@@ -191,6 +192,141 @@ Do not add tools, structured output, or a second provider on the first page. A s
 
 The stack choice for the page itself is still the one in [Laravel and Vue in 2026](/laravel-vue-in-2026). The form posts like the [CRUD guide](/laravel-inertia-vue-crud). The test style matches [Test a Laravel and Vue app](/test-laravel-vue).
 
+## Structured output instead of parsing text
+
+When the page needs fields, not prose, have the agent return a schema. Implement `HasStructuredOutput` and the response becomes array-accessible:
+
+```php title="app/Ai/Agents/ScoreNote.php"
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Ai\Contracts\Agent;
+use Laravel\Ai\Contracts\HasStructuredOutput;
+use Laravel\Ai\Promptable;
+
+class ScoreNote implements Agent, HasStructuredOutput
+{
+    use Promptable;
+
+    public function instructions(): string
+    {
+        return 'Score the note from 1 to 5 and give one reason.';
+    }
+
+    public function schema(JsonSchema $schema): array
+    {
+        return [
+            'score' => $schema->integer()->min(1)->max(5)->required(),
+            'reason' => $schema->string()->required(),
+        ];
+    }
+}
+```
+
+```php
+$response = (new ScoreNote)->prompt($validated['note']);
+
+return Inertia::render('notes/Show', [
+    'score' => $response['score'],
+    'reason' => $response['reason'],
+]);
+```
+
+The Vue page gets two plain props and never parses JSON. Pass only the validated field to `prompt()`, not `$request->all()`. The AI SDK 1.3 release added typed classes for this: see [typed structured output](/laravel-ai-sdk-1-3-typed-structured-output-file-limits).
+
+## Stream a reply to Vue
+
+`stream()` returns a streamed response of server-sent events. Give it its own route, because it isn't an Inertia visit:
+
+```php title="routes/web.php"
+Route::post('/replies/stream', function (Request $request) {
+    $validated = $request->validate(['note' => ['required', 'string', 'max:2000']]);
+
+    return (new DraftReply)->stream($validated['note']);
+})->middleware(['auth', 'throttle:20,1']);
+```
+
+On the Vue side, start it with `fetch` and read `response.body` as a stream, not with `useForm` or `<Form>`. Those wait for an Inertia page or a redirect and won't render tokens as they arrive. Keep `auth` and a throttle on the route: an open streaming endpoint is an open bill with your provider. Validation errors here come back as a normal 422 JSON response, so your fetch code has to read them.
+
+## Continue a conversation the user owns
+
+`RemembersConversations` stores each exchange in the `agent_conversations` and `agent_conversation_messages` tables, so publish and run the SDK migrations first:
+
+```php
+use Laravel\Ai\Concerns\RemembersConversations;
+use Laravel\Ai\Contracts\Conversational;
+
+class DraftReply implements Agent, Conversational
+{
+    use Promptable, RemembersConversations;
+}
+```
+
+Don't define your own `messages()` on that class, or the stored thread is ignored. Start a thread for the user, then send `conversationId` to the page:
+
+```php
+$reply = (new DraftReply)->forUser($request->user())->prompt($validated['note']);
+// $reply->conversationId
+```
+
+`continue()` doesn't check who owns the id, and the id comes back from the browser. Check ownership before you continue:
+
+```php
+use Laravel\Ai\Contracts\ConversationStore;
+
+abort_unless(app(ConversationStore::class)->conversationBelongsTo(
+    $validated['conversation'],
+    $request->user()->getMorphClass(),
+    $request->user()->getKey(),
+), 403);
+
+$reply = (new DraftReply)
+    ->continue($validated['conversation'], as: $request->user())
+    ->prompt($validated['note']);
+```
+
+Render stored messages as text, never with `v-html`.
+
+## Tool approval pauses the agent
+
+A tool that needs approval stops the run. The response tells you, and the page asks the user:
+
+```php
+if ($response->hasPendingApprovals()) {
+    return Inertia::render('notes/Approve', [
+        'conversation' => $response->conversationId,
+        'pending' => $response->pendingApprovals,
+    ]);
+}
+```
+
+Resuming needs the stored conversation, so this only works with `RemembersConversations`: a one-shot `prompt()` has nothing to resume. Check ownership as above, then continue with a decision for each pending call:
+
+```php
+use Laravel\Ai\Approvals\Decision;
+use Laravel\Ai\Approvals\Decisions;
+
+$response = (new DraftReply)
+    ->continue($validated['conversation'], as: $request->user())
+    ->prompt(Decisions::from([
+        $validated['call_id'] => Decision::approve(),
+    ]));
+```
+
+Don't auto-approve inside the tool to make a demo work. That removes the reason the approval exists. The [1.1 and 1.2 release notes](/laravel-ai-sdk-1-2-skills-approval-cohere) cover the approval API in more depth.
+
+### More test assertions
+
+`DraftReply::fake([...])` returns canned responses in order, so no request reaches the provider. Two more helpers keep tests honest:
+
+```php
+DraftReply::fake(['Rewritten.'])->preventStrayPrompts();
+
+$this->actingAs($user)->post('/replies', ['note' => 'Ship the form.'])->assertRedirect();
+
+DraftReply::assertPrompted('Ship the form.');
+```
+
+`assertPrompted` fails if the controller sent `$request->all()` or an empty string. `preventStrayPrompts()` fails the test if the agent is prompted more times than you faked. Don't keep a real key in `.env.testing` "just for one test": it costs money and makes the suite flaky.
+
 ## Recap
 
 - Key in `.env`, agent in PHP, reply as a prop.
@@ -209,12 +345,15 @@ The stack choice for the page itself is still the one in [Laravel and Vue in 202
 
 ## Next steps
 
-- [Stream an AI SDK reply without an Inertia visit](/laravel-ai-sdk-stream-vue)
-- [Continue an AI SDK conversation you own](/laravel-ai-conversation-vue)
-- [Return a structured score from the AI SDK](/laravel-ai-structured-output-vue)
-- [Fake an AI agent in a Pest test](/pest-fake-ai-agent-vue)
+- [Build a Laravel MCP server with Sanctum auth](/laravel-mcp-server-vue)
+- [Typed structured output in AI SDK 1.3](/laravel-ai-sdk-1-3-typed-structured-output-file-limits)
+- [Tool approval and skills in AI SDK 1.1 and 1.2](/laravel-ai-sdk-1-2-skills-approval-cohere)
+- [Run slow work in a queued job](/laravel-vue-queued-job)
+- [Test a Laravel and Vue app](/test-laravel-vue)
 
 ## Sources
 
 - [Laravel 13: AI SDK](https://laravel.com/framework/docs/13.x/ai-sdk)
 - [Inertia v3: Forms](https://inertiajs.com/docs/v3/the-basics/forms)
+- [laravel/ai on GitHub](https://github.com/laravel/ai)
+- [Pest docs](https://pestphp.com/docs/installation)

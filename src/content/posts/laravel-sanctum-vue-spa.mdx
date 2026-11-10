@@ -4,6 +4,7 @@ title: "Authenticate a Vue SPA with Laravel Sanctum"
 excerpt: "Cookie sessions for a first-party Vue app, CSRF, stateful domains, and the token path that is only for a phone or a third party."
 description: "Laravel Sanctum SPA authentication for Vue 3: CSRF cookie, session login, CORS, and when a bearer token is the wrong tool."
 seoTitle: "Laravel Sanctum Vue SPA authentication"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T04:40:00Z
 snippet: "php artisan install:api"
 categories: [laravel, vuejs]
@@ -89,6 +90,18 @@ Leave `SESSION_DOMAIN` empty when everything is `localhost`. A leading dot on `l
 Send `Accept: application/json` on API calls. Without it, a failed login can come back as a redirect to an HTML page instead of a 422.
 
 </Callout>
+
+## SESSION_DOMAIN in production
+
+| Setup | `SESSION_DOMAIN` | `SANCTUM_STATEFUL_DOMAINS` |
+|---|---|---|
+| One host, Inertia or SPA served by Laravel | empty (`null`) | your host |
+| SPA on `app.example.com`, API on `api.example.com` | `.example.com` | `app.example.com` |
+| Local, both on `localhost` with ports | empty | `localhost:5173,localhost:8000` |
+
+The leading dot sends the session cookie to every subdomain of `example.com`. Both hosts must share that parent domain. `localhost` has no parent you can prefix, and `localhost` and `127.0.0.1` aren't the same host for cookies. Pick one, use it in `APP_URL` and open the app at that address.
+
+The session cookie is `HttpOnly`, so you can't fix any of this from Vue code. If login works but the next request is a 401, the cookie went to a domain the next host doesn't match.
 
 ## The login route is a web route
 
@@ -300,3 +313,6 @@ Private broadcast channels from this SPA need a different auth route than a norm
 - [Laravel 13: Sanctum](https://laravel.com/framework/docs/13.x/sanctum)
 - [Laravel 13: Sanctum, SPA authentication](https://laravel.com/framework/docs/13.x/sanctum#spa-authentication)
 - [Axios: Request config](https://axios-http.com/docs/req_config)
+- [Laravel docs: Sanctum API token authentication](https://laravel.com/framework/docs/13.x/sanctum#api-token-authentication)
+- [Laravel docs: Session](https://laravel.com/framework/docs/13.x/session)
+- [MDN: Set-Cookie Domain](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)

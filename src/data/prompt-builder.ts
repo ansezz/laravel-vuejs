@@ -112,7 +112,7 @@ export const MODULES: StarterModule[] = [
     id: "permissions",
     label: "Roles and permissions",
     detail: "Spatie stores the role. A hidden button is not the check.",
-    slug: "laravel-vue-permissions",
+    slug: "laravel-vue-policies",
     group: "accounts",
     shapes: ["inertia"],
     defaults: [],

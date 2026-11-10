@@ -1,21 +1,21 @@
 ---
 id: 150
-title: "100 Laravel and Vue guides, by the search"
-seoTitle: "100 Laravel and Vue guides"
-excerpt: "One hundred short Laravel and Vue guides for the searches under an Inertia app: forms, Fortify, sessions, queues, and the AI SDK."
-description: "One hundred short Laravel and Vue guides for the searches under an Inertia app: forms, Fortify, sessions, queues, and the AI SDK."
+title: "Laravel and Vue guides by topic"
+seoTitle: "Laravel and Vue guides by topic"
+excerpt: "Laravel and Vue guides for an Inertia app, grouped by area: forms, auth and Fortify, pages, data, files, queues, deployment and the Laravel AI SDK."
+description: "Laravel and Vue guides for an Inertia app, grouped by area: forms, auth and Fortify, pages, data, files, queues, deployment and the Laravel AI SDK."
 date: 2026-10-11T11:37:00Z
 snippet: "One page, one fix."
 categories: [laravel, vuejs]
 tags: [laravel, vuejs, inertia]
 ---
-People search for a Laravel and Vue error, not for a stack essay. [State of Laravel 2026](https://stateoflaravel.com/) puts Inertia client rendering at 44.71 percent, up from 37.55 percent in 2025, and Vue reactivity at 51.08 percent. These one hundred pages are the short answers under that stack. Two of them are the longer agent guides. This page is the map. The other ninety-seven are one fix each.
+People search for a Laravel and Vue error, not for a stack essay. [State of Laravel 2026](https://stateoflaravel.com/) puts Inertia client rendering at 44.71 percent, up from 37.55 percent in 2025, and Vue reactivity at 51.08 percent. This page maps the guides for that stack by area. Several short pages have been folded into the longer guide they belonged to, so some links below jump to a section.
 
 <TLDR audience="Laravel + Vue developers with a failing request" applies="Laravel 13 · Inertia 3 · Vue 3">
 
-- One hundred short pages, one fix each, grouped by area: agents, forms, auth, pages, data, files, jobs and shipping.
+- Guides grouped by area: agents, forms, auth, pages, data, files, jobs and shipping.
 - Pick an architecture in the [2026 stack guide](/laravel-vue-in-2026); come here when the app exists and something fails.
-- Each short page links the longer guide when one exists.
+- Links with a `#` jump to the section of the longer guide that covers that fix.
 
 </TLDR>
 
@@ -33,7 +33,7 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 - [Validate an Inertia form with a form request](/laravel-form-request-inertia)
 - [Ignore the current user on a unique email](/laravel-unique-email-vue)
 - [Require a password confirmation in Vue](/laravel-password-confirmed-vue)
-- [Validate an image upload in Laravel and Vue](/laravel-image-rule-vue)
+- [Validate an image upload in Laravel and Vue](/laravel-vue-file-upload#what-the-image-rule-accepts)
 - [Write a custom Laravel validation rule](/laravel-custom-validation-rule-vue)
 - [Reset an Inertia form after it saves](/inertia-on-success-reset-vue)
 - [preserveState keeps the Vue page you have](/inertia-preserve-state-vue)
@@ -48,20 +48,20 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 ## Auth
 
 - [Fix a 419 after you deploy](/laravel-vue-419-after-deploy)
-- [Set SESSION_DOMAIN for a Vue app](/laravel-session-domain-vue)
-- [Verify email with Fortify and Vue](/fortify-email-verification-vue)
-- [Reset a password with Fortify and Vue](/fortify-password-reset-vue)
-- [Confirm a password before a sensitive Vue action](/fortify-confirm-password-vue)
-- [Change the Fortify login field](/fortify-login-username-vue)
-- [Rate limit Fortify login attempts](/laravel-login-rate-limit-vue)
+- [Set SESSION_DOMAIN for a Vue app](/laravel-sanctum-vue-spa#session_domain-in-production)
+- [Verify email with Fortify and Vue](/laravel-fortify-vue#email-verification)
+- [Reset a password with Fortify and Vue](/laravel-fortify-vue#password-reset)
+- [Confirm a password before a sensitive Vue action](/laravel-fortify-vue#confirm-the-password-before-a-sensitive-action)
+- [Change the Fortify login field](/laravel-fortify-vue#log-in-with-a-username)
+- [Rate limit Fortify login attempts](/laravel-fortify-vue#login-rate-limiting)
 - [Protect an Inertia page with auth middleware](/auth-middleware-inertia-vue)
-- [Issue a Sanctum token without breaking the SPA](/sanctum-api-token-beside-spa)
+- [Issue a Sanctum token without breaking the SPA](/laravel-sanctum-vue-spa#tokens-only-for-the-other-clients)
 - [Limit a Sanctum token with abilities](/sanctum-token-abilities-vue)
-- [Turn on CORS credentials for a separate Vue app](/cors-supports-credentials-vue)
+- [Turn on CORS credentials for a separate Vue app](/laravel-vue-cors#supports_credentials-needs-a-real-origin)
 - [Redirect to Socialite instead of a popup](/socialite-redirect-not-popup)
 - [Prefix a Laravel API with v1](/laravel-api-v1-prefix-vue)
 - [Update a profile from a Vue settings page](/laravel-profile-settings-vue)
-- [Invite a teammate with a signed link](/laravel-invite-teammate-vue)
+- [Invite a teammate with a signed link](/laravel-signed-email-link-vue#invite-a-teammate)
 
 ## Pages
 
@@ -71,11 +71,11 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 - [Read page props from a persistent layout](/inertia-layout-child-props)
 - [Default a prop an Inertia page did not get](/vue-prop-defaults-inertia)
 - [Move a Vue 2 component to script setup](/vue-2-options-to-script-setup)
-- [Authorize a controller action before the Vue page](/laravel-authorize-controller-vue)
-- [Hide a Vue button with a gate](/laravel-gate-button-vue)
-- [Put a permission on the route](/spatie-permission-middleware-vue)
-- [Gate a Vue index with viewAny](/laravel-policy-view-any-vue)
-- [Flash an error toast in Vue](/inertia-flash-error-vue)
+- [Authorize a controller action before the Vue page](/laravel-vue-policies#authorize-in-the-controller)
+- [Hide a Vue button with a gate](/laravel-vue-policies#share-the-answer-as-a-boolean)
+- [Put a permission on the route](/laravel-vue-policies#permission-middleware-on-the-route)
+- [Gate a Vue index with viewAny](/laravel-vue-policies#gate-the-index-with-viewany)
+- [Flash an error toast in Vue](/laravel-vue-flash#flash-an-error-toast)
 - [Read an Inertia 409 after deploy](/inertia-error-409-vue)
 - [Reject a Vue form that edited a stale row](/laravel-updated-at-check-vue)
 - [Let a missing Vue page 404](/laravel-abort-404-inertia-vue)
@@ -83,14 +83,14 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 ## Data
 
 - [Search one column from a Vue field](/laravel-where-search-vue)
-- [Order a cursor page by id](/laravel-order-by-id-vue)
-- [Eager load a relation for a Vue list](/laravel-eager-load-vue)
+- [Order a cursor page by id](/laravel-vue-pagination#newest-first-with-a-cursor)
+- [Eager load a relation for a Vue list](/laravel-automatic-eager-loading#explicit-with-and-column-lists)
 - [Bind a Vue page to a route model](/laravel-route-model-binding-vue)
 - [Bind a public URL to a slug](/laravel-slug-binding-vue)
 - [Keep soft-deleted rows off a Vue index](/laravel-soft-deletes-index-vue)
 - [Restore a soft-deleted row from Vue](/laravel-restore-soft-delete-vue)
-- [Paginate an API resource for Vue](/eloquent-api-resource-pagination-vue)
-- [Render simplePaginate without a last page](/simple-paginate-vue)
+- [Paginate an API resource for Vue](/laravel-vue-pagination#paginate-an-api-resource)
+- [Render simplePaginate without a last page](/laravel-vue-pagination#what-each-method-returns)
 - [Upsert rows without a per-row form](/laravel-upsert-vue)
 - [Wrap a Vue save in a transaction](/laravel-db-transaction-vue)
 - [Cache a prop and forget it on write](/laravel-cache-remember-vue)
@@ -102,13 +102,13 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 
 ## Files
 
-- [Download a file through a signed URL](/laravel-signed-download-vue)
+- [Download a file through a signed URL](/laravel-signed-email-link-vue#signed-downloads)
 - [Put a signed URL in an email](/laravel-signed-email-link-vue)
 - [Download a CSV from a Vue button](/laravel-csv-export-vue)
 - [Fix an image 404 with storage:link](/php-artisan-storage-link-vue)
 - [Show a private S3 file for a few minutes](/laravel-s3-temporary-url-vue)
-- [The image max rule is kilobytes](/laravel-image-max-kilobytes-vue)
-- [Chunk a large export in a job](/laravel-chunk-export-vue)
+- [The image max rule is kilobytes](/laravel-vue-file-upload#when-the-file-never-reaches-laravel)
+- [Chunk a large export in a job](/laravel-csv-export-vue#the-chunk-bug)
 
 ## Jobs
 
@@ -116,8 +116,8 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 - [Show failed jobs to an admin](/laravel-failed-jobs-table-vue)
 - [Record when a schedule last ran](/laravel-schedule-last-run-vue)
 - [Prune old rows on a schedule](/laravel-prune-models-vue)
-- [Send mail and a database notification](/laravel-mail-and-database-notification)
-- [Broadcast a notification to a Vue page](/laravel-broadcast-notification-vue)
+- [Send mail and a database notification](/laravel-vue-notifications#mail-and-the-bell-from-one-notification)
+- [Broadcast a notification to a Vue page](/laravel-vue-notifications#broadcast-it-live)
 - [Queue a broadcast instead of blocking the save](/laravel-should-broadcast-vue)
 
 ## Ship
@@ -125,7 +125,7 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 - [Register routes in bootstrap/app.php](/laravel-bootstrap-app-php)
 - [Format PHP with Pint before you commit](/laravel-pint-before-commit)
 - [Trust proxies so HTTPS sticks](/laravel-trust-proxies-https)
-- [Keep the Inertia SSR process running](/inertia-ssr-process-cloud)
+- [Keep the Inertia SSR process running](/inertia-ssr#keep-the-ssr-process-running)
 - [Store sessions in the database](/laravel-database-sessions-vue)
 - [Install Telescope for local debugging](/laravel-telescope-dev-only)
 - [Point the load balancer at /up](/laravel-health-route-up)
@@ -136,13 +136,13 @@ The [2026 stack guide](/laravel-vue-in-2026) is still the page that chooses Iner
 - [Expose a Vite variable without exposing a secret](/vite-public-env-vue)
 - [Point Vite HMR at localhost under Sail](/vite-hmr-sail-hostname)
 - [Fake an HTTP call a Vue page depends on](/laravel-http-fake-test-vue)
-- [Update Laravel Boost after you upgrade](/laravel-boost-update-vue)
-- [Use the Boost skill for Inertia Vue](/boost-inertia-vue-skill)
-- [Return a structured score from the AI SDK](/laravel-ai-structured-output-vue)
-- [Stream an AI SDK reply without an Inertia visit](/laravel-ai-sdk-stream-vue)
-- [Continue an AI SDK conversation you own](/laravel-ai-conversation-vue)
-- [Approve an AI SDK tool before it runs](/laravel-ai-tool-approval-vue)
-- [Fake an AI agent in a Pest test](/pest-fake-ai-agent-vue)
+- [Update Laravel Boost after you upgrade](/laravel-boost-vue#update-boost-after-an-upgrade)
+- [Use the Boost skill for Inertia Vue](/laravel-boost-vue#the-inertia-vue-skill)
+- [Return a structured score from the AI SDK](/laravel-ai-sdk-vue#structured-output-instead-of-parsing-text)
+- [Stream an AI SDK reply without an Inertia visit](/laravel-ai-sdk-vue#stream-a-reply-to-vue)
+- [Continue an AI SDK conversation you own](/laravel-ai-sdk-vue#continue-a-conversation-the-user-owns)
+- [Approve an AI SDK tool before it runs](/laravel-ai-sdk-vue#tool-approval-pauses-the-agent)
+- [Fake an AI agent in a Pest test](/laravel-ai-sdk-vue#more-test-assertions)
 
 Each short page links the longer guide when one already exists. Do not treat a short page as a second way to install Breeze, Ziggy, or Vue Router on an Inertia app.
 

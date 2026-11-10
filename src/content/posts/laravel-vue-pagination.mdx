@@ -4,6 +4,7 @@ title: "Laravel and Vue pagination"
 excerpt: "paginate, simplePaginate, and cursorPaginate return different JSON. The Vue page can only render the links that object actually has."
 description: "Choose paginate, simplePaginate, or cursorPaginate for a Laravel and Vue list, and render only the links that object includes."
 seoTitle: "Laravel Vue pagination"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T05:10:00Z
 categories: [laravel, vuejs]
 tags: [laravel, vuejs, inertia]
@@ -81,6 +82,33 @@ Post::query()
     ->withQueryString();
 ```
 
+## Newest first with a cursor
+
+A cursor needs an order it can resume from without ties. Ordering only by `published_at` breaks when two posts share a timestamp: the next page can repeat or skip a row. [The docs](https://laravel.com/framework/docs/13.x/pagination#cursor-pagination) require at least one unique column in the order, so add `id` as a tiebreaker:
+
+```php
+$posts = Post::query()
+    ->orderByDesc('published_at')
+    ->orderByDesc('id')
+    ->cursorPaginate(12);
+```
+
+Both columns go into the cursor, so the next page starts after that exact pair. Two limits from the docs: ordered columns can't contain `null` values (so drafts with an empty `published_at` need filtering out first), and an expression in the order by only works if it's aliased and added to the select. Sort in the query, not again in Vue, or page 2 won't follow page 1.
+
+## Paginate an API resource
+
+For a JSON API, wrap the paginator itself in the resource collection:
+
+```php
+return PostResource::collection(
+    Post::query()->latest('id')->paginate(12)
+);
+```
+
+The response then has `data`, `links` and `meta`, with `meta.current_page`, `meta.last_page` and `meta.total` for `paginate()`. If you pass `$posts->items()` instead, you get an array without `links` and `meta`, and the Vue footer has nothing to read. With `simplePaginate()` or `cursorPaginate()`, `meta` has no `total` or `last_page`, so check the shape again if you switch methods.
+
+For Inertia pages, return the paginator as a prop, as above. Use the resource when another client reads the same endpoint.
+
 ## A test that locks the shape
 
 <TryIt title="Fail fast if someone swaps the paginator">
@@ -132,3 +160,5 @@ Loading the next page by appending rows, instead of replacing them, is a partial
 
 - [Laravel 13: Pagination](https://laravel.com/framework/docs/13.x/pagination)
 - [Laravel 13: Cursor pagination](https://laravel.com/framework/docs/13.x/pagination#cursor-pagination)
+- [Laravel docs: Simple pagination](https://laravel.com/framework/docs/13.x/pagination#simple-pagination)
+- [Laravel docs: Resource pagination](https://laravel.com/framework/docs/13.x/eloquent-resources#pagination)

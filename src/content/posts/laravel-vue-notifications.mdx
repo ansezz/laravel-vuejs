@@ -4,6 +4,7 @@ title: "Laravel database notifications in Vue"
 excerpt: "A notification written to the database is a prop on the next Inertia visit. Live delivery is the Reverb guide, not a second copy of Echo."
 description: "Store Laravel database notifications and show the latest unread ones in a Vue bell: the notifications table, a shared Inertia prop and a mark-as-read route."
 seoTitle: "Database notifications in Vue"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T07:20:00Z
 snippet: "php artisan make:notification PostPublished"
 categories: [laravel, vuejs]
@@ -122,6 +123,51 @@ Reload the page: the title appears in the list. Mark it read and it disappears.
 
 </TryIt>
 
+## Mail and the bell from one notification
+
+One notification class can send an email and write the bell row:
+
+```php title="app/Notifications/CommentPosted.php"
+public function via(object $notifiable): array
+{
+    return ['mail', 'database'];
+}
+
+public function toMail(object $notifiable): MailMessage
+{
+    return (new MailMessage)
+        ->subject('New comment on '.$this->post->title)
+        ->action('Read it', route('posts.show', $this->post));
+}
+
+public function toArray(object $notifiable): array
+{
+    return ['post_id' => $this->post->id, 'message' => 'New comment on '.$this->post->title];
+}
+```
+
+`toArray()` is what the database channel stores and what the Vue bell reads. `toMail()` is only the email. Keep both short and free of secrets. Store plain values, not HTML, so the bell never needs `v-html`. Add `implements ShouldQueue` so sending the mail doesn't slow down the request.
+
+## Broadcast it live
+
+To make the bell update without a reload, add `broadcast` next to `database`:
+
+```php
+public function via(object $notifiable): array
+{
+    return ['database', 'broadcast'];
+}
+```
+
+The notification goes out on the user's private channel, `App.Models.User.{id}`. Listen with Echo once Reverb is set up as in the [Reverb guide](/laravel-reverb-vue):
+
+```ts
+echo.private(`App.Models.User.${userId}`)
+  .notification((n: { message: string }) => notifications.value.unshift(n))
+```
+
+Keep the `database` channel. The broadcast is a nudge and can be missed while the tab is closed. The row is what the bell shows on the next visit. Broadcast only what the bell prints, not the full model.
+
 ## Where this stops
 
 Nothing in this page opens a websocket. Polling `router.reload({ only: ['notifications'] })` works and is the [partial reload](/inertia-partial-reloads) guide. A live bell is Reverb. Pick one. Do not poll and subscribe to the same list.
@@ -150,3 +196,6 @@ Nothing in this page opens a websocket. Polling `router.reload({ only: ['notific
 ## Sources
 
 - [Laravel 13: Notifications, database notifications](https://laravel.com/framework/docs/13.x/notifications#database-notifications)
+- [Laravel docs: Mail notifications](https://laravel.com/framework/docs/13.x/notifications#mail-notifications)
+- [Laravel docs: Broadcast notifications](https://laravel.com/framework/docs/13.x/notifications#broadcast-notifications)
+- [Laravel docs: Broadcasting](https://laravel.com/framework/docs/13.x/broadcasting)

@@ -4,6 +4,7 @@ title: "Laravel and Vue CORS errors"
 excerpt: "A same-origin Inertia app does not need CORS. A separate SPA does, and a 419 is a different failure from a blocked response."
 description: "Fix Laravel and Vue CORS for a separate SPA: credentials, an explicit origin, the login path, and why a 419 is not CORS."
 seoTitle: "Laravel Vue CORS errors"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T05:20:00Z
 snippet: "php artisan config:publish cors"
 categories: [laravel, vuejs]
@@ -74,6 +75,20 @@ Leave `SESSION_DOMAIN` empty on localhost. Set it to `.example.com` only when th
 
 </Callout>
 
+## supports_credentials needs a real origin
+
+If the browser sends cookies across origins, the CORS response can't use a wildcard origin. List the SPA origin exactly:
+
+```php title="config/cors.php"
+'paths' => ['api/*', 'sanctum/csrf-cookie', 'login', 'logout'],
+'allowed_origins' => ['http://localhost:5173'],
+'supports_credentials' => true,
+```
+
+The origin includes the scheme and the port. `http://localhost:5173` and `http://127.0.0.1:5173` are different origins. Use `allowed_origins_patterns` if you need a regex, for example for preview deployments. The client must also opt in: axios needs `withCredentials: true`, and `fetch` needs `credentials: 'include'`.
+
+An Inertia app served by Laravel on one origin doesn't send CORS requests at all. Leave this file alone there.
+
 ## 419 is not CORS
 
 Open the failing request in the network panel.
@@ -121,3 +136,4 @@ Nuxt on port 3000 is the same rule with a different origin. The call itself is [
 - [Laravel 13: CORS](https://laravel.com/framework/docs/13.x/routing#cors)
 - [Laravel 13: Sanctum, SPA authentication](https://laravel.com/framework/docs/13.x/sanctum#spa-authentication)
 - [MDN: CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
+- [MDN: Access-Control-Allow-Credentials](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Credentials)

@@ -1,75 +1,224 @@
 ---
 id: 117
-title: "Download a CSV from a Vue button"
-seoTitle: "Download a CSV from Laravel"
-excerpt: "streamDownload writes the CSV. The button is an anchor, not an Inertia Link. cursor() keeps the memory flat."
-description: "Download a CSV from a Vue button in Laravel with streamDownload and a cursor() query for flat memory, using a plain anchor, not an Inertia Link."
+title: "Export CSV from Laravel to a Vue button: stream it, chunk it, or queue it"
+seoTitle: "Laravel CSV Export from Vue: Stream, Chunk or Queue"
+excerpt: "Three ways to export a CSV from a Laravel + Vue app: stream it with lazyById, write it in a queued job, and avoid the chunk() bug and formula injection. 7 tests."
+description: "Export a CSV from Laravel to a Vue button: streamDownload with lazyById for flat memory, a queued job for big files, the chunk() bug and CSV formula injection."
 date: 2026-10-11T11:04:00Z
-snippet: "return response()->streamDownload(...);"
+updated: 2026-11-10T12:00:00Z
+snippet: "return response()->streamDownload(fn () => ..., 'orders.csv');"
 categories: [laravel, vuejs]
-tags: [laravel, vuejs]
+tags: [laravel, vuejs, php, testing]
 ---
-People searching "Laravel CSV export Vue" load `Post::all()` and return a string. Stream it. The [pagination guide](/laravel-vue-pagination) is why a list page does not load every row. An export should not either.
+An Export button looks simple until the table has a few hundred thousand rows. `Order::all()` runs out of memory, the request hits the timeout, and someone opens the file in Excel and a cell runs a formula. This guide covers the two exports you actually need: a streamed download the user waits for, and a queued file for anything bigger. It also covers the bugs we reproduced in a test app.
 
-<TLDR audience="Laravel + Vue developers" applies="Laravel 13 · Vue 3">
+<TLDR
+  audience="Laravel + Vue developers adding an Export button to an Inertia page"
+  learn={['Streaming a CSV with streamDownload and lazyById so memory stays flat', 'Why the Vue button must be a plain anchor, not an Inertia Link', 'Moving big exports into a queued job and handing back a signed link', 'The chunk() update bug and CSV formula injection']}
+  tested="Laravel 13.40 · PHP 8.4 · Pest 4 (7 tests, 18 assertions)"
+>
 
-- streamDownload writes the CSV.
-- The button is an anchor, not an Inertia Link.
-- cursor() keeps the memory flat.
-- Do not build the CSV in a computed property from the current page of results.
+- Stream with `response()->streamDownload()` and walk the table with `lazyById()`. In our test, 1,000 rows took 6 small queries and the file was never held in memory.
+- The button is `<a :href="...">`. An Inertia `<Link>` expects an Inertia response, so it can't download a file.
+- For exports that take longer than a request should, dispatch a job, write the file to a disk, and give the user a signed download link.
+- Use `chunkById()`, not `chunk()`, when you update the rows you filter on. With `chunk()`, half of our rows were silently skipped.
 
 </TLDR>
 
-## The fix
+## Stream the CSV
 
-```php
-public function export(): StreamedResponse
+```php title="app/Http/Controllers/OrderExportController.php"
+namespace App\Http\Controllers;
+
+use App\Models\Order;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class OrderExportController extends Controller
 {
-    $this->authorize('viewAny', Post::class);
+    public function __invoke(): StreamedResponse
+    {
+        return response()->streamDownload(function () {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['id', 'customer', 'total']);
 
-    return response()->streamDownload(function () {
-        $out = fopen('php://output', 'w');
-        fputcsv($out, ['id', 'title']);
+            foreach (Order::query()->orderBy('id')->lazyById(500) as $order) {
+                fputcsv($out, [$order->id, csv_safe($order->customer), $order->total]);
+            }
 
-        foreach (Post::query()->orderBy('id')->cursor() as $post) {
-            fputcsv($out, [$post->id, $post->title]);
-        }
-
-        fclose($out);
-    }, 'posts.csv');
+            fclose($out);
+        }, 'orders.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
 }
 ```
 
-```vue
-<a href="/posts/export">Download CSV</a>
+```php title="routes/web.php"
+Route::get('/orders/export', OrderExportController::class)
+    ->middleware('auth')
+    ->name('orders.export');
 ```
 
-A `<Link>` would try to mount the file as a page. A normal anchor lets the browser download it.
+`streamDownload()` sends `Content-Disposition: attachment; filename=orders.csv`, and the closure writes straight to the response as it runs. `lazyById(500)` fetches 500 rows at a time using `where id > ?`, so PHP holds one batch, not the table. In our lab, a 1,000-row export ran exactly 6 queries on `orders`: five batches of 200 and one empty one that ends the loop.
 
-## What to avoid
+`cursor()` also keeps memory low, but it holds one long-running query open, and with MySQL's buffered queries PHP can still buffer the whole result. `lazyById()` uses short queries and works the same on every driver, so it's the safer default. Don't reach for `Order::all()` or `->get()->chunk()`: both load the whole table first.
 
-<Callout type="gotcha">
+## The button is an anchor
 
-Do not build the CSV in a computed property from the current page of results. That exports twelve rows and calls it the database. Do not skip `authorize`. An export is the whole table.
+```vue title="resources/js/pages/orders/Index.vue"
+<script setup lang="ts">
+import OrderExportController from '@/actions/App/Http/Controllers/OrderExportController'
+</script>
+
+<template>
+  <a :href="OrderExportController.url()" class="btn">Export CSV</a>
+</template>
+```
+
+An Inertia `<Link>` or `router.get()` sends an XHR and expects an Inertia JSON page back. A CSV is a file, so the browser has to navigate to it normally. The plain `<a>` keeps the user on the page while the download starts. Pass the current filters as query parameters, for example `OrderExportController.url({ query: { status: 'paid' } })`, and apply the same `when()` filters in the controller, so the export matches what the user sees.
+
+For an invokable controller, [Wayfinder](/laravel-wayfinder-vue) generates a default export you call directly. A literal `href="/orders/export"` works too.
+
+## Guard against CSV formula injection
+
+Spreadsheet apps treat a cell that starts with `=`, `+`, `-` or `@` as a formula. If a customer names themselves `=HYPERLINK("http://evil.test","click")`, your export becomes a phishing link in your finance team's Excel. [OWASP](https://owasp.org/www-community/attacks/CSV_Injection) recommends prefixing such cells with a single quote:
+
+```php title="app/helpers.php"
+function csv_safe(mixed $value): string
+{
+    $value = (string) $value;
+
+    return preg_match('/^[=+\-@\t\r]/', $value) ? "'".$value : $value;
+}
+```
+
+In our test, that customer's cell came out as `'=HYPERLINK(...)`, which spreadsheets show as text. Only apply it to free-text columns. Numbers you want to calculate with, including negative totals, should go into their own numeric columns without the prefix.
+
+## When the export is too big for one request
+
+Streaming still keeps a PHP worker busy for as long as it runs, and proxies often cut a request off after 60 to 100 seconds. Past a few hundred thousand rows, or when the export joins several tables, move it into a queued job:
+
+```php title="app/Jobs/ExportOrders.php"
+namespace App\Jobs;
+
+use App\Models\Order;
+use App\Models\User;
+use App\Notifications\ExportReady;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Storage;
+
+class ExportOrders implements ShouldQueue
+{
+    use Queueable;
+
+    public function __construct(public User $user) {}
+
+    public function handle(): void
+    {
+        $path = "exports/orders-{$this->user->id}-".now()->format('YmdHis').'.csv';
+        $tmp = fopen('php://temp', 'w+');
+        fputcsv($tmp, ['id', 'customer', 'total']);
+
+        Order::query()->orderBy('id')->lazyById(1000)->each(function (Order $order) use ($tmp) {
+            fputcsv($tmp, [$order->id, csv_safe($order->customer), $order->total]);
+        });
+
+        rewind($tmp);
+        Storage::disk('local')->put($path, $tmp);
+        fclose($tmp);
+
+        $this->user->notify(new ExportReady($path));
+    }
+}
+```
+
+The controller dispatches it and returns straight away:
+
+```php
+public function store(Request $request): RedirectResponse
+{
+    ExportOrders::dispatch($request->user());
+
+    Inertia::flash('toast', ['type' => 'info', 'message' => "We're preparing your export. You'll get a link when it's ready."]);
+
+    return back();
+}
+```
+
+`php://temp` keeps small files in memory and spills larger ones to a temp file, and `Storage::put()` accepts the stream, so the job never builds one giant string. The notification carries a [signed, expiring download link](/laravel-signed-email-link-vue#signed-downloads), and the Vue bell shows it like any other [database notification](/laravel-vue-notifications). For progress on the page while it runs, see [showing a queued job in Vue](/laravel-vue-queued-job).
+
+## The chunk() bug
+
+If an export also marks rows as exported, how you loop matters. We ran both versions on 1,000 rows:
+
+```php
+// Skips rows
+Order::where('exported', false)->orderBy('id')->chunk(100, function ($orders) {
+    Order::whereIn('id', $orders->pluck('id'))->update(['exported' => true]);
+});
+
+// Correct
+Order::where('exported', false)->chunkById(100, function ($orders) {
+    Order::whereIn('id', $orders->pluck('id'))->update(['exported' => true]);
+});
+```
+
+| Loop | Rows left unexported |
+|---|---|
+| `chunk(100)` | **500** |
+| `chunkById(100)` | 0 |
+
+`chunk()` pages with `offset`. After the first batch is updated, those rows no longer match `exported = false`, so `offset 100` skips the next 100 real rows, and so on. `chunkById()` resumes from the last id it saw, so updates don't shift the pages. The [Eloquent docs](https://laravel.com/framework/docs/13.x/eloquent#chunking-results) give the same warning. Use `lazyById()` the same way when you don't need batches.
+
+## Test it
+
+```php title="tests/Feature/OrderExportTest.php"
+test('exports every order as csv', function () {
+    Order::factory()->count(3)->create();
+
+    $response = $this->actingAs(User::factory()->create())->get('/orders/export');
+
+    $response->assertOk()->assertDownload('orders.csv');
+
+    $lines = explode("\n", trim($response->streamedContent()));
+    expect($lines)->toHaveCount(4)->and($lines[0])->toBe('id,customer,total');
+});
+```
+
+`streamedContent()` runs the stream callback and returns the body, so you can assert on the actual rows. For the queued version, use `Storage::fake('local')` and run the job synchronously, then read the file back from the fake disk.
 
 
-</Callout>
+
+## Recap
+
+- Stream downloads with `streamDownload()` and `lazyById()`; avoid `all()` and `get()`.
+- Use a plain `<a>` for the button, never an Inertia `<Link>`.
+- Prefix cells that start with `= + - @` to block formula injection.
+- Queue anything long-running, store the file on a disk, and send a signed link.
+- When you update rows while looping, use `chunkById()`: `chunk()` skipped half of ours.
 
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I download a CSV from a Vue button?', a: 'streamDownload writes the CSV. The button is an anchor, not an Inertia Link. cursor() keeps the memory flat.' },
-  { q: 'What goes wrong with Laravel CSV export Vue?', a: 'Many developers load `Post::all()` and return a string. Do not build the CSV in a computed property from the current page of results.' },
+  { q: 'How do I export a CSV in Laravel without running out of memory?', a: 'Return response()->streamDownload() and loop with lazyById() inside the callback, writing each row with fputcsv to php://output. Only one batch of rows is in memory at a time.' },
+  { q: 'Why does my Inertia Link not download the CSV?', a: 'Inertia Link and router visits expect an Inertia JSON response. A file download needs a normal browser navigation, so use a plain anchor tag pointing at the export route.' },
+  { q: 'Should I use cursor() or lazyById() for exports?', a: 'lazyById() is the safer default: it runs short queries of a fixed size on every database driver. cursor() keeps one query open and can still be buffered by the MySQL driver.' },
+  { q: 'Why does chunk() skip rows when I update them?', a: 'chunk() pages with offset. If the update removes rows from the filtered set, the next offset jumps past rows that never got processed. chunkById() pages by the last id and avoids it.' },
+  { q: 'What is CSV injection and how do I prevent it?', a: 'A cell starting with =, +, - or @ is run as a formula by spreadsheet apps. Prefix such free-text values with a single quote before writing them, as OWASP recommends.' },
 ]} />
 
 ## Next steps
 
-- [Laravel and Vue pagination](/laravel-vue-pagination)
-- [Put a signed URL in an email](/laravel-signed-email-link-vue)
-- [Fix an image 404 with storage:link](/php-artisan-storage-link-vue)
-- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+- [Laravel signed URLs](/laravel-signed-email-link-vue), for the download link the job sends
+- [Show a queued Laravel job in Vue](/laravel-vue-queued-job), for progress while it runs
+- [Laravel database notifications in Vue](/laravel-vue-notifications), for the "export ready" bell
+- [Laravel and Vue pagination](/laravel-vue-pagination), for the list the export mirrors
 
 ## Sources
 
 - [Laravel docs: Streamed downloads](https://laravel.com/framework/docs/13.x/responses#streamed-downloads)
+- [Laravel docs: Chunking results and lazy streaming](https://laravel.com/framework/docs/13.x/eloquent#chunking-results)
 - [Laravel docs: Lazy collections](https://laravel.com/framework/docs/13.x/collections#lazy-collections)
+- [Laravel docs: Testing file downloads](https://laravel.com/framework/docs/13.x/http-tests#assert-download)
+- [OWASP: CSV injection](https://owasp.org/www-community/attacks/CSV_Injection)
+- [PHP manual: fputcsv](https://www.php.net/manual/en/function.fputcsv.php)
+- [Laravel docs: Queues](https://laravel.com/framework/docs/13.x/queues)

@@ -7,6 +7,8 @@
 //   stores the submission in D1 and emails a notification through the Cloudflare Email Service
 //   send_email binding (EMAIL), recording the send status on the row.
 
+import { REDIRECTS } from './redirects'
+
 export interface Env {
   ASSETS: Fetcher
   DB: D1Database
@@ -54,6 +56,9 @@ export default {
       url.hostname = APEX
       return Response.redirect(url.toString(), 301)
     }
+    // Merged posts: one strong page per topic, the old URLs 301 to the section that replaced them.
+    const moved = REDIRECTS[url.pathname.replace(/\/+$/, '')]
+    if (moved) return Response.redirect(new URL(moved, url).toString(), 301)
     // Legacy duplicate of the terms page: one URL per page, so search engines don't split it across two.
     if (url.pathname === '/page/term-conditions') return Response.redirect(new URL('/page/terms-and-conditions', url).toString(), 301)
     // OG images moved from PNG to JPEG; keep old share-card URLs working.

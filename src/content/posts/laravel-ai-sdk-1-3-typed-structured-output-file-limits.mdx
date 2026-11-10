@@ -176,7 +176,7 @@ defineProps<{
 </template>
 ```
 
-The Vue page gets either the two fields or `null`, never the provider payload. Our [structured output guide](/laravel-ai-structured-output-vue) covers the rest of that pattern.
+The Vue page gets either the two fields or `null`, never the provider payload. Our [structured output guide](/laravel-ai-sdk-vue#structured-output-instead-of-parsing-text) covers the rest of that pattern.
 
 ## Remote files stop at 100 MB
 
@@ -363,9 +363,9 @@ On 1.2.3 the first assertion fails. Swap the fake for `[['score' => 8, 'reason' 
 
 ## Next steps
 
-- [Return a structured score from the AI SDK](/laravel-ai-structured-output-vue)
+- [Return a structured score from the AI SDK](/laravel-ai-sdk-vue#structured-output-instead-of-parsing-text)
 - [Laravel AI SDK 1.2.1: Stop middleware for agent runs](/laravel-ai-sdk-1-2-1-stop-middleware)
-- [Fake an AI agent in a Pest test](/pest-fake-ai-agent-vue)
+- [Fake an AI agent in a Pest test](/laravel-ai-sdk-vue#more-test-assertions)
 - [Laravel AI SDK docs: Structured output](https://laravel.com/framework/docs/13.x/ai-sdk#structured-output) and [Files](https://laravel.com/framework/docs/13.x/ai-sdk#files)
 
 ## Sources

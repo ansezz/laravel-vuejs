@@ -3,6 +3,7 @@ id: 160
 title: "Laravel automatic eager loading: kill N+1 with one line"
 seoTitle: "Laravel Automatic Eager Loading: Kill N+1 in One Line"
 excerpt: "Hidden gem: one line in AppServiceProvider turns every forgotten with() into one batched query. 51 queries became 2 in our Laravel 13.37 test."
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-19T02:30:00Z
 snippet: "Model::automaticallyEagerLoadRelationships();"
 categories: [laravel, vuejs]
@@ -149,6 +150,21 @@ public function boot(): void
 }
 ```
 
+## Explicit with() and column lists
+
+Automatic eager loading is a safety net. For a list page, an explicit `with()` still says exactly what the page needs, and it can limit the columns:
+
+```php
+$posts = Post::query()
+    ->with('author:id,name')
+    ->latest('id')
+    ->paginate(12);
+```
+
+Keep the key in the column list: `author:id,name` works because `id` is how Laravel matches each author to its posts. Leave it out and every `author` comes back `null`. Don't eager load every relation "just in case". With Inertia, every loaded relation is serialized into the page JSON.
+
+To catch a missing `with()` in development, enable `Model::preventLazyLoading(! app()->isProduction())` in a service provider. A lazy load then throws instead of quietly running one query per row.
+
 ## Gotchas
 
 **Touch it once, load it for everyone.** We read `$posts->first()->author` for a page heading. Laravel loaded the author for all 50 posts, because that is the whole idea. On a 5,000-row export where you only need one author, that is 4,999 rows you did not ask for.
@@ -229,7 +245,6 @@ If your app has a list page and a debug bar, try it today and compare the query 
 
 ## Next steps
 
-- [Eager load a relation for a Vue list](/laravel-eager-load-vue), the manual `with()` version
 - [API resources for Vue](/laravel-api-resources-vue), to keep Inertia payloads to the fields you chose
 - [Inertia partial reloads](/inertia-partial-reloads), so heavy props are not reloaded on every visit
 - [Laravel docs: Automatic eager loading](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatic-eager-loading)
@@ -243,3 +258,4 @@ If your app has a list page and a debug bar, try it today and compare the query 
 - [laravel/framework v12.9.0 release (PRs #55344, #55345)](https://github.com/laravel/framework/releases/tag/v12.9.0)
 - [laravel/framework PR #56211: factories and automatic eager loading](https://github.com/laravel/framework/pull/56211)
 - [Source: `Illuminate\Database\Eloquent\Collection::withRelationshipAutoloading`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Eloquent/Collection.php)
+- [Laravel docs: Eager loading](https://laravel.com/framework/docs/13.x/eloquent-relationships#eager-loading)

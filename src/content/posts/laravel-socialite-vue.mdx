@@ -122,7 +122,7 @@ The users table from the starter kit requires `password`. The random string sati
 
 ## Where this stops
 
-Socialite does not replace Fortify's password reset. Email and password stay [Fortify](/laravel-fortify-vue). The callback above does not check a [permission](/laravel-vue-permissions). A new GitHub user is a normal user until you give them one.
+Socialite does not replace Fortify's password reset. Email and password stay [Fortify](/laravel-fortify-vue). The callback above does not check a [permission](/laravel-vue-policies#roles-and-permissions-with-spatie). A new GitHub user is a normal user until you give them one.
 
 Add scopes only when you need an API GitHub will not return by default. The login above uses the default user. Extra scopes are a decision you can point at the [Socialite docs](https://laravel.com/framework/docs/13.x/socialite), not a list to paste in before the first redirect works.
 
@@ -144,7 +144,7 @@ Add scopes only when you need an API GitHub will not return by default. The logi
 ## Next steps
 
 - [Laravel Fortify with Vue](/laravel-fortify-vue): email and password stay here.
-- [Laravel permissions on a Vue page](/laravel-vue-permissions)
+- [Laravel permissions on a Vue page](/laravel-vue-policies#roles-and-permissions-with-spatie)
 - [Laravel docs: Socialite](https://laravel.com/framework/docs/13.x/socialite)
 
 ## Sources

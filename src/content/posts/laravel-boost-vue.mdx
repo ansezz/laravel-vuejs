@@ -4,6 +4,7 @@ title: "Install Laravel Boost on a Vue starter kit"
 seoTitle: "Laravel Boost on a Vue app"
 excerpt: "Add Laravel Boost to a Vue and Inertia app so Cursor or Claude follows the Inertia Vue guidelines for the versions you have installed."
 description: "Install Laravel Boost on a Vue and Inertia app so your coding agent follows the Inertia Vue guidelines for the versions you have installed."
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-11T16:20:00Z
 snippet: "php artisan boost:install"
 categories: [laravel, vuejs]
@@ -102,6 +103,21 @@ Do not install Boost inside the Vue app with npm. There is no Boost component to
 
 The kit itself is still created the way the [setup guide](/application-setup) describes. The stack choice is the one in [Laravel and Vue in 2026](/laravel-vue-in-2026). Boost sits on top of that app. It does not pick Inertia, a SPA, or Nuxt for you.
 
+## The Inertia Vue skill
+
+`boost:install` writes guidelines and skills for the packages in your `composer.json` and `package.json`. On an Inertia + Vue app, that includes an `inertia-vue-development` skill matched to the Inertia major you installed. That's how the agent knows to use the v3 `<Form>` component and `useHttp` instead of v2 patterns. The skill is a file for the agent to read, not a Vue component, so don't import it or copy it into your pages.
+
+## Update Boost after an upgrade
+
+```bash
+composer update laravel/boost
+php artisan boost:update
+```
+
+Run `boost:update` after you upgrade Laravel, Inertia or another package Boost knows. It regenerates the guideline and skill files for the versions now installed, so the agent stops suggesting APIs from the old major. Restart the coding agent afterwards so it rereads them.
+
+Boost overwrites its own generated files, so don't hand-edit them. Put project rules in your own guideline file, which Boost leaves alone ([Boost docs: custom guidelines](https://laravel.com/framework/docs/13.x/boost)). Never put a provider API key in `boost.json`.
+
 ## Recap
 
 - Boost is a dev dependency for your coding agent.
@@ -120,11 +136,10 @@ The kit itself is still created the way the [setup guide](/application-setup) de
 
 ## Next steps
 
-- [Use the Boost skill for Inertia Vue](/boost-inertia-vue-skill)
-- [Update Laravel Boost after you upgrade](/laravel-boost-update-vue)
 - [Laravel AI SDK with Vue](/laravel-ai-sdk-vue)
 
 ## Sources
 
 - [Laravel 13: Boost](https://laravel.com/framework/docs/13.x/boost)
 - [laravel/boost on GitHub](https://github.com/laravel/boost)
+- [laravel/boost releases](https://github.com/laravel/boost/releases)
