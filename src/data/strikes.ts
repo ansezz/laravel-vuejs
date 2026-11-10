@@ -238,7 +238,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "logout",
-    guide: "/inertia-preserve-state-vue",
+    guide: "/inertia-form-component-vue",
     guideTitle: "preserveState keeps the Vue page you have",
     reason:
       "Do not set preserveState: true on a logout request. The old page's props, including the user, stay on screen until something else navigates.",

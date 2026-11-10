@@ -1,83 +1,257 @@
 ---
 id: 55
-title: "Validate an Inertia form with a form request"
-seoTitle: "Laravel form request and Inertia"
-excerpt: "Move Inertia form rules into a form request and pass validated() to the model. authorize() still runs."
-description: "Validate an Inertia form with a Laravel form request: move the rules out of the controller, save validated(), and keep authorize() for permissions."
+title: "Laravel validation for Inertia forms: form requests, unique, confirmed, enums and custom rules"
+seoTitle: "Laravel Validation for Inertia: Form Requests and Rules"
+excerpt: "Move Inertia form rules into a Laravel form request, then handle the rules every app needs: unique on update, password confirmation, PHP enums and a custom rule."
+description: "Laravel validation for Inertia and Vue forms: form requests, unique emails that ignore the current user, confirmed passwords, enum selects and custom rules."
 date: 2026-10-11T10:02:00Z
+updated: 2026-11-10T12:00:00Z
 snippet: "php artisan make:request StorePostRequest"
 categories: [laravel, vuejs]
-tags: [laravel, vuejs, inertia]
+tags: [laravel, vuejs, inertia, php]
 ---
-People searching "Laravel form request Inertia" want the rules off the controller. The Vue page does not change. It still posts `title` and reads `form.errors.title`, as in the [CRUD guide](/laravel-inertia-vue-crud).
+Laravel validates an Inertia form the same way it validates any other form. The difference is in what the Vue page receives. A failure redirects back, and the first message for each field arrives in `errors`. This guide covers the server half. It moves the rules into a form request, then works through the rules most apps get wrong: unique values on update, password confirmation, enum selects and a custom rule. The Vue half (`<Form>`, `useForm`, showing the messages) is in the [Inertia forms guide](/inertia-form-component-vue).
 
 <TLDR audience="Laravel + Vue developers on Inertia" applies="Laravel 13 · Inertia 3 · Vue 3">
 
-- Move Inertia form rules into a form request and pass validated() to the model.
-- authorize() still runs.
-- Do not `return true` from `authorize()` on a request that updates someone else's post.
+- A form request runs `prepareForValidation()`, then `authorize()` (a 403 on failure), then the rules. The controller only runs when all of them pass.
+- Save `$request->validated()`. It drops any field without a rule.
+- `Rule::unique('users')->ignore($user)` on update. `confirmed` puts its error on `password`, not on `password_confirmation`.
+- `Rule::enum(PostStatus::class)` validates the backed value. Send the page `{ value, label }` pairs, not raw enum cases.
 
 </TLDR>
 
-## The fix
+Every rule and message below comes from a Pest file that runs on Laravel 13.39 (11 tests, 30 assertions). The quoted messages are Laravel's English defaults.
 
-```shell
+## Move the rules into a form request
+
+```bash
 php artisan make:request StorePostRequest
 ```
 
-```php
-public function authorize(): bool
-{
-    return $this->user() !== null;
-}
+```php title="app/Http/Requests/StorePostRequest.php"
+namespace App\Http\Requests;
 
-public function rules(): array
+use App\Enums\PostStatus;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+
+class StorePostRequest extends FormRequest
 {
-    return [
-        'title' => ['required', 'string', 'max:120'],
-    ];
+    public function authorize(): bool
+    {
+        return $this->user()->can('create', \App\Models\Post::class);
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge(['slug' => Str::slug((string) $this->input('title'))]);
+    }
+
+    public function rules(): array
+    {
+        return [
+            'title' => ['required', 'string', 'max:120'],
+            'slug' => ['required', Rule::unique('posts', 'slug')],
+            'status' => ['required', Rule::enum(PostStatus::class)],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return ['slug.unique' => 'A post with this title already exists.'];
+    }
+
+    public function attributes(): array
+    {
+        return ['status' => 'publishing status'];
+    }
 }
 ```
 
-```php
-public function store(StorePostRequest $request): RedirectResponse
+```php title="app/Http/Controllers/PostController.php"
+public function store(StorePostRequest $request)
 {
-    Post::create([
-        'title' => $request->validated('title'),
-        'user_id' => $request->user()->id,
-    ]);
+    Post::create($request->validated());
 
     return to_route('posts.index');
 }
 ```
 
-`$request->validated()` is the only array you should persist. A key that is not in `rules()` is dropped, which is the point.
+The order matters. `prepareForValidation()` runs first. Here it derives the slug from the title, so the unique rule checks the value you will actually save. It runs even for a guest, so keep it free of side effects. Then `authorize()` runs: if it returns false, Laravel returns 403 before any rule runs, so a guest never learns which fields are wrong. On failure, the user is redirected back. The Vue page gets `errors.slug` as "A post with this title already exists." and `errors.status` as "The selected publishing status is invalid.". `attributes()` renames the field inside the default message, and `messages()` replaces a message outright.
 
-## What to avoid
+`validated()` returns only the keys that have rules. In the test, posting an extra `is_admin` field returns just `['title' => 'Hi']`. Don't pass `$request->all()` to `create()`: the model's `$fillable` would then be the only thing between the request and your columns.
 
-<Callout type="gotcha">
+Use `authorize()` for permission questions that belong to this form. Leave it returning `true` when the route already has middleware or the controller calls [`Gate::authorize()`](/laravel-vue-policies#authorize-in-the-controller).
 
-Do not `return true` from `authorize()` on a request that updates someone else's post. That method is a gate. The owner check belongs in a [policy](/laravel-vue-policies), and `authorize()` can call it.
+## Ignore the current row on unique
+
+A profile form that posts the user's own email fails a plain `unique:users` rule, because the row already exists. Ignore the row being updated:
+
+```php title="app/Http/Requests/UpdateProfileRequest.php"
+use Illuminate\Validation\Rule;
+
+public function rules(): array
+{
+    return [
+        'name' => ['required', 'string', 'max:255'],
+        'email' => [
+            'required', 'email', 'max:255',
+            Rule::unique('users', 'email')->ignore($this->user()),
+        ],
+    ];
+}
+```
+
+`ignore()` accepts the model or its key. Another user's address still fails with "The email has already been taken.". Never feed `ignore()` an ID from the request body. A user could send someone else's ID and skip the check. Take it from the authenticated user or from the route-bound model. If the email column is unique in the database, keep that index too. The rule gives a friendly message, and the index stops two requests that arrive at the same moment.
+
+## Confirm a password
+
+```php
+use Illuminate\Validation\Rules\Password;
+
+'current_password' => ['required', 'current_password'],
+'password' => ['required', 'confirmed', Password::defaults()],
+```
+
+`confirmed` compares `password` with `password_confirmation` and reports the mismatch on `password`: "The password field confirmation does not match.". Show the message under the first password input, not under the confirmation input, or nobody sees it. `current_password` checks the value against the signed-in user's hash and fails with "The password is incorrect.". `Password::defaults()` uses whatever you set in `AppServiceProvider`, for example `Password::defaults(fn () => Password::min(12)->uncompromised())`. That way the register, reset and settings forms share one policy.
+
+On the Vue side, reset the password fields after both success and failure, and keep them out of history state. The [forms guide](/inertia-form-component-vue#reset-after-it-saves) has the component.
+
+## Validate a PHP enum and build the select
+
+```php title="app/Enums/PostStatus.php"
+enum PostStatus: string
+{
+    case Draft = 'draft';
+    case Published = 'published';
+    case Archived = 'archived';
+
+    public function label(): string
+    {
+        return ucfirst($this->value);
+    }
+}
+```
+
+```php title="app/Http/Controllers/PostController.php"
+return Inertia::render('posts/Create', [
+    'statuses' => collect(PostStatus::cases())
+        ->map(fn (PostStatus $s) => ['value' => $s->value, 'label' => $s->label()])
+        ->all(),
+]);
+```
+
+```vue title="resources/js/pages/posts/Create.vue"
+<select name="status">
+  <option v-for="status in statuses" :key="status.value" :value="status.value">
+    {{ status.label }}
+  </option>
+</select>
+```
+
+`Rule::enum(PostStatus::class)` accepts the backing values (`draft`, `published`, `archived`) and rejects anything else with "The selected status is invalid.". To allow only some cases on this form, chain `->only([PostStatus::Draft, PostStatus::Published])`. There is also an `->except([...])`. Avoid `in:Draft,Published`: it checks the case names, but the column stores the lowercase values. Cast the column with `'status' => PostStatus::class` on the model, and `$request->validated()` will save cleanly.
+
+## Write a custom rule
+
+When a check is specific to your app, make it a rule class:
+
+```bash
+php artisan make:rule NotDisposableEmail
+```
+
+```php title="app/Rules/NotDisposableEmail.php"
+namespace App\Rules;
+
+use Closure;
+use Illuminate\Contracts\Validation\ValidationRule;
+
+class NotDisposableEmail implements ValidationRule
+{
+    public function __construct(private array $blocked = ['mailinator.com', 'tempmail.dev']) {}
+
+    public function validate(string $attribute, mixed $value, Closure $fail): void
+    {
+        $domain = strtolower(substr(strrchr((string) $value, '@') ?: '', 1));
+
+        if (in_array($domain, $this->blocked, true)) {
+            $fail('Use a work or personal address, not a disposable one.');
+        }
+    }
+}
+```
+
+Use it as `'email' => ['required', 'email', new NotDisposableEmail]`. The sentence passed to `$fail` is what lands in `errors.email`. For a translated message, call `$fail('validation.disposable')->translate()` and add the key to `lang/en/validation.php`. A rule used once can be a closure in the rules array instead. Make a class when two forms share the check or when you want to unit test it.
+
+Keep the rule fast and local. If it calls an external API, every keystroke in a [Precognition](/laravel-precognition-vue) form calls that API too. In that case, skip the rule during precognitive requests, or cache its result.
+
+## Test the rules
+
+```php title="tests/Feature/PostValidationTest.php"
+test('unique ignore lets a user keep their own email', function () {
+    $me = User::factory()->create(['email' => 'me@example.com']);
+    User::factory()->create(['email' => 'taken@example.com']);
+    $rules = ['email' => ['required', 'email', Rule::unique('users')->ignore($me)]];
+
+    expect(Validator::make(['email' => 'me@example.com'], $rules)->passes())->toBeTrue();
+    expect(Validator::make(['email' => 'taken@example.com'], $rules)->errors()->first('email'))
+        ->toBe('The email has already been taken.');
+});
+
+test('confirmed reports on password', function () {
+    $v = Validator::make(
+        ['password' => 'secret-123', 'password_confirmation' => 'nope'],
+        ['password' => ['required', 'confirmed']],
+    );
+
+    expect($v->errors()->keys())->toBe(['password']);
+});
+
+test('the form request blocks guests before validating', function () {
+    $this->post('/posts', ['title' => ''])->assertForbidden();
+});
+```
+
+`assertSessionHasErrors(['field' => 'message'])` is the request-level version. It is what you want after `$this->from('/posts/create')->post(...)`, because that is exactly what the Inertia page will read.
 
 
-</Callout>
+
+## Recap
+
+- Form request order: `prepareForValidation()`, then `authorize()`, then the rules, then your controller.
+- Save `validated()`, never `all()`.
+- `ignore()` the authenticated user or the bound model on update, and keep the database index.
+- `confirmed` errors on `password`. Use `current_password` when changing it.
+- `Rule::enum()` checks backing values. Send `{ value, label }` options to the page.
+- A `ValidationRule` class gives you a testable rule with your own sentence.
 
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I validate an Inertia form with a form request?', a: 'Move Inertia form rules into a form request and pass validated() to the model. authorize() still runs.' },
-  { q: 'What goes wrong with Laravel form request Inertia?', a: 'Many developers want the rules off the controller. Do not `return true` from `authorize()` on a request that updates someone else\'s post.' },
+  { q: "Do I need to change the Vue page when I move rules into a form request?", a: "No. The redirect and the errors prop are the same, so form.errors.title keeps working. Only the controller signature changes." },
+  { q: "Why does my unique email rule fail when the user saves their profile?", a: "The row being updated already holds that email. Use Rule::unique('users', 'email')->ignore($request->user()) and take the ID from the authenticated user, not from the request body." },
+  { q: "Where does the confirmed error appear?", a: "On the original field. A mismatch between password and password_confirmation is reported on password with 'The password field confirmation does not match.'" },
+  { q: "How do I validate a PHP enum from a Vue select?", a: "Post the backing value and use Rule::enum(YourEnum::class). Add ->only([...]) to accept a subset of cases on one form." },
+  { q: "Closure rule or rule class?", a: "A closure is fine for a one-off check. A class that implements ValidationRule is reusable across forms and can be unit tested." },
 ]} />
 
 ## Next steps
 
-- [Laravel and Vue CRUD with Inertia](/laravel-inertia-vue-crud)
-- [Laravel policies on a Vue page](/laravel-vue-policies)
-- [Use the Inertia Form component in Vue](/inertia-form-component-vue)
-- [Ignore the current user on a unique email](/laravel-unique-email-vue)
-- [Laravel and Vue guides by topic](/laravel-vue-keyword-guides)
+- [Inertia forms in Vue: Form, useForm and errors](/inertia-form-component-vue)
+- [Live validation with Precognition](/laravel-precognition-vue)
+- [Authorize Inertia pages with policies](/laravel-vue-policies)
+- [CRUD with Inertia and Vue](/laravel-inertia-vue-crud)
+- [Test a Laravel and Vue app](/test-laravel-vue)
 
 ## Sources
 
 - [Laravel docs: Form request validation](https://laravel.com/framework/docs/13.x/validation#form-request-validation)
+- [Laravel docs: The unique rule](https://laravel.com/framework/docs/13.x/validation#rule-unique)
+- [Laravel docs: The confirmed rule](https://laravel.com/framework/docs/13.x/validation#rule-confirmed)
+- [Laravel docs: The enum rule](https://laravel.com/framework/docs/13.x/validation#rule-enum)
+- [Laravel docs: Custom validation rules](https://laravel.com/framework/docs/13.x/validation#custom-validation-rules)
+- [Laravel docs: Validating passwords](https://laravel.com/framework/docs/13.x/validation#validating-passwords)
 - [Inertia docs: Validation](https://inertiajs.com/docs/v3/the-basics/validation)
+- [Laravel docs: Validation](https://laravel.com/framework/docs/13.x/validation)
+- [PHP manual: Enumerations](https://www.php.net/manual/en/language.enumerations.php)

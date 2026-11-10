@@ -837,7 +837,7 @@ export const cases: WhichCase[] = [
   {
     id: "logout",
     task: "Log the user out from the Vue page.",
-    guide: "/inertia-preserve-state-vue",
+    guide: "/inertia-form-component-vue",
     guideTitle: "preserveState keeps the Vue page you have",
     rule: "Do not set preserveState: true on a logout request. The old page's props, including the user, stay on screen until something else navigates.",
     files: [

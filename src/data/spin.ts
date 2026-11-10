@@ -220,7 +220,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "table",
     "Table, the potluck board",
-    "inertia-preserve-state-vue",
+    "inertia-form-component-vue",
     "preserveState keeps the Vue page you have",
     [
       "Build Table, a board for one shared meal. People sign what dish they will bring, then sign out.",
