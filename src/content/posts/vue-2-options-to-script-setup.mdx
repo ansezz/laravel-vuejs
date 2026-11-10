@@ -1,61 +1,172 @@
 ---
 id: 89
 title: "Move a Vue 2 component to script setup"
-seoTitle: "Vue 2 options to script setup"
-excerpt: "data() becomes ref. Methods become functions. An Inertia page still receives props. It does not gain Vue Router."
-description: "data() becomes ref. Methods become functions. An Inertia page still receives props. It does not gain Vue Router."
+seoTitle: "Vue 2 Options API to script setup"
+excerpt: "data() becomes ref, methods become functions, and an Inertia page still receives props through defineProps. Vue Router stays out of the starter kit."
+description: "Convert a Vue 2 Options API component to Vue 3 script setup in Inertia: data() becomes ref, methods become functions, and defineProps replaces this.$page."
 date: 2026-10-11T10:36:00Z
+updated: 2026-11-10T13:00:00Z
 snippet: "<script setup lang=\"ts\">"
 categories: [laravel, vuejs]
 tags: [laravel, vuejs, typescript]
 ---
-People searching "Vue 2 options API to script setup" paste a Vue 2 component into an Inertia page and keep `export default`. The Vue starter kit pages are `<script setup lang="ts">`. The [TypeScript guide](/typescript-laravel-vue-pages) is the prop type. This page is the move.
+You paste a Vue 2 component into a starter kit page and keep `export default`. The page compiles, then `this` is undefined, the props from the controller never show up, and someone suggests installing Vue Router to "fix navigation". The kit's pages are already `<script setup lang="ts">`. Here is the move, and the Inertia parts that trip people up.
 
-<TLDR audience="Laravel + Vue developers" applies="Laravel 13 · Vue 3 · TypeScript">
+<TLDR
+  audience="Laravel + Vue developers converting a Vue 2 Options API component to an Inertia 3 page"
+  learn={['How data, computed, methods, watch and lifecycle map to script setup', 'How defineProps and usePage replace this.$page', 'Why Vue Router and new Vue() stay out of this kit']}
+  applies="Vue 3.5 · @inertiajs/vue3 3.11 · Laravel 13 · TypeScript"
+>
 
-- data() becomes ref.
-- Methods become functions.
-- An Inertia page still receives props.
-- It does not gain Vue Router.
+- `data()` becomes `ref` or `reactive`. Methods become functions. Computed and watch use the imports from `vue`.
+- An Inertia page still receives controller data as props, declared with `defineProps`. Shared data such as the user is `usePage()`.
+- Do not install Vue Router to convert a component. Inertia already navigates. The kit already calls `createInertiaApp`, so `new Vue()` does not belong in `app.ts`.
 
 </TLDR>
 
-## The fix
+## The problem
 
-```vue
-<script setup lang="ts">
-import { ref } from "vue";
+A Vue 2 single-file component is an options object: `data`, `methods`, `computed`, `watch`, `props`, and hooks such as `created` and `mounted`. Vue 3 still accepts that object, but the Vue starter kit, and the [Inertia pages docs](https://inertiajs.com/docs/v3/the-basics/pages), are written in `<script setup>`. Mixing the two in one file is how you end up with `this.title` in a script that has no `this`.
 
-defineProps<{ title: string }>();
+`<script setup>` is the recommended syntax for the Composition API in a single-file component. The code inside it runs like `setup()`: once per instance, not once at import time. Top-level bindings are already available in the template. You do not return them from `setup()`.
 
-const open = ref(false);
+## The conversion
 
-function toggle() {
-  open.value = !open.value;
-}
+Here is a small Vue 2 panel, and the same component in `<script setup lang="ts">`.
+
+<CodeCompare before="Vue 2 Options API" after="Vue 3 script setup">
+
+```vue title="resources/js/components/TitlePanel.vue"
+<script>
+export default {
+  props: {
+    title: { type: String, required: true },
+  },
+  data() {
+    return { open: false };
+  },
+  computed: {
+    label() {
+      return this.open ? "Hide" : this.title;
+    },
+  },
+  methods: {
+    toggle() {
+      this.open = !this.open;
+      this.$emit("toggled", this.open);
+    },
+  },
+  mounted() {
+    if (this.title === "") this.open = false;
+  },
+};
 </script>
 
 <template>
-  <button type="button" @click="toggle">{{ title }}</button>
+  <button type="button" @click="toggle">{{ label }}</button>
 </template>
 ```
 
-`data()` becomes `ref`. You need `.value` in the script and you do not need it in the template. `props` from the controller replace `this.$page` reads you used to do in `created()`. Use `usePage()` when you need a shared prop.
+```vue title="resources/js/components/TitlePanel.vue"
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
 
-## What to avoid
+const props = defineProps<{ title: string }>();
+const emit = defineEmits<{ toggled: [open: boolean] }>();
 
-<Callout type="gotcha">
+const open = ref(false);
 
-Do not install Vue Router while you convert a component. Inertia still navigates. The [stack guide](/laravel-vue-in-2026) is why a second router stays off this kit. Do not keep `new Vue()` in `app.ts`. The kit already calls `createInertiaApp`.
+const label = computed(() => (open.value ? "Hide" : props.title));
 
+function toggle() {
+  open.value = !open.value;
+  emit("toggled", open.value);
+}
+
+onMounted(() => {
+  if (props.title === "") open.value = false;
+});
+</script>
+
+<template>
+  <button type="button" @click="toggle">{{ label }}</button>
+</template>
+```
+
+</CodeCompare>
+
+`data()` becomes `ref`. You need `.value` in the script and you do not need it in the template: Vue unwraps refs there. A group of related fields can be one `reactive({})` object instead of several refs. `computed` and `watch` are functions you import from `vue`. `watch(open, (value) => { ... })` replaces `watch: { open(value) {} }`.
+
+`defineProps` and `defineEmits` are compiler macros. You do not import them. The type form above is the one the kit uses. Defaults, if you need them, can use destructuring in Vue 3.5, or `withDefaults` on earlier 3.x releases. The [TypeScript pages guide](/typescript-laravel-vue-pages) covers typing the props an Inertia page receives.
+
+## Lifecycle hooks
+
+Code at the top level of `<script setup>` runs when the instance is created, which is where most Vue 2 `created()` work belongs. The other hooks become imports:
+
+| Vue 2 | script setup |
+|---|---|
+| `beforeCreate` / `created` | top-level code in `<script setup>` |
+| `beforeMount` / `mounted` | `onBeforeMount` / `onMounted` |
+| `beforeUpdate` / `updated` | `onBeforeUpdate` / `onUpdated` |
+| `beforeDestroy` / `destroyed` | `onBeforeUnmount` / `onUnmounted` |
+
+Import them from `vue` and pass a function. There is no `this` inside that function; close over the refs and props you already declared.
+
+## What to do with this.$page
+
+On an Inertia page, the object you used to reach as `this.$page.props` is two different things:
+
+- Props the controller passed to this page belong in `defineProps`. The [Inertia pages guide](https://inertiajs.com/docs/v3/the-basics/pages) shows exactly that: `defineProps({ user: Object })`, then `{{ user.name }}` in the template.
+- Shared data, such as the signed-in user on a layout, comes from `usePage()`:
+
+```vue title="resources/js/layouts/AppLayout.vue"
+<script setup lang="ts">
+import { computed } from "vue";
+import { usePage } from "@inertiajs/vue3";
+
+const page = usePage();
+const user = computed(() => page.props.auth.user);
+</script>
+```
+
+That pattern is in the [shared data docs](https://inertiajs.com/docs/v3/data-props/shared-data). Use `usePage()` in a layout or a child that is not the page itself. On the page, prefer `defineProps` for the record the controller loaded.
+
+`this.$inertia` becomes `router` from `@inertiajs/vue3`. Forms that used `this.$inertia.form(...)` become `useForm(...)`. Visits stay on Laravel routes. You do not add Vue Router while you convert a component.
+
+<Callout type="gotcha" title="no Vue Router, and no new Vue()">
+
+Do not install Vue Router to make the converted component "navigate properly". Inertia already handles visits. A second router fights it. The [stack guide](/laravel-vue-in-2026) is the place that decision lives. Do not keep `new Vue()` in `app.ts` either. The kit already calls `createInertiaApp`.
 
 </Callout>
+
+## Components, mixins and the APIs that went away
+
+In `<script setup>`, an imported component is already a component. You do not add a `components: { TitlePanel }` option. The template can use `<TitlePanel />` because the import is in scope.
+
+A Vue 2 mixin becomes a composable: a function that calls `ref`, `computed` or `onMounted` and returns what the component needs. That is the replacement the Vue docs recommend. Filters are gone; use a method or a computed property. `this.$set` and `Vue.set` are gone; `reactive` objects are deep by default.
+
+If you must keep a small options object (for `inheritAttrs: false`, for example), Vue 3.3 added `defineOptions({ inheritAttrs: false })`. You can also keep a second plain `<script>` block for module-level work that should run once, but do not declare `props` or `emits` there when the same file already uses `defineProps`.
+
+<TryIt title="Convert one component">
+
+Pick one Vue 2 component, not a whole page. Move `props` to `defineProps`, `data` to `ref`, and one method to a function. Render it from an Inertia page and confirm the controller prop still appears. Then move `mounted` to `onMounted`. Leave Vue Router uninstalled.
+
+</TryIt>
+
+## Recap
+
+- `<script setup>` is the kit's syntax. `data()` becomes `ref`, methods become functions, and you write `.value` only in the script.
+- Controller data arrives through `defineProps`. Shared data such as `auth.user` is `usePage()`.
+- Lifecycle hooks are imports from `vue`. Top-level setup code replaces `created()`.
+- Do not install Vue Router, and do not put `new Vue()` back into `app.ts`.
 
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I move a Vue 2 component to script setup?', a: 'data() becomes ref. Methods become functions. An Inertia page still receives props. It does not gain Vue Router.' },
-  { q: 'What goes wrong with Vue 2 options API to script setup?', a: 'Many developers paste a Vue 2 component into an Inertia page and keep `export default`. Do not install Vue Router while you convert a component.' },
+  { q: 'Do I have to convert Options API components to script setup?', a: 'No. Vue 3 still runs the Options API. Convert them when you drop a component into the starter kit, whose pages and docs are written in script setup, so you are not mixing this.title with a script that has no this.' },
+  { q: 'Where did this.$page go?', a: 'Controller props belong in defineProps, which is how Inertia pages receive data. Shared data, such as auth.user on a layout, comes from usePage() in @inertiajs/vue3.' },
+  { q: 'Should I install Vue Router while I convert a component?', a: 'No. Inertia already navigates with Laravel routes. A second router fights it. Vue Router belongs in a separate SPA, not in this kit.' },
+  { q: 'Why is this undefined in my script?', a: 'Code in `<script setup>` is not an options object. There is no this. Use the refs, props and emit function you declared at the top of the file.' },
 ]} />
 
 ## Next steps
@@ -63,6 +174,7 @@ Do not install Vue Router while you convert a component. Inertia still navigates
 - [TypeScript props on Laravel Vue pages](/typescript-laravel-vue-pages)
 - [Laravel and Vue in 2026: Inertia, a SPA, or Nuxt](/laravel-vue-in-2026)
 - [Default a prop an Inertia page did not get](/typescript-laravel-vue-pages#optional-props-and-defaults)
+- [Test a Laravel and Vue app](/test-laravel-vue)
 - [Authorize a controller action before the Vue page](/laravel-vue-policies#authorize-in-the-controller)
 - [Laravel and Vue guides by topic](/laravel-vue-keyword-guides)
 
@@ -70,3 +182,6 @@ Do not install Vue Router while you convert a component. Inertia still navigates
 
 - [Vue docs: script setup](https://vuejs.org/api/sfc-script-setup.html)
 - [Vue 3 migration guide](https://v3-migration.vuejs.org/)
+- [Vue docs: Lifecycle hooks](https://vuejs.org/api/composition-api-lifecycle.html)
+- [Inertia v3: Pages](https://inertiajs.com/docs/v3/the-basics/pages)
+- [Inertia v3: Shared data](https://inertiajs.com/docs/v3/data-props/shared-data)

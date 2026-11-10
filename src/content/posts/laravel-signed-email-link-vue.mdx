@@ -160,7 +160,7 @@ The signature covers the full URL, including scheme and host. Behind a load bala
 
 Two fixes:
 
-- **Trust the proxy** so Laravel sees the real scheme and host. In `bootstrap/app.php`: `$middleware->trustProxies(at: '*')`, or your load balancer's IP range. See [trusted proxies](/laravel-trust-proxies-https).
+- **Trust the proxy** so Laravel sees the real scheme and host. In `bootstrap/app.php`: `$middleware->trustProxies(at: '*')`, or your load balancer's IP range. See [trusted proxies](/deploy-laravel-vue#trust-proxies-so-https-sticks).
 - **Sign relative URLs.** Generate with `absolute: false` and verify with `signed:relative`. The host is then left out of the signature. The same URL on a different host returned 200 in our test.
 
 ```php
@@ -211,7 +211,7 @@ test('signed review link works and edited links do not', function () {
 - [Export a CSV from Laravel](/laravel-csv-export-vue), which sends a signed download link for big files
 - [Upload files from Vue to Laravel](/laravel-vue-file-upload), where the private files come from
 - [Laravel Fortify with Vue](/laravel-fortify-vue), which uses signed links for email verification
-- [Trust proxies and HTTPS](/laravel-trust-proxies-https), the usual cause of production 403s
+- [Trust proxies and HTTPS](/deploy-laravel-vue#trust-proxies-so-https-sticks), the usual cause of production 403s
 
 ## Sources
 
