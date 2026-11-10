@@ -113,6 +113,31 @@ php artisan test --filter=PostTest
 
 </TryIt>
 
+## back() or to_route()
+
+Every Inertia form ends with a redirect, and the flash message travels with it. Choose the destination by what the user does next:
+
+```php title="app/Http/Controllers/PostController.php"
+public function publish(Post $post): RedirectResponse
+{
+    Gate::authorize('update', $post);
+    $post->update(['published_at' => now()]);
+
+    Inertia::flash('toast', ['type' => 'success', 'message' => 'Published.']);
+
+    return back();                              // a row action: stay on the list
+}
+
+public function store(StorePostRequest $request): RedirectResponse
+{
+    $post = Post::create($request->validated());
+
+    return to_route('posts.edit', $post);       // next step is the editor
+}
+```
+
+`back()` uses the `Referer` header, falling back to the previous URL in the session. That suits list buttons and settings forms. `to_route()` is for a fixed destination. Don't return `response()->json(['ok' => true])` from an Inertia action and then navigate in `onSuccess`. Inertia expects a redirect or a page, so JSON isn't a valid response.
+
 ## Flash an error toast
 
 The same toast handles failures. On the starter kit, the toast reads `flash.toast`, so an error is the same array with `type` set to `error`:
@@ -171,3 +196,5 @@ Use a toast for failures that aren't about a field, such as a timeout from a pay
 - [Inertia v3: Flash data](https://inertiajs.com/docs/v3/data-props/flash-data)
 - [Laravel Vue starter kit](https://github.com/laravel/vue-starter-kit)
 - [Laravel docs: Flashed session data](https://laravel.com/framework/docs/13.x/session#flash-data)
+- [Inertia docs: Redirects](https://inertiajs.com/docs/v3/the-basics/redirects)
+- [Laravel docs: Redirects](https://laravel.com/framework/docs/13.x/responses#redirects)

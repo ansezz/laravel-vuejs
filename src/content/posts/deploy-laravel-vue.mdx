@@ -4,6 +4,7 @@ title: "Deploy a Laravel and Vue app"
 excerpt: "The production build Laravel Cloud documents, the Inertia SSR bundle, the queue, and the public/hot file that breaks a live site."
 description: "Deploy Laravel and Vue: npm run build or build:ssr, php artisan optimize, a queue worker, and how to keep Vite off the dev server."
 seoTitle: "Deploy a Laravel and Vue app"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T04:30:00Z
 snippet: "npm run build"
 categories: [laravel, vuejs]
@@ -125,6 +126,43 @@ If you broadcast with Reverb, that is a second long-running process. The asset b
 
 Point the web server at the `public` directory. The front controller is `public/index.php`. PHP 8.3 or newer, the extensions in [the requirements](/requirements), and a database. Put `public/build` on disk, keep `public/hot` off disk, run migrations, and supervise the queue. That is the same app Cloud builds. The host is the part you are now operating yourself.
 
+## 419 Page Expired after a deploy
+
+A 419 is Laravel's `TokenMismatchException`. The CSRF token the browser sent doesn't match the one in its session. Inertia's HTTP client already reads the `XSRF-TOKEN` cookie and sends it as `X-XSRF-TOKEN` on every request, so you don't need a `csrf-token` meta tag. Inertia's docs ask Laravel apps to remove that tag, because a stale tag stops the token refreshing. When 419s start right after a deploy, the session is usually what changed:
+
+- **The session store was wiped.** The `file` driver on a disk that is rebuilt on every release loses every session. Use `database` or `redis` in production.
+- **`APP_KEY` changed.** Cookies are encrypted with it, so every cookie becomes unreadable. Keep one stable key per environment. When you rotate it, put the old key in `APP_PREVIOUS_KEYS`.
+- **Cookie settings changed.** Check `APP_URL`, `SESSION_DOMAIN` (empty for a single host) and `SESSION_SECURE_COOKIE=true` behind HTTPS.
+
+A session that simply expired still returns a 419, and Inertia shows a non-Inertia response in a modal. Inertia's docs recommend sending the user back with a message instead:
+
+```php title="bootstrap/app.php"
+use Symfony\Component\HttpFoundation\Response;
+
+->withExceptions(function (Exceptions $exceptions): void {
+    $exceptions->respond(function (Response $response) {
+        if ($response->getStatusCode() === 419) {
+            return back()->with('message', 'The page expired. Please try again.');
+        }
+
+        return $response;
+    });
+})
+```
+
+Don't exclude the whole `web` group from CSRF checks, and don't add a wildcard CORS origin. A same-origin Inertia app doesn't use CORS at all.
+
+## 409 means new assets
+
+After a deploy, the first Inertia `GET` from an open tab carries the old `X-Inertia-Version`. inertia-laravel compares it with the current version (a hash of the Vite manifest by default). On a mismatch, it answers `409 Conflict` with an `X-Inertia-Location` header, and the client does a full page load to fetch the new JavaScript. The test for this setup confirms it: a stale `GET` gets the 409, while a stale `POST` is processed normally and redirects. Since Inertia 3.6, a background request such as polling doesn't force the reload. The next visit the user starts does.
+
+The 409 is part of the protocol, not an error to handle in `onError`. Two things break it:
+
+- **Every visit returns 409.** The version isn't stable. Usually `public/build/manifest.json` is missing on one server, or two servers behind one URL built different assets. Build once and ship the same `public/build` everywhere.
+- **Your own `abort(409)`.** If a controller uses 409 to mean "this record changed", Inertia may read it as a version change. Report a stale edit as a validation error instead. The [CRUD guide](/laravel-inertia-vue-crud#stop-a-stale-edit-from-overwriting) shows how.
+
+`Inertia::location($url)` uses the same 409 to send the browser to an external URL, such as an OAuth provider.
+
 ## Recap
 
 - One PHP app plus one Vite build.
@@ -152,3 +190,8 @@ Point the web server at the `public` directory. The front controller is `public/
 - [Laravel Cloud: Deploying Laravel](https://laravel.com/cloud/docs/deploy-guides/laravel)
 - [Laravel 13: Deployment](https://laravel.com/framework/docs/13.x/deployment)
 - [Laravel 13: Queues, Supervisor configuration](https://laravel.com/framework/docs/13.x/queues#supervisor-configuration)
+- [Laravel docs: CSRF protection](https://laravel.com/framework/docs/13.x/csrf)
+- [Inertia docs: CSRF protection](https://inertiajs.com/docs/v3/security/csrf-protection)
+- [Laravel docs: Session](https://laravel.com/framework/docs/13.x/session)
+- [Inertia docs: Asset versioning](https://inertiajs.com/docs/v3/advanced/asset-versioning)
+- [Inertia docs: The protocol](https://inertiajs.com/docs/v3/core-concepts/the-protocol)

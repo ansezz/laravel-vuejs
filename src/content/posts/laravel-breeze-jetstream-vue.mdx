@@ -4,6 +4,7 @@ title: "Breeze, Jetstream, and the Vue starter kit"
 excerpt: "Both packages still install. laravel new no longer offers them. The Vue starter kit already has the screens those tutorials are trying to publish."
 description: "Breeze and Jetstream still install. laravel new offers the Vue starter kit instead. Map the old screens before you add either package."
 seoTitle: "Breeze, Jetstream, and the Vue kit"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T08:30:00Z
 snippet: "laravel new my-app"
 categories: [laravel, vuejs]
@@ -103,6 +104,29 @@ php artisan route:list --path=two-factor
 
 </TryIt>
 
+## Profile settings: re-verify a changed email
+
+The starter kit's `Settings\ProfileController` shows the pattern to keep when you change the profile form:
+
+```php title="app/Http/Controllers/Settings/ProfileController.php"
+public function update(ProfileUpdateRequest $request): RedirectResponse
+{
+    $request->user()->fill($request->validated());
+
+    if ($request->user()->isDirty('email')) {
+        $request->user()->email_verified_at = null;
+    }
+
+    $request->user()->save();
+
+    Inertia::flash('toast', ['type' => 'success', 'message' => __('Profile updated.')]);
+
+    return to_route('profile.edit');
+}
+```
+
+Clearing `email_verified_at` when the address changes stops a user swapping in an address they don't own while staying verified. `ProfileUpdateRequest` ignores the user's own row on the unique email rule (see [unique on update](/laravel-form-request-inertia#ignore-the-current-row-on-unique)). `validated()` keeps `is_admin` or `email_verified_at` out of `fill()`, even if someone posts them. The Vue page binds `ProfileController.update.form()` to `<Form>` and shows `errors.email` with `InputError`.
+
 ## What to build next
 
 Auth is done when `laravel new` finishes and the kit's login page accepts a user. The first feature is [create, edit, delete, and search](/laravel-inertia-vue-crud). A separate Vue app that is not this kit is the [Sanctum cookie guide](/laravel-sanctum-vue-spa), and it still does not get Breeze installed on the Laravel side.
@@ -136,3 +160,4 @@ Auth is done when `laravel new` finishes and the kit's login page accepts a user
 - [laravel/breeze on GitHub](https://github.com/laravel/breeze)
 - [laravel/jetstream on GitHub](https://github.com/laravel/jetstream)
 - [Laravel 13: Fortify](https://laravel.com/framework/docs/13.x/fortify)
+- [Laravel docs: Unique rule](https://laravel.com/framework/docs/13.x/validation#rule-unique)
