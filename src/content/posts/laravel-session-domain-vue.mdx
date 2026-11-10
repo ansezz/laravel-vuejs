@@ -51,5 +51,19 @@ Do not set the domain in a Vue cookie. The session cookie is HttpOnly. JavaScrip
 
 <FAQ items={[
   { q: 'How do I set SESSION_DOMAIN for a Vue app?', a: 'Leave SESSION_DOMAIN empty on one host. Set the parent domain only when Vue and Laravel are real subdomains.' },
-  { q: 'What goes wrong with Laravel session domain Vue?', a: 'Many developers set `SESSION_DOMAIN=. Do not set the domain in a Vue cookie.' },
+  { q: 'What goes wrong with Laravel session domain Vue?', a: 'Many developers set `SESSION_DOMAIN=.localhost` because a production snippet said to use a leading dot. Do not set the domain in a Vue cookie.' },
 ]} />
+
+## Next steps
+
+- [Laravel and Vue CORS errors](/laravel-vue-cors)
+- [Authenticate a Vue SPA with Laravel Sanctum](/laravel-sanctum-vue-spa)
+- [Fix a 419 after you deploy](/laravel-vue-419-after-deploy)
+- [Verify email with Fortify and Vue](/fortify-email-verification-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Sanctum SPA authentication](https://laravel.com/docs/13.x/sanctum#spa-authentication)
+- [Laravel docs: Session](https://laravel.com/docs/13.x/session)
+- [MDN: Set-Cookie Domain](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)

@@ -2,10 +2,10 @@
 id: 123
 title: "Show failed jobs to an admin"
 seoTitle: "Failed jobs table"
-excerpt: "queue:failed-table stores the failure. An admin page may show the name and the time. It does not show the payload."
-description: "queue:failed-table stores the failure. An admin page may show the name and the time. It does not show the payload."
+excerpt: "The make:queue-failed-table migration stores the failure. An admin page may show the name and the time. It does not show the payload."
+description: "The make:queue-failed-table migration stores the failure. An admin page may show the name and the time. It does not show the payload."
 date: 2026-10-11T11:10:00Z
-snippet: "php artisan queue:failed-table"
+snippet: "php artisan make:queue-failed-table"
 categories: [laravel, vuejs]
 tags: [laravel, vuejs]
 ---
@@ -13,7 +13,7 @@ People searching "Laravel failed jobs Vue" render the `exception` column in the 
 
 <TLDR audience="Laravel + Vue developers" applies="Laravel 13 · Vue 3">
 
-- queue:failed-table stores the failure.
+- `make:queue-failed-table` stores the failure.
 - An admin page may show the name and the time.
 - It does not show the payload.
 - Do not put `payload` or `exception` in an Inertia prop.
@@ -23,7 +23,7 @@ People searching "Laravel failed jobs Vue" render the `exception` column in the 
 ## The fix
 
 ```shell
-php artisan queue:failed-table
+php artisan make:queue-failed-table
 php artisan migrate
 ```
 
@@ -53,6 +53,18 @@ Do not put `payload` or `exception` in an Inertia prop. Do not let every signed-
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I show failed jobs to an admin?', a: 'queue:failed-table stores the failure. An admin page may show the name and the time. It does not show the payload.' },
+  { q: 'How do I show failed jobs to an admin?', a: '`make:queue-failed-table` stores the failure. An admin page may show the name and the time. It does not show the payload.' },
   { q: 'What goes wrong with Laravel failed jobs Vue?', a: 'Many developers render the `exception` column in the page. Do not put `payload` or `exception` in an Inertia prop.' },
 ]} />
+
+## Next steps
+
+- [Show a queued Laravel job in Vue](/laravel-vue-queued-job)
+- [queue:work in production, listen locally](/laravel-queue-work-vs-listen)
+- [Record when a schedule last ran](/laravel-schedule-last-run-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Dealing with failed jobs](https://laravel.com/docs/13.x/queues#dealing-with-failed-jobs)
+- [Laravel docs: Queues](https://laravel.com/docs/13.x/queues)

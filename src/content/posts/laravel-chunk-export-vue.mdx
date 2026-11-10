@@ -47,3 +47,15 @@ Do not `Post::all()` and then `collect()->chunk()` to feel safer. You already lo
   { q: 'How do I chunk a large export in a job?', a: 'chunkById walks a table in a job. Do not chunk() an update, and do not do this work inside the HTTP request.' },
   { q: 'What goes wrong with Laravel chunk export?', a: 'Many developers call `chunk()` inside a controller and the request times out. Do not `Post::all()` and then `collect()->chunk()` to feel safer.' },
 ]} />
+
+## Next steps
+
+- [Show a queued Laravel job in Vue](/laravel-vue-queued-job)
+- [The image max rule is kilobytes](/laravel-image-max-kilobytes-vue)
+- [Show a private S3 file for a few minutes](/laravel-s3-temporary-url-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Chunking results](https://laravel.com/docs/13.x/eloquent#chunking-results)
+- [Laravel docs: Queues](https://laravel.com/docs/13.x/queues)

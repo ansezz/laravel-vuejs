@@ -32,7 +32,7 @@ public function via(object $notifiable): array
 The database channel needs the notifications table:
 
 ```shell
-php artisan notifications:table
+php artisan make:notifications-table
 php artisan migrate
 ```
 
@@ -53,3 +53,15 @@ Do not `Mail::send` and `notify` with two different texts that can drift. Do not
   { q: 'How do I send mail and a database notification?', a: 'via() can return mail and database. The Vue bell reads the database row. It does not read the mailable.' },
   { q: 'What goes wrong with Laravel notification mail and database?', a: 'Many developers create a mailable and a notification and send both by hand. Do not `Mail::send` and `notify` with two different texts that can drift.' },
 ]} />
+
+## Next steps
+
+- [Laravel database notifications in Vue](/laravel-vue-notifications)
+- [Prune old rows on a schedule](/laravel-prune-models-vue)
+- [Broadcast a notification to a Vue page](/laravel-broadcast-notification-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Database notifications](https://laravel.com/docs/13.x/notifications#database-notifications)
+- [Laravel docs: Mail notifications](https://laravel.com/docs/13.x/notifications#mail-notifications)

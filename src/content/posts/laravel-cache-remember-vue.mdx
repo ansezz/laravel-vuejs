@@ -52,3 +52,15 @@ Do not `Cache::remember` a paginator that called `where('user_id', auth()->id())
   { q: 'How do I cache a prop and forget it on write?', a: 'Cache::remember stores a public count. Forget that key when a post is created. Do not cache one user\'s drafts under a global key.' },
   { q: 'What goes wrong with Laravel cache Vue page?', a: 'Many developers remember the whole post list, including drafts, under one key. Do not `Cache::remember` a paginator that called `where(\'user_id\', auth()->id())` under a key with no user id in it.' },
 ]} />
+
+## Next steps
+
+- [Laravel and Vue CRUD with Inertia](/laravel-inertia-vue-crud)
+- [Wrap a Vue save in a transaction](/laravel-db-transaction-vue)
+- [Show an activity log on a Vue page](/laravel-activity-log-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Cache](https://laravel.com/docs/13.x/cache)
+- [Laravel docs: Retrieve and store](https://laravel.com/docs/13.x/cache#retrieve-store)

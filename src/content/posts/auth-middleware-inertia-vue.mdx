@@ -49,5 +49,18 @@ Do not fetch `/posts` with `fetch()` and expect the login redirect to become JSO
 
 <FAQ items={[
   { q: 'How do I protect an Inertia page with auth middleware?', a: 'auth on the Laravel route is what sends a guest to login. A v-if on the Vue page does not.' },
-  { q: 'What goes wrong with Inertia auth middleware?', a: 'Many developers hide the nav when `auth. Do not fetch `/posts` with `fetch()` and expect the login redirect to become JSON.' },
+  { q: 'What goes wrong with Inertia auth middleware?', a: 'Many developers hide the nav when `auth.user` is null and leave the route open. Do not fetch `/posts` with `fetch()` and expect the login redirect to become JSON.' },
 ]} />
+
+## Next steps
+
+- [Set up a Laravel 13 + Vue 3 app in ten minutes](/application-setup)
+- [Vue Router on a Laravel API](/vue-router-laravel-spa)
+- [Rate limit Fortify login attempts](/laravel-login-rate-limit-vue)
+- [Issue a Sanctum token without breaking the SPA](/sanctum-api-token-beside-spa)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Protecting routes](https://laravel.com/docs/13.x/authentication#protecting-routes)
+- [Inertia docs: Authentication](https://inertiajs.com/docs/v3/security/authentication)

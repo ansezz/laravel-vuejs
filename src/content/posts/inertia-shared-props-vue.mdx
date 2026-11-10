@@ -63,3 +63,15 @@ Do not share `$request->user()` a second time under another key. The kit already
   { q: 'How do I share a prop with every Inertia page?', a: 'HandleInertiaRequests::share() runs for every Inertia response. Keep the query cheap and leave secrets out.' },
   { q: 'What goes wrong with Inertia shared data Vue?', a: 'Many developers put a post query in `share()` and then every page loads it, including the login screen. Do not share `$request->user()` a second time under another key.' },
 ]} />
+
+## Next steps
+
+- [Set up a Laravel 13 + Vue 3 app in ten minutes](/application-setup)
+- [Prefetch an Inertia link](/inertia-link-prefetch-vue)
+- [Redirect back after an Inertia form](/inertia-redirect-back-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Inertia docs: Shared data](https://inertiajs.com/docs/v3/data-props/shared-data)
+- [Inertia docs: Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads)

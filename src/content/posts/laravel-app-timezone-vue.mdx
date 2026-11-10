@@ -47,3 +47,16 @@ Do not store a local datetime in a `timestamp` column by formatting it in PHP an
   { q: 'How do I format a timestamp in the user\'s zone?', a: 'Store UTC. Format with the user\'s timezone when you send the prop. Do not save local time into a timestamp column.' },
   { q: 'What goes wrong with Laravel timezone Vue?', a: 'Many developers set `APP_TIMEZONE` to the user\'s city and then every row shifts when someone else signs in. Do not store a local datetime in a `timestamp` column by formatting it in PHP and writing the string.' },
 ]} />
+
+## Next steps
+
+- [Laravel API resources for a Vue client](/laravel-api-resources-vue)
+- [Switch the app locale from Vue](/laravel-app-locale-vue)
+- [Format money before it reaches Vue](/format-money-vue-laravel)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Configuration](https://laravel.com/docs/13.x/configuration)
+- [Laravel docs: Dates](https://laravel.com/docs/13.x/helpers#dates)
+- [PHP manual: timezone_identifiers_list()](https://www.php.net/manual/en/function.timezone-identifiers-list.php)

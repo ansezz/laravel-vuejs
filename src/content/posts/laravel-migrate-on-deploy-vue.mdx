@@ -43,3 +43,15 @@ Do not call `Artisan::call('migrate')` from a controller the Vue page can hit. T
   { q: 'How do I run migrations in the release, not in a request?', a: 'php artisan migrate --force belongs in the release step. A Vue button must not be the thing that migrates production.' },
   { q: 'What goes wrong with Laravel migrate on deploy?', a: 'Many developers hit the site once so `AppServiceProvider` can run migrations. Do not call `Artisan::call(\'migrate\')` from a controller the Vue page can hit.' },
 ]} />
+
+## Next steps
+
+- [Deploy a Laravel and Vue app](/deploy-laravel-vue)
+- [Point the load balancer at /up](/laravel-health-route-up)
+- [config:cache makes env() return null](/php-artisan-config-cache-vue)
+- [All 100 short Laravel and Vue guides](/laravel-vue-keyword-guides)
+
+## Sources
+
+- [Laravel docs: Running migrations](https://laravel.com/docs/13.x/migrations#running-migrations)
+- [Laravel docs: Deployment](https://laravel.com/docs/13.x/deployment)
