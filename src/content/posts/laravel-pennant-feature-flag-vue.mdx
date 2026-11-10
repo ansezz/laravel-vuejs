@@ -1,72 +1,179 @@
 ---
 id: 111
-title: "Send a Pennant flag to a Vue page"
-seoTitle: "Pennant flag on a Vue page"
-excerpt: "Feature::for($user)->active() becomes a boolean prop. The controller checks the same flag before it writes."
-description: "Send a Laravel Pennant feature flag to Vue: Feature::for($user)->active() becomes a boolean Inertia prop, and the controller checks it as well."
+title: "Laravel Pennant feature flags in a Vue app: define, share, gate and test"
+seoTitle: "Laravel Pennant Feature Flags with Inertia and Vue"
+excerpt: "Use Laravel Pennant feature flags in an Inertia + Vue app: define a flag, share only the flags a page needs, gate routes and writes on the server, and test both states."
+description: "Laravel Pennant feature flags for Inertia and Vue: define flags per user, share them as props, gate routes with middleware, handle guests and test both states."
 date: 2026-10-11T10:58:00Z
-snippet: "composer require laravel/pennant"
+updated: 2026-11-10T12:00:00Z
+snippet: "Feature::for($user)->active('new-editor')"
 categories: [laravel, vuejs]
-tags: [laravel, vuejs]
+tags: [laravel, vuejs, inertia]
 ---
-People searching "Laravel Pennant Vue" hide a button and let the POST through. A flag is a server check that you also copy into a prop. The [stack guide](/laravel-vue-in-2026) is the app this flag sits on.
+Laravel Pennant decides on the server whether a feature is on for a user, a team or anything else you pass as the scope. It then remembers that answer. In an Inertia app, the Vue page shouldn't decide anything. It receives booleans as props and shows or hides parts of the page, while the routes and writes check the same flag again. This guide sets that up and covers the two traps: guests and stale stored values.
 
-<TLDR audience="Laravel + Vue developers" applies="Laravel 13 · Vue 3">
+<TLDR audience="Laravel + Vue developers on Inertia" applies="Laravel 13 · Pennant 1.26 · Inertia 3 · Vue 3">
 
-- Feature::for($user)->active() becomes a boolean prop.
-- The controller checks the same flag before it writes.
-- Do not send the flag list to the browser and trust a posted `newEditor: true`.
-- Do not call the provider from the page to "evaluate the flag".
+- Define flags in a service provider. `Feature::for($user)->active('new-editor')` resolves once, then the stored value is reused.
+- Share `Feature::for($user)->values([...])` for just the flags the UI uses, not every flag.
+- Gate the route with `EnsureFeaturesAreActive::using('new-editor')` (400 by default). Check again before a write.
+- A definition typed `User $user` returns false for guests without running. Type it `?User` to handle guests yourself.
 
 </TLDR>
 
-## The fix
+Each behaviour below runs in a Pest file on Laravel 13.39 with Pennant 1.26 (9 tests, 34 assertions in the file).
 
-```shell
+## Install
+
+```bash
 composer require laravel/pennant
+php artisan vendor:publish --provider="Laravel\Pennant\PennantServiceProvider"
+php artisan migrate
 ```
 
-```php
+The default `database` store keeps every resolved value in a `features` table. A user who got the new editor keeps it after a deploy, even if the rule that picked them changes. Set `PENNANT_STORE=array` in `phpunit.xml` so tests don't touch the table.
+
+## Define a flag
+
+```php title="app/Providers/AppServiceProvider.php"
+use App\Models\User;
+use Illuminate\Support\Lottery;
 use Laravel\Pennant\Feature;
 
-Feature::define('new-editor', function (User $user) {
-    return (bool) $user->is_admin;
+public function boot(): void
+{
+    Feature::define('new-editor', fn (User $user) => match (true) {
+        $user->is_admin => true,
+        $user->created_at->isAfter('2026-10-01') => Lottery::odds(1, 10),
+        default => false,
+    });
+}
+```
+
+Admins always get the editor. Newer accounts get it one time in ten, and everyone else doesn't. The resolver runs once per scope, and the result is stored. In the test, checking the flag three times for two users ran the closure twice. For a flag with real logic, `php artisan pennant:feature NewEditor` creates a class in `app/Features` with a `resolve()` method.
+
+## Share the flags the page needs
+
+The UI needs booleans, so send them with the shared props:
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+use Laravel\Pennant\Feature;
+
+public function share(Request $request): array
+{
+    return [
+        ...parent::share($request),
+        'features' => fn () => $request->user()
+            ? Feature::for($request->user())->values(['new-editor', 'billing-v2'])
+            : [],
+    ];
+}
+```
+
+`values()` returns `['new-editor' => true, 'billing-v2' => false]`. List the flags explicitly. Sharing every flag tells anyone who opens devtools what you're building next. The closure keeps the lookup lazy, so a partial reload that doesn't ask for `features` skips it.
+
+```vue title="resources/js/pages/posts/Edit.vue"
+<script setup lang="ts">
+import { computed } from "vue";
+import { usePage } from "@inertiajs/vue3";
+import NewEditor from "@/components/NewEditor.vue";
+import ClassicEditor from "@/components/ClassicEditor.vue";
+
+const page = usePage<{ features: Record<string, boolean> }>();
+const useNewEditor = computed(() => page.props.features["new-editor"] === true);
+</script>
+
+<template>
+  <NewEditor v-if="useNewEditor" />
+  <ClassicEditor v-else />
+</template>
+```
+
+A flag that only matters on one page can be a normal page prop from that controller instead.
+
+## Gate the route and the write
+
+Hiding a button isn't security. Anyone can post to the URL. Gate the route:
+
+```php title="routes/web.php"
+use Laravel\Pennant\Middleware\EnsureFeaturesAreActive;
+
+Route::middleware(['auth', EnsureFeaturesAreActive::using('new-editor')])->group(function () {
+    Route::get('/posts/{post}/edit-v2', [EditorV2Controller::class, 'edit']);
+    Route::put('/posts/{post}/edit-v2', [EditorV2Controller::class, 'update']);
 });
 ```
 
-Define that in a service provider, not in the Vue page.
+In the test, a user without the flag got `400` and a user with it got `200`. To send them somewhere useful instead, register a response in a service provider: `EnsureFeaturesAreActive::whenInactive(fn ($request, $features) => redirect()->route('posts.edit', $request->route('post')))`. In a controller that handles both versions, check `Feature::active('new-editor')`, which uses the authenticated user, before you take the new code path. Never trust a `newEditor: true` posted by the page.
+
+## Guests and other scopes
+
+Pennant's default scope is the authenticated user. For a guest, in a queued job, or in an Artisan command, that scope is `null`. If the definition is typed `User $user`, Pennant returns false without calling it. The test confirms the closure never ran. To show a flag to guests, type the scope as nullable:
 
 ```php
-$enabled = $request->user()
-    ? Feature::for($request->user())->active('new-editor')
-    : false;
-
-return Inertia::render('posts/Edit', [
-    'newEditor' => $enabled,
-]);
+Feature::define('new-pricing-page', fn (?User $user) => $user === null ? Lottery::odds(1, 2) : true);
 ```
 
-```vue
-<section v-if="newEditor">New editor</section>
+In a job, pass the scope explicitly: `Feature::for($this->user)->active('new-editor')`. A flag can also belong to a team: `Feature::for($user->currentTeam)->active('billing-v2')`, with a definition that takes a `Team`.
+
+## Roll out, roll back, clean up
+
+```php
+Feature::for($user)->activate('new-editor');      // one user, e.g. from an admin toggle
+Feature::activateForEveryone('new-editor');       // full rollout
+Feature::deactivateForEveryone('new-editor');     // kill switch
 ```
 
-The store method checks `active('new-editor')` again before it writes. Do not send the flag list to the browser and trust a posted `newEditor: true`. Do not call the provider from the page to "evaluate the flag".
+```bash
+php artisan pennant:purge new-editor              # forget stored values; the next check re-resolves
+```
+
+Changing the definition doesn't change values that are already stored. Purge the flag after you change its rule. When the feature has fully shipped, delete the definition and the checks, then purge it. A flag left in the code for good is just a hidden setting.
+
+## Test both states
+
+```php title="tests/Feature/NewEditorTest.php"
+use Laravel\Pennant\Feature;
+
+test('users with the flag get the new editor route', function () {
+    Feature::define('new-editor', true);
+    $this->actingAs(User::factory()->create())->get('/posts/1/edit-v2')->assertOk();
+});
+
+test('users without it are refused', function () {
+    Feature::define('new-editor', false);
+    $this->actingAs(User::factory()->create())->get('/posts/1/edit-v2')->assertStatus(400);
+});
+```
+
+Redefining the flag in the test is how Pennant's docs recommend controlling it. It overrides the service provider definition for that test.
+
+## Recap
+
+- Define flags on the server. Values are resolved once and stored.
+- Share an explicit list of booleans, lazily. The page only renders.
+- Gate routes with the middleware and check again before a write.
+- Type the scope `?User` when guests matter. Purge after you change a rule.
 
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I send a Pennant flag to a Vue page?', a: 'Feature::for($user)->active() becomes a boolean prop. The controller checks the same flag before it writes.' },
-  { q: 'What goes wrong with Laravel Pennant Vue?', a: 'Many developers hide a button and let the POST through. Do not send the flag list to the browser and trust a posted `newEditor: true`.' },
+  { q: "How do I use a Laravel Pennant flag in Vue?", a: "Resolve it on the server with Feature::for($user)->values([...]) and pass the booleans as a shared or page prop. The Vue page reads the prop and the server checks the flag again on routes and writes." },
+  { q: "Why is my Pennant flag always false for guests?", a: "The default scope is null when nobody is logged in. A definition typed User $user returns false without running; type it ?User to handle guests." },
+  { q: "I changed the flag's rule but users still see the old value. Why?", a: "The database store keeps resolved values. Run php artisan pennant:purge for that flag so the next check resolves it again." },
+  { q: "What does the Pennant middleware return when a flag is off?", a: "A 400 response by default. Register EnsureFeaturesAreActive::whenInactive() to redirect instead." },
 ]} />
 
 ## Next steps
 
-- [Laravel and Vue in 2026: Inertia, a SPA, or Nuxt](/laravel-vue-in-2026)
-- [Show an activity log on a Vue page](/laravel-inertia-vue-crud#an-activity-log-for-the-admin)
-- [Switch the app locale from Vue](/laravel-vue-i18n#save-the-locale-on-the-user)
-- [Laravel and Vue guides by topic](/laravel-vue-keyword-guides)
+- [Shared props for the layout](/inertia-vue-persistent-layout#shared-props-for-the-layout)
+- [Authorize Inertia pages with policies](/laravel-vue-policies)
+- [Test a Laravel and Vue app](/test-laravel-vue)
 
 ## Sources
 
 - [Laravel docs: Pennant](https://laravel.com/framework/docs/13.x/pennant)
+- [Laravel docs: Pennant nullable scope](https://laravel.com/framework/docs/13.x/pennant#nullable-scope)
+- [Laravel docs: Pennant middleware](https://laravel.com/framework/docs/13.x/pennant#middleware)
+- [Laravel docs: Pennant testing](https://laravel.com/framework/docs/13.x/pennant#testing)
 - [laravel/pennant on GitHub](https://github.com/laravel/pennant)

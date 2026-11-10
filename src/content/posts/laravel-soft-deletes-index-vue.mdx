@@ -1,28 +1,37 @@
 ---
 id: 103
-title: "Keep soft-deleted rows off a Vue index"
-seoTitle: "Soft deletes on an index"
-excerpt: "SoftDeletes hides deleted rows from a normal query. Do not filter them again in Vue."
-description: "Keep soft-deleted Laravel rows off a Vue index: the SoftDeletes trait already excludes them from queries, so don't filter deleted_at again in the Vue component."
+title: "Soft deletes in a Laravel + Vue app: the index, a trash screen and restore"
+seoTitle: "Laravel Soft Deletes with Vue: Trash and Restore"
+excerpt: "Soft deletes for a Laravel + Inertia app: keep deleted rows off the index, build a trash screen, restore from Vue with withTrashed(), and prune old rows."
+description: "Laravel soft deletes with Inertia and Vue: hide trashed rows from the index, build a trash page, restore with withTrashed(), force delete and prune old rows."
 date: 2026-10-11T10:50:00Z
+updated: 2026-11-10T12:00:00Z
 snippet: "use SoftDeletes;"
 categories: [laravel, vuejs]
-tags: [laravel, vuejs]
+tags: [laravel, vuejs, inertia]
 ---
-People searching "Laravel soft deletes Vue" delete a row, see it disappear, and then also filter `deleted_at` in the component. The trait already did the filter. The [CRUD guide](/laravel-inertia-vue-crud) is the destroy action.
+With soft deletes, Delete becomes an undo-able action. Laravel sets `deleted_at` instead of removing the row, and every normal query skips it. Then a few questions come up. Where do trashed rows show? How does the user restore one? When do they really go? This guide builds the whole loop for an Inertia app: the index, a trash screen, restore and force delete buttons, the policy methods, and pruning.
 
-<TLDR audience="Laravel + Vue developers" applies="Laravel 13 · Vue 3">
+<TLDR audience="Laravel + Vue developers on Inertia" applies="Laravel 13 · Inertia 3 · Vue 3">
 
-- SoftDeletes hides deleted rows from a normal query.
-- Do not filter them again in Vue.
-- Do not pass trashed rows to the public index and hide them with `v-if`.
-- Do not call `forceDelete()` from the button you labeled Delete.
+- `use SoftDeletes` plus a `softDeletes()` column. `delete()` sets `deleted_at`, and normal queries and route bindings skip the row.
+- Trash screen: `Post::onlyTrashed()`. Restore route: `->withTrashed()` on that one route only.
+- Policies have `restore` and `forceDelete` methods. Use them.
+- Add `Prunable` with a `deleted_at` cutoff, and run `model:prune` from the scheduler.
 
 </TLDR>
 
-## The fix
+The model, query and route behaviour below runs in a Pest file on Laravel 13.39 with inertia-laravel 3.7.
 
-```php
+## Turn it on
+
+```php title="database/migrations/xxxx_add_deleted_at_to_posts.php"
+Schema::table('posts', function (Blueprint $table) {
+    $table->softDeletes();
+});
+```
+
+```php title="app/Models/Post.php"
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Post extends Model
@@ -31,35 +40,166 @@ class Post extends Model
 }
 ```
 
-The migration needs a nullable `deleted_at` timestamp. `$post->delete()` sets it. `Post::query()->paginate(12)` does not return that row. The Vue list renders `posts.data` and does not know about the column.
+`$post->delete()` now sets `deleted_at`. In the test, after deleting one of two posts, `Post::count()` was 1, `withTrashed()->count()` was 2, and `onlyTrashed()` returned only the deleted one. The index needs no change: `Post::latest()->paginate(15)` already leaves trashed rows out. Don't pass trashed rows to the public index and hide them with `v-if`. They would still be in the page's JSON.
 
-A trash screen is the exception. `Post::onlyTrashed()->paginate(12)` is an admin page with its own [policy](/laravel-vue-policies). Do not pass trashed rows to the public index and hide them with `v-if`.
+Unique indexes still see trashed rows. If a user deletes "hello-world" and then creates a new post with the same slug, the insert fails. The simplest fix is to treat slugs as unique across the trash too. Keep the plain `Rule::unique('posts', 'slug')`, so the user gets a validation message instead of a database error. Only use `Rule::unique(...)->withoutTrashed()` if the database index also ignores trashed rows.
 
-## What to avoid
+## The trash screen
 
-<Callout type="gotcha">
+```php title="app/Http/Controllers/TrashController.php"
+public function index(): Response
+{
+    Gate::authorize('viewAny', Post::class);
 
-Do not call `forceDelete()` from the button you labeled Delete. That removes the row. Soft delete is the one you can restore.
+    return Inertia::render('posts/Trash', [
+        'posts' => Post::onlyTrashed()
+            ->latest('deleted_at')
+            ->paginate(15)
+            ->through(fn (Post $post) => [
+                'id' => $post->id,
+                'title' => $post->title,
+                'deleted_at' => $post->deleted_at->diffForHumans(),
+            ]),
+    ]);
+}
+```
+
+```vue title="resources/js/pages/posts/Trash.vue"
+<script setup lang="ts">
+import { router } from "@inertiajs/vue3";
+
+defineProps<{ posts: { data: { id: number; title: string; deleted_at: string }[] } }>();
+
+function restore(id: number) {
+  router.post(`/posts/${id}/restore`, {}, { preserveScroll: true });
+}
+
+function destroyForever(id: number) {
+  if (confirm("Delete this post forever? This cannot be undone.")) {
+    router.delete(`/posts/${id}/force`, { preserveScroll: true });
+  }
+}
+</script>
+
+<template>
+  <ul>
+    <li v-for="post in posts.data" :key="post.id">
+      {{ post.title }} · deleted {{ post.deleted_at }}
+      <button type="button" @click="restore(post.id)">Restore</button>
+      <button type="button" @click="destroyForever(post.id)">Delete forever</button>
+    </li>
+  </ul>
+</template>
+```
+
+## Restore and force delete
+
+A trashed post doesn't bind. In the test, `GET /posts/{id}/edit` for a trashed post was a 404. Opt in only on the routes that act on the trash:
+
+```php title="routes/web.php"
+Route::middleware('auth')->group(function () {
+    Route::post('/posts/{post}/restore', [TrashController::class, 'restore'])->withTrashed()->name('posts.restore');
+    Route::delete('/posts/{post}/force', [TrashController::class, 'destroy'])->withTrashed()->name('posts.force-delete');
+});
+```
+
+```php title="app/Http/Controllers/TrashController.php"
+public function restore(Post $post): RedirectResponse
+{
+    Gate::authorize('restore', $post);
+    $post->restore();
+
+    Inertia::flash('toast', ['type' => 'success', 'message' => "Restored \"{$post->title}\"."]);
+
+    return back();
+}
+
+public function destroy(Post $post): RedirectResponse
+{
+    Gate::authorize('forceDelete', $post);
+    $post->forceDelete();
+
+    return back();
+}
+```
+
+Don't put `withTrashed()` on the whole group. Edit and update would start opening deleted posts. A generated policy (`php artisan make:policy PostPolicy --model=Post`) already has `restore` and `forceDelete` methods. Restricting force delete to admins is a one-line change there. Keep the normal Delete button on `delete()`. Never wire the button labelled Delete to `forceDelete()`.
+
+Soft deletes don't cascade. Comments on a trashed post are still live rows. Either soft delete them too, in a `deleted` model event, or filter them by their parent's state.
+
+### Undo from a toast
+
+The quickest restore is right after the delete. Have `destroy()` flash the post ID, and give the toast an Undo button that posts to `posts.restore`. It's the same route and the same policy check, with no trash screen needed.
+
+## Prune old rows
+
+Trash shouldn't grow forever. Make the model prunable:
+
+```php title="app/Models/Post.php"
+use Illuminate\Database\Eloquent\Prunable;
+
+class Post extends Model
+{
+    use SoftDeletes, Prunable;
+
+    public function prunable(): Builder
+    {
+        return static::onlyTrashed()->where('deleted_at', '<=', now()->subDays(30));
+    }
+}
+```
+
+```php title="routes/console.php"
+Schedule::command('model:prune')->daily();
+```
+
+`model:prune` finds every model that uses `Prunable` and force deletes the matching rows. Deleting files or other cleanup goes in a `pruning()` method on the model. Run `php artisan model:prune --pretend` first to see how many rows it would remove.
+
+## Test it
+
+```php title="tests/Feature/TrashTest.php"
+test('a trashed post leaves the index and comes back on restore', function () {
+    $user = User::factory()->create(); // the policy allows restore for this user
+    $post = Post::factory()->create();
+    $post->delete();
+
+    expect(Post::count())->toBe(0)->and(Post::onlyTrashed()->count())->toBe(1);
+    $this->actingAs($user)->get("/posts/{$post->id}/edit")->assertNotFound();
+
+    $this->actingAs($user)->from('/trash')->post("/posts/{$post->id}/restore")->assertRedirect('/trash');
+    expect($post->fresh()->trashed())->toBeFalse();
+});
+```
 
 
-</Callout>
+
+## Recap
+
+- Soft deleted rows disappear from queries and route bindings, so the index needs no changes.
+- Trash: `onlyTrashed()`. Restore and force delete: `withTrashed()` on those routes only.
+- Authorize with the policy's `restore` and `forceDelete`.
+- Watch unique indexes and child rows. Prune with `Prunable` and `model:prune`.
 
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I keep soft-deleted rows off a Vue index?', a: 'SoftDeletes hides deleted rows from a normal query. Do not filter them again in Vue.' },
-  { q: 'What goes wrong with Laravel soft deletes Vue?', a: 'Many developers delete a row, see it disappear, and then also filter `deleted_at` in the component. Do not pass trashed rows to the public index and hide them with `v-if`.' },
+  { q: "Do I need to filter deleted_at on my index query?", a: "No. The SoftDeletes trait adds a global scope, so normal queries and route model binding skip trashed rows." },
+  { q: "Why is my restore route a 404?", a: "Implicit binding skips trashed models. Add ->withTrashed() to the restore route so the trashed post can bind." },
+  { q: "How do I permanently delete soft-deleted rows?", a: "Call forceDelete() on one model, or use the Prunable trait with model:prune on a schedule for rows trashed more than N days ago." },
+  { q: "Why does creating a post fail after deleting one with the same slug?", a: "The unique index still contains the trashed row. Keep slugs unique across the trash or design the index and the unique rule to exclude trashed rows." },
 ]} />
 
 ## Next steps
 
-- [Laravel and Vue CRUD with Inertia](/laravel-inertia-vue-crud)
-- [Laravel policies on a Vue page](/laravel-vue-policies)
-- [Bind a public URL to a slug](/laravel-slug-binding-vue)
-- [Restore a soft-deleted row from Vue](/laravel-restore-soft-delete-vue)
-- [Laravel and Vue guides by topic](/laravel-vue-keyword-guides)
+- [Route model binding for Inertia pages](/laravel-route-model-binding-vue)
+- [Authorize Inertia pages with policies](/laravel-vue-policies)
+- [CRUD with Inertia and Vue](/laravel-inertia-vue-crud)
+- [Flash a toast from Laravel](/laravel-vue-flash)
 
 ## Sources
 
 - [Laravel docs: Soft deleting](https://laravel.com/framework/docs/13.x/eloquent#soft-deleting)
-- [Laravel docs: Querying soft deleted models](https://laravel.com/framework/docs/13.x/eloquent#querying-soft-deleted-models)
+- [Laravel docs: Pruning models](https://laravel.com/framework/docs/13.x/eloquent#pruning-models)
+- [Laravel docs: Implicit soft deleted models](https://laravel.com/framework/docs/13.x/routing#implicit-soft-deleted-models)
+- [Laravel docs: Policy methods](https://laravel.com/framework/docs/13.x/authorization#writing-policies)
+- [Laravel docs: Restoring soft deleted models](https://laravel.com/framework/docs/13.x/eloquent#restoring-soft-deleted-models)
