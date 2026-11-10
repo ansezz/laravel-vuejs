@@ -21,22 +21,22 @@ const lead = 'Tick the jobs. The commands use the same packages as the chart. Th
       ))}
     </fieldset>
     <div class="tool-output">
-      <h3>Composer</h3>
+      <h2>Composer</h2>
       <div data-recipe-composer-wrap hidden={recipe.composer === null}>
         <PackageInstall command={recipe.composer ?? ''} />
       </div>
       <p class="pkg-set-note" data-recipe-composer-empty hidden={recipe.composer !== null}>No PHP packages in this recipe.</p>
-      <h3>npm</h3>
+      <h2>npm</h2>
       <div data-recipe-npm-wrap hidden={recipe.npm === null}>
         <PackageInstall command={recipe.npm ?? ''} />
       </div>
       <p class="pkg-set-note" data-recipe-npm-empty hidden={recipe.npm !== null}>No npm packages in this recipe.</p>
-      <h3>Check before you install</h3>
+      <h2>Check before you install</h2>
       <ul class="tool-warnings" data-recipe-warnings hidden={recipe.warnings.length === 0}>
         {recipe.warnings.map(warning => <li>{warning}</li>)}
       </ul>
       <p class="pkg-set-note" data-recipe-warnings-empty hidden={recipe.warnings.length > 0}>No mix-up in the current ticks.</p>
-      <h3>Markdown card</h3>
+      <h2>Markdown card</h2>
       <div class="code pkg-install">
         <div class="code-head">
           <span class="code-lang">markdown</span>

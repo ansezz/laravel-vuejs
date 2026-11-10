@@ -72,12 +72,13 @@ export async function sitemapUrls(): Promise<
     ],
     posts: posts.map((p) => ({ loc: p.url, lastmod: p.updated ?? p.date })),
     taxonomies: [
-      ...categories.map((c) => ({
-        loc: `/category/${c.slug}`,
-        lastmod: newest(
-          posts.filter((p) => p.categories.some((x) => x.slug === c.slug)),
-        ),
-      })),
+      ...categories
+        .map((c) => ({
+          c,
+          ps: posts.filter((p) => p.categories.some((x) => x.slug === c.slug)),
+        }))
+        .filter((x) => x.ps.length)
+        .map(({ c, ps }) => ({ loc: `/category/${c.slug}`, lastmod: newest(ps) })),
       ...tags
         .map((t) => ({
           t,

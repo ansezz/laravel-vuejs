@@ -24,7 +24,7 @@ const year = new Date().getFullYear()
     </div>
     {FOOTER.map(col => (
       <div class="footer-col">
-        <h3>{col.title}</h3>
+        <h2>{col.title}</h2>
         <ul>{col.links.map(l => <li><a href={l.href}>{l.label}</a></li>)}</ul>
       </div>
     ))}

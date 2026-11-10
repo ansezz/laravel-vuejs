@@ -12,6 +12,7 @@ export type CheatSheet = {
   description: string
   lead: string
   checked: string
+  published: string // first published (git history); datePublished in the JSON-LD
   sources: { label: string; url: string }[]
   sections: CheatSection[]
 }
@@ -24,6 +25,7 @@ const eloquent: CheatSheet = {
   description: 'Laravel 13 Eloquent on one page: queries, relationships, eager loading, scopes, casts, mass assignment, chunking, lazy collections and N+1 fixes.',
   lead: 'Queries, relationships, eager loading, scopes, casts, mass assignment, chunking and the N+1 fixes, in the Laravel 13 syntax (model attributes like #[Fillable] and #[Scope]).',
   checked: '2026-10-15',
+  published: '2026-10-15',
   sources: [
     { label: 'Eloquent: Getting Started', url: 'https://laravel.com/docs/13.x/eloquent' },
     { label: 'Eloquent: Relationships', url: 'https://laravel.com/docs/13.x/eloquent-relationships' },
@@ -189,6 +191,7 @@ const inertia: CheatSheet = {
   description: 'Inertia 3 with Laravel and Vue: responses, deferred, optional, once and merge props, useForm, Link, partial reloads, shared data, validation errors and SSR.',
   lead: 'Responses, prop types (deferred, optional, once, merge), useForm, Link, partial reloads, shared data, validation errors and SSR with the @inertiajs/vite plugin.',
   checked: '2026-10-15',
+  published: '2026-10-15',
   sources: [
     { label: 'Inertia v3 upgrade guide', url: 'https://inertiajs.com/docs/v3/getting-started/upgrade-guide' },
     { label: 'Deferred props', url: 'https://inertiajs.com/docs/v3/data-props/deferred-props' },
@@ -346,9 +349,10 @@ const vue: CheatSheet = {
   title: 'Vue 3 Composition API cheat sheet',
   short: 'Vue 3 Composition API',
   version: 'Vue 3.5',
-  description: 'Vue 3.5 Composition API on one page: ref, reactive, computed, watch, lifecycle hooks, props and emits, defineModel, composables, provide/inject and script setup.',
+  description: 'Vue 3.5 Composition API on one page: ref, reactive, computed, watch, lifecycle hooks, props and emits, defineModel, composables and provide/inject.',
   lead: 'ref, reactive, computed and watch, lifecycle hooks, props and emits, defineModel, composables, provide/inject and the script setup macros, for Vue 3.5 with TypeScript.',
   checked: '2026-10-15',
+  published: '2026-10-15',
   sources: [
     { label: 'Reactivity API: Core', url: 'https://vuejs.org/api/reactivity-core.html' },
     { label: '<script setup>', url: 'https://vuejs.org/api/sfc-script-setup.html' },
@@ -495,9 +499,10 @@ const aiSdk: CheatSheet = {
   title: 'Laravel AI SDK cheat sheet (laravel/ai 1.2)',
   short: 'Laravel AI SDK',
   version: 'laravel/ai 1.2 · Laravel 13',
-  description: 'Laravel AI SDK on two pages: agents, prompting, attachments, structured output, tools and approvals, conversations, streaming to Vue, embeddings, images, audio, classification, events and testing fakes.',
+  description: 'Laravel AI SDK on two pages: agents, structured output, tools and approvals, streaming to Vue, embeddings, images, audio, classification and testing fakes.',
   lead: 'Agents, prompt/stream/queue, attachments, structured output, tools with approval, Stop middleware, conversations, streaming to Vue, embeddings and vector search, images, audio, transcription, reranking, classification, events and the testing fakes, checked against laravel/ai 1.2.3.',
   checked: '2026-10-17',
+  published: '2026-10-19',
   sources: [
     { label: 'Laravel docs: AI SDK', url: 'https://laravel.com/docs/13.x/ai-sdk' },
     { label: 'laravel/ai releases', url: 'https://github.com/laravel/ai/releases' },
@@ -687,9 +692,10 @@ const validation: CheatSheet = {
   title: 'Laravel 13 validation cheat sheet',
   short: 'Validation',
   version: 'Laravel 13.37 · Inertia 3',
-  description: 'Laravel 13 validation on two pages: Form Requests, the Rule:: builders (13.36), strings, numbers, conditionals, arrays, database, dates, files, passwords, custom rules, and showing errors in Vue with Inertia and Precognition.',
+  description: 'Laravel 13 validation on two pages: Form Requests, Rule:: builders, conditional and array rules, files, passwords, custom rules and errors in Vue with Inertia.',
   lead: 'Where to validate, the typed Rule:: builders that arrived in 13.36, conditional and array rules, database, date, file and password rules, custom rules, and how the errors reach a Vue form with Inertia and Precognition. Every chain was run on Laravel 13.37.',
   checked: '2026-10-17',
+  published: '2026-10-19',
   sources: [
     { label: 'Laravel docs: Validation', url: 'https://laravel.com/docs/13.x/validation' },
     { label: 'Illuminate\\Validation\\Rule (13.x source)', url: 'https://github.com/laravel/framework/blob/13.x/src/Illuminate/Validation/Rule.php' },
