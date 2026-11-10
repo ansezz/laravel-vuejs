@@ -4,6 +4,7 @@ title: "Show a saved message in Vue"
 excerpt: "Inertia 3 can flash a toast for one visit. The Vue starter kit already displays it. A Laravel with() call does not reach that toast."
 description: "Flash a one-time saved message with Inertia 3. The Vue starter kit already shows the toast. A Laravel with() call does not."
 seoTitle: "Flash a saved message in Vue"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T09:10:00Z
 snippet: "Inertia::flash('toast', ...)"
 categories: [laravel, vuejs]
@@ -112,6 +113,37 @@ php artisan test --filter=PostTest
 
 </TryIt>
 
+## Flash an error toast
+
+The same toast handles failures. On the starter kit, the toast reads `flash.toast`, so an error is the same array with `type` set to `error`:
+
+```php title="app/Http/Controllers/PostController.php"
+use Inertia\Inertia;
+
+try {
+    $publisher->publish($post);
+} catch (PublishFailed $e) {
+    report($e);
+
+    Inertia::flash('toast', [
+        'type' => 'error',
+        'message' => 'We could not publish that post. Try again in a minute.',
+    ]);
+
+    return back();
+}
+```
+
+`type` is one of `success`, `info`, `warning` or `error`. A plain `->with('error', '...')` puts the string in the session under another key, so the kit's toast never sees it.
+
+Use a toast for failures that aren't about a field, such as a timeout from a payment provider. A bad title still belongs in `form.errors.title` from `validate()`. If you show a toast and a field error for the same mistake, the user reads it twice.
+
+<Callout type="gotcha" title="don't flash the exception message">
+
+`$e->getMessage()` can contain SQL, file paths or provider details. Log the exception with `report($e)` and flash a sentence written for the person using the page.
+
+</Callout>
+
 ## Recap
 
 - Inertia flash data lives for one response and never comes back with the back button.
@@ -138,3 +170,4 @@ php artisan test --filter=PostTest
 
 - [Inertia v3: Flash data](https://inertiajs.com/docs/v3/data-props/flash-data)
 - [Laravel Vue starter kit](https://github.com/laravel/vue-starter-kit)
+- [Laravel docs: Flashed session data](https://laravel.com/framework/docs/13.x/session#flash-data)

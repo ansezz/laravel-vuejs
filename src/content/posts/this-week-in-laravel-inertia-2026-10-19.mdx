@@ -157,7 +157,7 @@ The official docs flag the classification API as experimental, so it may change 
 
 | Fix | Version | Who it affects |
 |---|---|---|
-| Structured-output sub-agents run unstreamed when the parent streams | 1.2.2 (#1117) | You stream an agent whose tools include a [structured-output agent](/laravel-ai-structured-output-vue). The tool result was "Agent failed: Streaming structured output is not currently supported." |
+| Structured-output sub-agents run unstreamed when the parent streams | 1.2.2 (#1117) | You stream an agent whose tools include a [structured-output agent](/laravel-ai-sdk-vue#structured-output-instead-of-parsing-text). The tool result was "Agent failed: Streaming structured output is not currently supported." |
 | A failed turn's interrupted tool result keeps its call ID | 1.2.2 (#1133) | Conversations on OpenAI, Azure OpenAI or xAI that got stuck returning HTTP 400 after a failed turn. They continue on the next prompt, no data fix needed. |
 | `Conversation` and `ConversationMessage` are non-incrementing again on Laravel 12 | 1.2.3 (#1137) | Laravel 12 apps that create conversations through Eloquent. The string ID was overwritten with the database row ID. |
 

@@ -4,6 +4,7 @@ title: "Upload files from Vue to Laravel with Inertia"
 excerpt: "Send an image with the Inertia Form component, validate it, store it on the public disk, and show upload progress."
 description: "Laravel and Vue file uploads with Inertia 3: a file input, image rules, the public disk, and progress while the request runs."
 seoTitle: "Laravel Vue file upload"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T04:10:00Z
 snippet: "php artisan storage:link"
 categories: [laravel, vuejs]
@@ -84,6 +85,25 @@ Pass the current path to the page:
 ```php
 'post' => $post->only(['id', 'title', 'excerpt', 'cover_path']),
 ```
+
+## What the image rule accepts
+
+`image` passes for jpg, jpeg, png, bmp, gif, webp, avif, heic and heif. SVG is excluded by default because it can carry scripts. If you really need it, use `image:allow_svg` and serve the file from somewhere that can't run it. For tighter control, list the types: `'mimes:jpg,png,webp'`.
+
+`accept="image/*"` on the Vue input only filters the file picker. It isn't validation, and the rule on the server is still the check.
+
+## When the file never reaches Laravel
+
+`max:2048` is in kilobytes, so it means 2 MB. PHP has its own limits that apply first: `upload_max_filesize` (2M by default) and `post_max_size` (8M by default). If a file is over `upload_max_filesize`, PHP drops it before Laravel runs. The `cover` field then looks empty: `nullable` quietly passes, or `required` fails with a confusing message. If the whole body is over `post_max_size`, every field arrives empty.
+
+Set both PHP limits above your Laravel rule, so the Laravel message is the one users see:
+
+```ini title="php.ini"
+upload_max_filesize = 10M
+post_max_size = 12M
+```
+
+Write the rule in kilobytes and say what it means: `'max:5120'` is 5 MB. Don't write `max:5` with a comment that says 5 MB.
 
 ## The Vue form
 
@@ -205,3 +225,5 @@ The `public` disk is fine for images you are happy to serve from the app server.
 - [Laravel 13: File storage](https://laravel.com/framework/docs/13.x/filesystem)
 - [Laravel 13: Validation, files](https://laravel.com/framework/docs/13.x/validation#validating-files)
 - [Inertia v3: File uploads](https://inertiajs.com/docs/v3/the-basics/file-uploads)
+- [Laravel docs: The image rule](https://laravel.com/framework/docs/13.x/validation#rule-image)
+- [Laravel docs: The max rule](https://laravel.com/framework/docs/13.x/validation#rule-max)

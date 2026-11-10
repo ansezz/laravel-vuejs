@@ -135,7 +135,7 @@ export const traps: Trap[] = [
   {
     id: "cors",
     task: "Let a separate Vue app send the session cookie.",
-    guide: "/cors-supports-credentials-vue",
+    guide: "/laravel-vue-cors",
     guideTitle: "Turn on CORS credentials for a separate Vue app",
     rule: "Do not set allowed_origins to ['*'] in the same file as supports_credentials => true.",
     lines: [
@@ -224,7 +224,7 @@ export const traps: Trap[] = [
   {
     id: "simple",
     task: "Show the next page of posts.",
-    guide: "/simple-paginate-vue",
+    guide: "/laravel-vue-pagination",
     guideTitle: "Render simplePaginate without a last page",
     rule: "simplePaginate omits last_page. Do not compute page 2 of undefined.",
     lines: [
@@ -363,7 +363,7 @@ export const traps: Trap[] = [
   {
     id: "window",
     task: "Read the browser location during setup.",
-    guide: "/inertia-ssr-process-cloud",
+    guide: "/inertia-ssr",
     guideTitle: "Keep the Inertia SSR process running",
     rule: "Do not read window in setup.",
     lines: [

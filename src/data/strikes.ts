@@ -57,7 +57,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "cors",
-    guide: "/cors-supports-credentials-vue",
+    guide: "/laravel-vue-cors",
     guideTitle: "Turn on CORS credentials for a separate Vue app",
     reason:
       "Do not set allowed_origins to ['*'] in the same file as supports_credentials => true.",
@@ -158,7 +158,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "simple",
-    guide: "/simple-paginate-vue",
+    guide: "/laravel-vue-pagination",
     guideTitle: "Render simplePaginate without a last page",
     reason:
       "simplePaginate omits last_page. Do not compute page 2 of undefined.",
@@ -277,7 +277,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "window",
-    guide: "/inertia-ssr-process-cloud",
+    guide: "/inertia-ssr",
     guideTitle: "Keep the Inertia SSR process running",
     reason: "Do not read window in setup.",
     find: (line) => {

@@ -206,7 +206,7 @@ Sanctum is the simplest option. If you need clients that only support OAuth, the
 
 ## A Vue page that hands out the token
 
-Users need a token to paste into their AI client. Create it in a controller and send it with [Inertia flash data](/inertia-flash-error-vue). Flash data shows up on the next page only and isn't saved in browser history, which suits a secret you show once.
+Users need a token to paste into their AI client. Create it in a controller and send it with [Inertia flash data](/laravel-vue-flash#flash-an-error-toast). Flash data shows up on the next page only and isn't saved in browser history, which suits a secret you show once.
 
 ```php title="routes/web.php"
 use Illuminate\Http\Request;
