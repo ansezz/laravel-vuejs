@@ -1,0 +1,325 @@
+---
+id: 187
+title: "Laravel 13.41: a signed URL fix, $request->uuid() and MigrationFailed"
+seoTitle: "Laravel 13.41: Signed URL Fix, request uuid() and More"
+excerpt: "Laravel 13.41 fixes signed links that never expired and a nested validation bypass, plus $request->uuid(), ulid(), Uri::origin() and MigrationFailed."
+date: 2026-11-11T00:30:00Z
+snippet: "$request->uuid('order_id') // UuidInterface|null"
+categories: [laravel]
+tags: [laravel, release, upgrade, testing]
+---
+You send a download link that should die in 15 minutes. On Laravel 13.40, one extra positional parameter could keep it alive forever. Laravel **13.41** fixes that and a nested validation bypass, and adds `$request->uuid()`, `$request->ulid()`, `Uri::origin()` and a `MigrationFailed` event. Install it this week.
+
+<TLDR
+  audience="Laravel 13 developers who send signed links, validate nested input, or run migrations and the scheduler in production"
+  learn={['Which signed URLs could stop expiring, and how 13.41 fixes them', 'The nested `sometimes` bug that let `"__missing__"` through validation', '`$request->uuid()`, `ulid()`, `Uri::origin()`, `MigrationFailed` and `ScheduledTaskSkipReason`', 'The smaller fixes worth knowing: hashed `TokenGuard::validate()`, `cursor()` lazy loading, JSON sessions']}
+  tested="Laravel 13.42.0 · PHP 8.4 · Pest 4 · SQLite (18 tests / 46 assertions: uuid/ulid on Request and validated input, Uri::origin, MigrationFailed, ScheduledTaskSkipReason, LostConnectionDetector::detectUsing, PendingProcess macros, foreignIdFor with keyType integer, hashed TokenGuard::validate, preventLazyLoading with cursor, JSON session with invalid UTF-8, signed URL expiry smuggling, nested sometimes with __missing__, schedule:list --json timezone, plus a 13.40-generated smuggled link checked on 13.42). The 15 feature tests all fail on 13.40.0."
+>
+
+- **13.41.0** was tagged on **November 10, 2026** (15:44 UTC). **13.42.0** followed 12 minutes later with only a version bump, so `composer update` lands you on 13.42.0 with the same code.
+- **Security:** on 13.40, a positional parameter like `'expires='` in `URL::temporarySignedRoute()` produced a valid link that **never expired**. A nested `sometimes` rule also skipped any value that was literally `"__missing__"`. Both are fixed, and backported to **12.72.0**. Links already sent stay valid after the upgrade, so add the small check below.
+- `$request->uuid('order_id')` and `$request->ulid('invoice')` return real ID objects (or `null`), like `date()` and `enum()`.
+- `MigrationFailed` fires when a migration throws, and `ScheduledTaskSkipped` now tells you **why** a task was skipped.
+
+</TLDR>
+
+## What's new at a glance
+
+| Change | PR | What it replaces |
+|---|---|---|
+| Positional route parameters URL-encoded (security) | port of [#62401](https://github.com/laravel/framework/pull/62401) | Raw `&expires=` that cancelled the expiry |
+| `sometimes` on nested keys checks `"__missing__"` (security) | port of [#62402](https://github.com/laravel/framework/pull/62402) | A magic string that skipped validation |
+| `expires` read from the raw query string as a fallback | port of [#62349](https://github.com/laravel/framework/pull/62349), [#62391](https://github.com/laravel/framework/pull/62391) | Signed links failing when the query bag is empty |
+| `uuid()` and `ulid()` on `InteractsWithData` | [#62327](https://github.com/laravel/framework/pull/62327), [#62348](https://github.com/laravel/framework/pull/62348) | `Uuid::fromString($request->input(...))` plus a null check |
+| `Uri::origin()` | [#62326](https://github.com/laravel/framework/pull/62326) | `parse_url()` and string glue |
+| `MigrationFailed` event | [#62342](https://github.com/laravel/framework/pull/62342) | Catching the exception in your deploy script |
+| `ScheduledTaskSkipped::$reason` | [#62294](https://github.com/laravel/framework/pull/62294) | Guessing why a task didn't run |
+| `LostConnectionDetector::detectUsing()` | [#62316](https://github.com/laravel/framework/pull/62316) | Binding a decorated detector |
+| `PendingProcess` is macroable | [#62351](https://github.com/laravel/framework/pull/62351) | Macros that only worked as the first call |
+| `schedule:list --json` keeps each task's timezone | [#62352](https://github.com/laravel/framework/pull/62352) | Expressions that drift an hour after DST |
+| `foreignIdFor()` with `$keyType = 'integer'` | [#62365](https://github.com/laravel/framework/pull/62365) | A `char(36)` column for a `bigint` key |
+| `TokenGuard::validate()` hashes the token | [#62336](https://github.com/laravel/framework/pull/62336) | `validate()` always `false` with `'hash' => true` |
+| `preventLazyLoading()` works with `cursor()` | [#62345](https://github.com/laravel/framework/pull/62345) | Silent N+1 inside `cursor()` loops |
+| JSON sessions survive invalid UTF-8 | [#62378](https://github.com/laravel/framework/pull/62378) | Users signed out by one bad byte |
+| Lost connection on `COMMIT` drops the PDO | [#62366](https://github.com/laravel/framework/pull/62366) | A worker stuck on "already an active transaction" |
+
+## Signed links that never expired
+
+`URL::temporarySignedRoute()` accepts a parameters array. Named keys fill route segments or become `key=value` pairs. Values with **integer keys** that don't match a segment were appended to the query string as they were, with no encoding.
+
+So if one of those values was `expires=`, the URL ended in `&expires=`. The signature covered it, PHP kept the last `expires` (an empty string), and Laravel's expiry check treats an empty `expires` as "no expiry". Here is the same call on both versions from our lab:
+
+<CodeCompare before="Laravel 13.40" after="Laravel 13.41+">
+
+```php title="routes/web.php"
+$url = URL::temporarySignedRoute(
+    'exports.download',
+    now()->plus(minutes: 5),
+    [42, 'expires='],
+);
+
+// /exports/42?expires=1794384300&signature=...&expires=
+// request()->query('expires') === ''
+// One year later: URL::hasValidSignature($request) === true
+```
+
+```php title="routes/web.php"
+$url = URL::temporarySignedRoute(
+    'exports.download',
+    now()->plus(minutes: 5),
+    [42, 'expires='],
+);
+
+// /exports/42?expires=1794384300&signature=...&expires%3D
+// request()->query('expires') === '1794384300'
+// Six minutes later: URL::hasValidSignature($request) === false
+```
+
+</CodeCompare>
+
+<Diagram name="laravel-signed-url-expires-smuggling" alt="The same temporarySignedRoute call with params 42 and 'expires='. On Laravel 13.40 the numeric parameter is appended raw, the URL ends in '&expires=', PHP keeps the last empty expires and the link never expires. On 13.41 and later the parameter is URL-encoded to 'expires%3D', expires keeps the real timestamp and the link expires on time." caption="One unencoded query fragment was enough to cancel the expiry." />
+
+You are exposed if any value with an integer key in that array can come from a user: a reference, a filename, a "return to" value. Named keys were always encoded, so `['export' => 42, 'ref' => $ref]` was safe.
+
+13.41 also reads `expires` from the raw `QUERY_STRING` (or Vapor's `VAPOR_RAW_QUERY_STRING`) when the parsed query has none, and rejects it if it arrives as an array.
+
+<Callout type="heads-up" title="Upgrading does not kill links already sent">
+
+We fed a link generated on 13.40 into 13.42 and moved the clock a year ahead: still valid. The URL itself carries the empty `expires`, and rotating `APP_KEY` won't help if the old key sits in `APP_PREVIOUS_KEYS`, because signed URLs accept previous keys too. If you could have sent such links, reject an empty `expires` before the `signed` middleware runs (below). A real signed link never has one.
+
+</Callout>
+
+```php title="app/Http/Middleware/RejectEmptySignedExpiry.php"
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+class RejectEmptySignedExpiry
+{
+    public function handle(Request $request, Closure $next): Response
+    {
+        if ($request->query->has('signature') && $request->query('expires') === '') {
+            abort(403, 'Invalid signature.');
+        }
+
+        return $next($request);
+    }
+}
+```
+
+```php title="routes/web.php"
+Route::get('/exports/{export}', DownloadExportController::class)
+    ->middleware([RejectEmptySignedExpiry::class, 'signed'])
+    ->name('exports.download');
+```
+
+## The "__missing__" validation bypass
+
+Laravel's validator used the string `"__missing__"` internally to mean "this nested key isn't there". If a client sent that exact string as a nested value, `sometimes` thought the field was absent and skipped every rule on it. Top-level fields were not affected.
+
+```php title="tests/Feature/NestedSometimesTest.php"
+$v = Validator::make(
+    ['profile' => ['age' => '__missing__'], 'items' => [['qty' => '__missing__']]],
+    ['profile.age' => 'sometimes|integer', 'items.*.qty' => 'sometimes|integer'],
+);
+
+// 13.40: passes, and validated() returns both "__missing__" strings
+// 13.41: fails on profile.age and items.0.qty
+```
+
+The fix swaps the magic string for a private `UndefinedValue` object, so no request payload can collide with it. If you have `sometimes` on nested or wildcard keys and then trust `validated()`, this one matters.
+
+## Read UUIDs and ULIDs straight from the request
+
+`uuid()` and `ulid()` join `date()`, `enum()` and friends on `InteractsWithData`. That covers `Request`, `$request->safe()`, `Fluent`, `UriQueryString`, Blade component attributes and console input.
+
+<CodeCompare before="Laravel 13.40" after="Laravel 13.41">
+
+```php title="app/Http/Controllers/OrderController.php"
+use Ramsey\Uuid\Uuid;
+
+public function show(Request $request)
+{
+    $orderId = $request->filled('order_id')
+        ? Uuid::fromString($request->input('order_id'))
+        : null;
+
+    // ...
+}
+```
+
+```php title="app/Http/Controllers/OrderController.php"
+public function show(Request $request)
+{
+    $orderId = $request->uuid('order_id'); // UuidInterface|null [!code highlight]
+    $invoice = $request->ulid('invoice');  // Symfony\Component\Uid\Ulid|null
+
+    // ...
+}
+```
+
+</CodeCompare>
+
+Missing or empty input returns `null`. Invalid input **throws**: `InvalidUuidStringException` for `uuid()` and `InvalidArgumentException` for `ulid()`. Validate first (`'order_id' => 'nullable|uuid'`), then read it from `$request->safe()->uuid('order_id')` so a bad value turns into a 422 and not a 500.
+
+<Callout type="gotcha" title="ulid() won't convert a UUID">
+
+`ulid()` uses `new Ulid($value)`, not `Ulid::fromString()`. Passing a UUID string throws instead of silently turning it into a different ULID. Our lab confirmed it.
+
+</Callout>
+
+## Uri::origin() for CORS and same-origin checks
+
+`Uri::origin()` returns the scheme, host and port, normalised. Default ports disappear and the host is lowercased, so two spellings of the same origin compare equal.
+
+```php title="app/Support/AllowedOrigins.php"
+use Illuminate\Support\Uri;
+
+Uri::of('https://App.Example.com:443/billing?tab=1#top')->origin(); // "https://app.example.com"
+Uri::of('http://localhost:8000/dashboard')->origin();               // "http://localhost:8000"
+
+$allowed = collect(config('services.embed.origins'))
+    ->map(fn (string $url) => Uri::of($url)->origin());
+
+$isAllowed = $allowed->contains(Uri::of($request->headers->get('origin', ''))->origin());
+```
+
+It needs `league/uri` 7.6 or later, which 13.41 requires, so `composer update` takes care of it.
+
+## Get told when a migration fails
+
+`MigrationFailed` fires when a migration throws, then the exception is rethrown as before. It carries the migration, the method (`up` or `down`), the migration name and the exception. On MySQL, DDL can't be rolled back, so half a migration may already be applied when this fires.
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Database\Events\MigrationFailed;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
+
+public function boot(): void
+{
+    Event::listen(function (MigrationFailed $event) {
+        Log::channel('slack')->critical("Migration {$event->name} failed during {$event->method}", [
+            'error' => $event->exception->getMessage(),
+        ]);
+    });
+}
+```
+
+In our lab a migration that threw `column already exists` fired the event with `name` `2026_11_11_000000_broken` and `method` `up`, and `php artisan migrate` still failed with the original exception.
+
+## Find out why a scheduled task was skipped
+
+`ScheduledTaskSkipped` (which 13.40 started firing for `onOneServer()`) now has a `$reason`: a `ScheduledTaskSkipReason` enum with `ConditionNotMet`, `Paused` and `RanOnAnotherServer`.
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Console\Events\ScheduledTaskSkipped;
+
+Event::listen(function (ScheduledTaskSkipped $event) {
+    Log::info('Scheduled task skipped', [
+        'task' => $event->task->getSummaryForDisplay(),
+        'reason' => $event->reason?->value, // condition_not_met | paused | ran_on_another_server
+    ]);
+});
+```
+
+Related: `schedule:list --json` now returns each task's **own** expression and timezone instead of converting everything to the app timezone. A `0 9 * * *` task in `Europe/Zurich` used to come back as `0 8 * * *` UTC, which is wrong for half the year. Pass `--timezone` if you still want the converted version.
+
+## Smaller additions you'll use
+
+**Teach Laravel a new "lost connection" message.** Behind Vitess, PgBouncer or a cloud proxy you see errors Laravel doesn't recognise, so it won't reconnect. Now it's one line:
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Database\LostConnectionDetector;
+
+LostConnectionDetector::detectUsing(
+    fn (Throwable $e) => str_contains($e->getMessage(), 'vttablet: rpc error'),
+);
+```
+
+**Macros anywhere in a process chain.** `PendingProcess` is now `Macroable`, so a macro works after `path()` or `tty()`, not only as the first call:
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Process\PendingProcess;
+
+PendingProcess::macro('withAppEnv', fn (string $env) => $this->env(['APP_ENV' => $env]));
+
+Process::path(base_path())->withAppEnv('staging')->run('php artisan about');
+```
+
+**`foreignIdFor()` and `$keyType = 'integer'`.** The rest of Eloquent treats `int` and `integer` the same, but `foreignIdFor()` only knew `int` and created a UUID (`char(36)`) column. It now creates a big integer column.
+
+## Fixes that might already be biting you
+
+- **Hashed API tokens:** with `'hash' => true` on the `token` guard, `Auth::guard('api')->validate([...])` always returned `false` because it skipped the hash. Fixed ([#62336](https://github.com/laravel/framework/pull/62336)).
+- **`cursor()` and lazy loading:** `Model::preventLazyLoading()` was ignored for models streamed with `cursor()`. It now throws `LazyLoadingViolationException`, so an N+1 hidden in an export loop will show up in tests ([#62345](https://github.com/laravel/framework/pull/62345)).
+- **JSON sessions:** new apps ship with `'serialization' => 'json'`. One invalid UTF-8 byte (a malformed `Referer` saved as `url.intended`, say) made `json_encode()` fail and **emptied the whole session**, signing the user out. The bad byte is now replaced with U+FFFD ([#62378](https://github.com/laravel/framework/pull/62378)).
+- **Lost connection on commit:** on PostgreSQL, a connection dropped during `COMMIT` left every later transaction failing with "There is already an active transaction" until the worker restarted. Laravel now drops the dead PDO and reconnects ([#62366](https://github.com/laravel/framework/pull/62366)).
+- Also: `dispatch()->afterResponse()` reports exceptions instead of trying to render them ([#62313](https://github.com/laravel/framework/pull/62313)), Pusher auth returns 403 for an array `channel_name` instead of a 500 ([#62309](https://github.com/laravel/framework/pull/62309)), and the Ably broadcaster supports `ably/pubsub-server` 2 ([#62315](https://github.com/laravel/framework/pull/62315), [#62322](https://github.com/laravel/framework/pull/62322)).
+
+## Upgrade notes
+
+- `composer update laravel/framework` puts you on **13.42.0** (same code as 13.41.0). No config to publish.
+- **Extra positional route parameters are now URL-encoded.** `route('search', ['q' => 'a', 'raw&x=1'])` used to append `raw&x=1` as two params. If you relied on that, pass named keys instead.
+- **Code that lazy loads inside `cursor()` loops may now throw** where `preventLazyLoading()` is on (usually only outside production). Add `with()` or turn the loop into `lazy()` with eager loads.
+- If you parse `schedule:list --json`, expressions now come in each task's own timezone.
+- **On Laravel 12?** **12.72.0** (November 10) backports the signed URL fix, the nested `sometimes` fix, the `expires` fallback and the `schedule:list --json` change. It also rejects email addresses longer than 254 characters (RFC 5321), which 13.x hasn't picked up yet. The new features above are 13.x only.
+
+<TryIt title="Prove your signed links expire">
+
+```php title="tests/Feature/SignedLinkExpiryTest.php"
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
+
+it('expires signed export links even with positional params', function () {
+    // assumes a route named exports.download with an {export} segment
+    $url = URL::temporarySignedRoute('exports.download', now()->plus(minutes: 5), [42, 'expires=']);
+
+    expect(URL::hasValidSignature(Request::create($url)))->toBeTrue();
+
+    $this->travel(6)->minutes();
+
+    expect(URL::hasValidSignature(Request::create($url)))->toBeFalse();
+});
+```
+
+</TryIt>
+
+## Also out this week
+
+**Laravel AI SDK 1.4** (November 10) exposes the raw HTTP response on classification, embeddings, transcription, image and reranking responses, lets agents recover when a tool throws, and lets agent fakes resume tool approvals in tests. We'll cover it in Monday's roundup. **Reverb 1.13** is maintenance (Guzzle 8 support, PHPStan 2) plus a fix that scopes client event membership checks to the connection's app.
+
+## Recap
+
+- Upgrade now if you send signed links or validate nested input: both bypasses are fixed in 13.41 and 12.72. Reject an empty `expires` to retire links already sent.
+- `$request->uuid()` / `ulid()` return ID objects or `null`, and throw on junk, so validate first.
+- `Uri::origin()` gives you a normalised origin for CORS lists and same-origin checks.
+- `MigrationFailed` and `ScheduledTaskSkipped::$reason` make deploys and the scheduler easier to watch.
+- Several quiet fixes: hashed `TokenGuard::validate()`, `cursor()` lazy loading, JSON sessions and lost connections on commit.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Should I install 13.41 or 13.42?', a: 'Run `composer update laravel/framework` and you get 13.42.0. Its only change from 13.41.0 is the version number.' },
+  { q: 'Am I affected by the signed URL bug?', a: 'Only if you pass values with integer keys to `URL::temporarySignedRoute()` (or `signedRoute()` with an expiration) and one of them can come from a user. Named parameters were always encoded.' },
+  { q: 'Do I need to change code for the validation fix?', a: 'No. If you use `sometimes` on nested or wildcard keys, a literal `"__missing__"` value is now validated like any other string. Nothing changes for real input.' },
+  { q: 'What does $request->uuid() return for an invalid value?', a: 'It throws `InvalidUuidStringException`. Missing or empty input returns `null`. Validate with the `uuid` rule first if the value comes from users.' },
+  { q: 'Is any of this in Laravel 12?', a: 'The security fixes are, in 12.72.0, along with the `schedule:list --json` change. `uuid()`, `ulid()`, `Uri::origin()`, `MigrationFailed` and the other features are 13.x only.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.40: slow job alerts, middleware insertBefore() and strict input](/laravel-13-40-slow-jobs-middleware-insert-strict-input)
+- [Laravel signed URLs with Vue: email links, invites and private downloads](/laravel-signed-email-link-vue)
+- [Laravel 13.36: validation rule builders, OLAP and sticky queues](/laravel-13-36-validation-builders-olap-sticky-queues)
+- [URL generation in the Laravel docs](https://laravel.com/framework/docs/13.x/urls#signed-urls)
+
+## Sources
+
+- [laravel/framework v13.42.0 release](https://github.com/laravel/framework/releases/tag/v13.42.0) and [v13.40.0...v13.41.0 compare](https://github.com/laravel/framework/compare/v13.40.0...v13.41.0)
+- [laravel/framework v12.72.0 release notes](https://github.com/laravel/framework/releases/tag/v12.72.0)
+- 13.x ports of the security fixes: [ba9e21e](https://github.com/laravel/framework/commit/ba9e21eb) and [aa9deaa](https://github.com/laravel/framework/commit/aa9deaa7)
+- PRs: [#62401](https://github.com/laravel/framework/pull/62401), [#62402](https://github.com/laravel/framework/pull/62402), [#62349](https://github.com/laravel/framework/pull/62349), [#62391](https://github.com/laravel/framework/pull/62391), [#62327](https://github.com/laravel/framework/pull/62327), [#62348](https://github.com/laravel/framework/pull/62348), [#62326](https://github.com/laravel/framework/pull/62326), [#62342](https://github.com/laravel/framework/pull/62342), [#62294](https://github.com/laravel/framework/pull/62294), [#62352](https://github.com/laravel/framework/pull/62352), [#62316](https://github.com/laravel/framework/pull/62316), [#62351](https://github.com/laravel/framework/pull/62351), [#62365](https://github.com/laravel/framework/pull/62365), [#62336](https://github.com/laravel/framework/pull/62336), [#62345](https://github.com/laravel/framework/pull/62345), [#62378](https://github.com/laravel/framework/pull/62378), [#62366](https://github.com/laravel/framework/pull/62366)
+- [Docs: Retrieving input (uuid / ulid)](https://laravel.com/framework/docs/13.x/requests#retrieving-input)
+- [laravel/ai v1.4.0](https://github.com/laravel/ai/releases/tag/v1.4.0) · [laravel/reverb v1.13.0](https://github.com/laravel/reverb/releases/tag/v1.13.0)
