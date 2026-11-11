@@ -115,7 +115,7 @@ Route::get('/exports/{export}', DownloadExportController::class)
     ->name('exports.download');
 ```
 
-## The "__missing__" validation bypass
+## The `__missing__` validation bypass
 
 Laravel's validator used the string `"__missing__"` internally to mean "this nested key isn't there". If a client sent that exact string as a nested value, `sometimes` thought the field was absent and skipped every rule on it. Top-level fields were not affected.
 
