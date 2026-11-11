@@ -1,0 +1,20 @@
+flowchart LR
+  A["`**temporarySignedRoute()**
+  params: [42, 'expires=']`"] --> B{"`**Laravel 13.40**
+  numeric params
+  appended raw`"}
+  A --> C{"`**Laravel 13.41+**
+  numeric params
+  URL-encoded`"}
+  B --> D["`...?expires=1794384300
+  &signature=...
+  **&expires=**`"]
+  D --> E["`PHP keeps the last
+  expires: **empty**
+  link never expires`"]
+  C --> F["`...?expires=1794384300
+  &signature=...
+  &expires%3D`"]
+  F --> G["`expires stays the
+  real timestamp:
+  **link expires on time**`"]
