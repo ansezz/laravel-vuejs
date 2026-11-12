@@ -1,0 +1,12 @@
+flowchart LR
+  A["`**$author->drafts()**`"] --> B{"`How is the
+  relation scoped?`"}
+  B -- "where('status', 'draft')" --> C["`Read: only drafts
+  create(): status = column default`"]
+  C --> D["`New row is **published**
+  and missing from drafts()`"]
+  B -- "withAttributes(['status' => 'draft'])" --> E["`Read: where posts.status = 'draft'
+  create / make / save / factories:
+  status = 'draft'`"]
+  E --> F["`New row shows up
+  **in drafts()**`"]
