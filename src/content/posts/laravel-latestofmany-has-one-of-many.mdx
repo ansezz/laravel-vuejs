@@ -1,0 +1,293 @@
+---
+id: 189
+title: "Laravel latestOfMany(): each customer's latest order, no N+1"
+seoTitle: "Laravel latestOfMany() and ofMany() Explained"
+excerpt: "Hidden gem: hasOne()->latestOfMany() eager loads one order per customer instead of every order. Plus ofMany() closures, whereRelation, and the id trap. 17 Pest tests."
+date: 2026-11-13T09:00:00Z
+snippet: "return $this->hasOne(Order::class)->latestOfMany();"
+categories: [laravel]
+tags: [laravel, php, inertia, vuejs]
+---
+Your customers page shows each customer's last order. The first version calls `$customer->orders()->latest()->first()` in a loop, so 50 customers run 51 queries. The second version adds `latestOrder()` as `hasOne(Order::class)->latest()` and eager loads it, and now 2 queries pull every order each of those customers has ever placed. Laravel has had a relation built for this since 8.42: `latestOfMany()`.
+
+<TLDR
+  audience="Laravel developers who show a 'latest', 'first', 'biggest' or 'current' child row next to each parent: last order, last login, current price, top reply"
+  learn={['Why hasOne()->latest() is correct but loads every child when eager loaded', 'latestOfMany(), oldestOfMany() and ofMany() with the SQL they run', 'A Vue + Inertia customers table that loads one order per row', 'Gotchas: highest id is not newest date, filters belong in the closure, two 13.38 fixes']}
+  tested="Laravel 13.42 · PHP 8.4 · Pest 4 (17 tests, 64 assertions), plus a re-run on 13.36 for the before/after"
+>
+
+- `hasOne(Order::class)->latestOfMany()` returns the order with the highest `id` per customer. `Customer::with('latestOrder')` runs 2 queries and hydrates one order per customer. With `hasOne()->latest('id')`, our lab hydrated all 5 orders to keep 2.
+- Sort by a date with `latestOfMany(['placed_at', 'id'])`. Plain `latestOfMany()` is "highest id", so a backfilled October order beats your November ones.
+- Pick from a subset with the closure: `ofMany(['placed_at' => 'max', 'id' => 'max'], fn ($q) => $q->where('status', 'paid'))`. A `->where()` chained after it returns `null` when the latest order isn't paid.
+- It's a real relation: `whereRelation('latestOrder', 'status', 'failed')`, `doesntHave('latestOrder')`, `withDefault()` and column selection all work.
+
+</TLDR>
+
+## What latestOfMany() is and why people miss it
+
+A "has one of many" relation is a `hasOne` that picks one row out of a `hasMany` by a `MAX()` or `MIN()` aggregate. It came with Laravel 8.42 in May 2021 ([PR #37362](https://github.com/laravel/framework/pull/37362)), and the docs file it under "Has One of Many", between belongs-to and has-one-through. Most people search for "latest record per group", find a raw SQL answer, and never see it.
+
+```php title="app/Models/Customer.php"
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+
+public function orders(): HasMany
+{
+    return $this->hasMany(Order::class);
+}
+
+public function latestOrder(): HasOne
+{
+    return $this->hasOne(Order::class)->latestOfMany();
+}
+
+public function firstOrder(): HasOne
+{
+    return $this->hasOne(Order::class)->oldestOfMany();
+}
+
+public function largestOrder(): HasOne
+{
+    return $this->orders()->one()->ofMany('total', 'max');
+}
+```
+
+`latestOfMany()` is `ofMany('id', 'max')`, `oldestOfMany()` is `ofMany('id', 'min')`, and `->one()` turns an existing `hasMany` into a `hasOne` so you don't repeat the keys. Only `min` and `max` are allowed; anything else throws `InvalidArgumentException`.
+
+Under the hood it joins the table to a grouped copy of itself. This is the SQL for one customer, straight from `toRawSql()` in our lab:
+
+```sql
+select "orders".* from "orders"
+inner join (
+  select MAX("orders"."id") as "id_aggregate", "orders"."customer_id"
+  from "orders"
+  where "orders"."customer_id" = 1 and "orders"."customer_id" is not null
+  group by "orders"."customer_id"
+) as "latestOfMany"
+  on "latestOfMany"."id_aggregate" = "orders"."id"
+ and "latestOfMany"."customer_id" = "orders"."customer_id"
+where "orders"."customer_id" = 1 and "orders"."customer_id" is not null
+```
+
+When you eager load, the `= 1` becomes `in (1, 2, 3)` and each customer gets exactly one row back.
+
+<Diagram name="laravel-latestofmany-has-one-of-many" alt="Customer::with('latestOrder'). If latestOrder is hasOne()->latest('id'), the eager query has no limit, so every order of every customer is hydrated and one is kept: the answer is right but memory grows with order history. If it is hasOne()->latestOfMany(), the query inner joins a MAX(id) subquery grouped by customer_id, so one order per customer comes back in 2 queries." caption="Same relation name, very different eager query." />
+
+## The usual way vs latestOfMany()
+
+There are two usual ways, and they fail differently.
+
+The loop is an N+1: one query for customers plus one per customer. In our lab, 3 customers made 4 queries.
+
+```php
+$customers->map(fn ($c) => $c->orders()->latest('id')->first());
+```
+
+The `hasOne()->latest()` relation looks like the fix. Lazy loaded, it adds `limit 1` and is correct. Eager loaded, it can't use a limit, because one `limit 1` would cover all customers together, so it loads every order and keeps the first per customer.
+
+<CodeCompare before="hasOne()->latest(): right answer, every order hydrated" after="latestOfMany(): one order per customer">
+
+```php title="app/Models/Customer.php"
+public function latestOrder(): HasOne
+{
+    return $this->hasOne(Order::class)->latest('id');
+}
+
+Customer::with('latestOrder')->get();
+// select * from "orders"
+//   where "orders"."customer_id" in (1, 2, 3)
+//   order by "id" desc
+// 2 queries, 5 orders hydrated to keep 2
+```
+
+```php title="app/Models/Customer.php"
+public function latestOrder(): HasOne
+{
+    return $this->hasOne(Order::class)->latestOfMany();
+}
+
+Customer::with('latestOrder')->get();
+// select "orders".* from "orders"
+//   inner join (select MAX(id) ... group by customer_id)
+//   where "orders"."customer_id" in (1, 2, 3)
+// 2 queries, 2 orders hydrated
+```
+
+</CodeCompare>
+
+We counted hydrated models with an `Order::retrieved` listener. With 5 orders it's 5 vs 2. With customers who have 400 orders each, a 25-row page hydrates 10,000 models with the first version and 25 with the second.
+
+| | Loop with `->first()` | `hasOne()->latest()` | `hasOne()->latestOfMany()` |
+|---|---|---|---|
+| Queries for a page of N customers | N + 1 | 2 | 2 |
+| Orders hydrated | N | every order of those customers | N |
+| `whereRelation()` / `has()` on the latest one | no | filters on **any** order | filters on the latest |
+| Works with `preventLazyLoading()` | n/a (explicit queries) | yes | yes |
+
+## Real-world example: a Vue customers table
+
+An admin page lists customers with the status and total of their last order. The controller eager loads only the columns the table shows. Include `id` and the foreign key, as with any column-limited eager load.
+
+```php title="app/Http/Controllers/CustomerController.php"
+use App\Models\Customer;
+use Inertia\Inertia;
+
+class CustomerController
+{
+    public function index()
+    {
+        return Inertia::render('Customers/Index', [
+            'customers' => Customer::query()
+                ->with('latestOrder:id,customer_id,status,total,placed_at')
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn (Customer $c) => [
+                    'id' => $c->id,
+                    'name' => $c->name,
+                    'latest_order' => $c->latestOrder?->only('id', 'status', 'total', 'placed_at'),
+                ]),
+        ]);
+    }
+}
+```
+
+```vue title="resources/js/pages/Customers/Index.vue"
+<script setup lang="ts">
+type LatestOrder = { id: number; status: string; total: number; placed_at: string }
+
+defineProps<{
+  customers: { id: number; name: string; latest_order: LatestOrder | null }[]
+}>()
+
+const money = (cents: number) =>
+  new Intl.NumberFormat('en', { style: 'currency', currency: 'USD' }).format(cents / 100)
+</script>
+
+<template>
+  <table>
+    <thead>
+      <tr><th>Customer</th><th>Last order</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr v-for="c in customers" :key="c.id">
+        <td>{{ c.name }}</td>
+        <template v-if="c.latest_order">
+          <td>{{ money(c.latest_order.total) }}</td>
+          <td>{{ c.latest_order.status }}</td>
+        </template>
+        <td v-else colspan="2">No orders yet</td>
+      </tr>
+    </tbody>
+  </table>
+</template>
+```
+
+Our lab test hit this route and asserted the Inertia props: three customers, Ana's last total `3400`, Ben's last status `failed`, Cy's `latest_order` `null`, and exactly one query touching `orders`.
+
+The same relation answers the support team's next question, "who should we email about a failed payment?", without loading anything:
+
+```php
+Customer::whereRelation('latestOrder', 'status', 'failed')->get(); // Ben
+Customer::whereRelation('orders', 'status', 'failed')->get();      // anyone who EVER had a failed order
+Customer::doesntHave('latestOrder')->get();                        // never ordered: Cy
+```
+
+<Callout type="tip" title="Sorting the list by last order date">
+
+The relation doesn't sort parents. To order customers by their most recent order, add the aggregate as a column: `Customer::withMax('orders', 'placed_at')->orderByDesc('orders_max_placed_at')`. It's one query and you can still eager load `latestOrder` for the row details.
+
+</Callout>
+
+## Gotchas
+
+**"Latest" means highest id, not newest date.** `latestOfMany()` with no argument is `MAX(id)`. In our lab, importing an order dated October 1st after the November ones made it Ana's "latest". If rows can be backfilled, imported or have editable dates, name the column, with `id` after it to break ties: `latestOfMany(['placed_at', 'id'])`. If you pass only `'placed_at'`, Laravel adds the primary key as a tiebreaker, and two orders on the same timestamp resolve to the higher id. We tested that too.
+
+<Callout type="gotcha" title="Filters go inside the closure">
+
+"Last paid order" is not "last order, if it's paid". This returns `null` for Ben, whose newest order failed:
+
+```php
+return $this->hasOne(Order::class)->latestOfMany(['placed_at', 'id'])->where('status', 'paid');
+```
+
+The `where()` filters the row after it was picked. To pick the latest *among paid orders*, put it in the subquery with the closure argument:
+
+```php
+return $this->hasOne(Order::class)->ofMany(
+    ['placed_at' => 'max', 'id' => 'max'],
+    fn (Builder $query) => $query->where('status', 'paid'),
+);
+```
+
+That returns Ben's 9,900 order from November 2nd.
+
+</Callout>
+
+**Create through `orders()`, not `latestOrder()`.** `$customer->latestOrder()->create([...])` inserts a row, but an `oldestOfMany()` or `ofMany('total', 'max')` relation may not point at it. The PR author's advice was to always create through the `hasMany`.
+
+**`withDefault()` works.** `hasOne(Order::class)->latestOfMany()->withDefault(['status' => 'none'])` gives customers with no orders an unsaved `Order` instead of `null`, if you prefer that to `?->` in the controller.
+
+**PostgreSQL and UUID keys.** The docs say it: PostgreSQL has no `MAX()` for `uuid` columns, so `latestOfMany()` on a UUID primary key fails there. Sort by a timestamp plus a sortable key, or use ordered ids such as ULIDs stored as strings.
+
+**Two fixes in Laravel 13.38.** We ran the same test file on 13.36 and 13.42:
+
+- A self-referencing relation like `Comment::hasOne(Comment::class, 'parent_id')->ofMany('score', 'max')` returned nothing from `has('topReply')` on 13.36, and the PR reports an unknown-column error on MySQL ([PR #62043](https://github.com/laravel/framework/pull/62043)). On 13.42 it returns the parent.
+- `ofMany()` inside `Customer::resolveRelationUsing('biggestOrder', fn ...)` broke on PHP 8.4, because the join alias is taken from the calling function's name and PHP 8.4 names closures `{closure:/path/file.php:12}`. 13.36 threw `near ".": syntax error`; 13.42 uses the table name ([PR #62051](https://github.com/laravel/framework/pull/62051)). The same name guessing is why the alias in our SQL above is `latestOfMany` rather than `latestOrder`.
+
+**Big tables want an index.** The subquery groups by the foreign key and aggregates the sort column, so an index on `(customer_id, placed_at, id)` (or `(customer_id, id)` for plain `latestOfMany()`) keeps it cheap.
+
+## Try it yourself
+
+<TryIt title="Find 'latest' relations that load every row">
+
+```bash
+grep -rnE 'hasOne\([^)]*\)->(latest|oldest|orderBy)' app/Models
+```
+
+Each hit eager loads every child row. Swap `->latest('created_at')` for `->latestOfMany(['created_at', 'id'])`, then add a test that eager loads it for two parents and counts hydrated rows with `Model::retrieved()`.
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ Replaces a loop or a raw "greatest-n-per-group" query with one line |
+| How often you'll reach for it | ★★★★★ Last order, last login, current price, latest status, top reply |
+| Risk if misused | ★★☆☆☆ Wrong column picks the wrong row; filters outside the closure return null |
+| **Overall** | **4.5 / 5**: one of the most useful relations most Laravel apps don't use |
+
+## Recap
+
+- `hasOne()->latestOfMany()` is a relation that returns one child per parent and eager loads in 2 queries without hydrating the rest.
+- `hasOne()->latest()` is correct only when lazy loaded; eager loaded it hydrates every child.
+- Plain `latestOfMany()` means `MAX(id)`. Use `latestOfMany(['placed_at', 'id'])` when dates matter.
+- Constraints that choose *which* rows compete go in the `ofMany()` closure.
+- `whereRelation()`, `has()`, `doesntHave()`, `withDefault()` and column selection all work on it, and Laravel 13.38 fixed self-referencing and PHP 8.4 closure cases.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version has latestOfMany()?', a: 'Laravel 8.42 (May 2021, PR #37362) added ofMany(), latestOfMany() and oldestOfMany() for hasOne and morphOne. We tested on Laravel 13.42.' },
+  { q: 'Is latestOfMany() based on created_at?', a: 'No. With no argument it uses the primary key, MAX(id). Pass a column, for example latestOfMany([\'created_at\', \'id\']), to sort by date with the id as a tiebreaker.' },
+  { q: 'Why not hasOne()->latest()?', a: 'It is correct when lazy loaded because it adds limit 1, but eager loading cannot use a per-parent limit, so it loads every related row and keeps the first per parent.' },
+  { q: 'Can I add a where condition to latestOfMany()?', a: 'Use ofMany() with a closure to limit which rows compete, for example only paid orders. A where() chained after latestOfMany() filters the picked row, so it returns null when the latest row does not match.' },
+  { q: 'Does it work with morphOne and hasManyThrough?', a: 'Yes. morphOne()->latestOfMany() is in the docs, and $this->deployments()->one()->latestOfMany() turns a hasManyThrough into a hasOneThrough of many.' },
+  { q: 'Does it work on PostgreSQL with UUID primary keys?', a: 'Not with the default id aggregate. PostgreSQL has no MAX() for uuid columns, so sort by another column such as a timestamp.' },
+]} />
+
+## Next steps
+
+- [Automatic eager loading](/laravel-automatic-eager-loading), so relations like this load without listing them
+- [Eloquent chaperone()](/laravel-eloquent-chaperone), the other relationship gem that saves queries
+- [withAttributes() scoped relations](/laravel-withattributes-scoped-relationships), for relations you also create through
+- [Laravel docs: Has One of Many](https://laravel.com/framework/docs/13.x/eloquent-relationships#has-one-of-many)
+
+## Sources
+
+- [Laravel 13 docs: Eloquent relationships, Has One of Many](https://laravel.com/framework/docs/13.x/eloquent-relationships#has-one-of-many)
+- [Laravel 13 docs: One of Many (Polymorphic)](https://laravel.com/framework/docs/13.x/eloquent-relationships#one-of-many-polymorphic-relations)
+- [laravel/framework PR #37362: Add one-of-many relationship (Laravel 8.42)](https://github.com/laravel/framework/pull/37362)
+- [laravel/framework PR #62043: Fix existence and aggregate queries on self-referencing one-of-many relations (13.38)](https://github.com/laravel/framework/pull/62043)
+- [laravel/framework PR #62051: Fix ofMany() alias inside closures (13.38)](https://github.com/laravel/framework/pull/62051)
+- [Source: CanBeOneOfMany concern](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Eloquent/Relations/Concerns/CanBeOneOfMany.php)
