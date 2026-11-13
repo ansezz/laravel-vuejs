@@ -1,6 +1,7 @@
 ---
 // Pre-rendered Mermaid diagram (docs/diagrams/<name>.mmd -> public/diagrams/<name>-{light,dark}.svg via `npm run diagrams`).
-// alt describes the flow in words, for screen readers and for the Markdown copy of the post.
+// alt describes the flow in words, for screen readers and for the Markdown copy of the post. The dark variant carries the
+// same alt (it is aria-hidden and only one variant is ever shown, so screen readers still hear it once).
 // width/height come from the SVG's viewBox at build time, so the lazy-loaded image reserves its space (no layout shift).
 interface Props { name: string; alt: string; caption?: string }
 const { name, alt, caption } = Astro.props
@@ -12,6 +13,6 @@ const width = Math.round(w), height = Math.round(h)
 ---
 <figure class="diagram">
   <img class="only-light" src={`/diagrams/${name}-light.svg`} alt={alt} loading="lazy" decoding="async" width={width} height={height}>
-  <img class="only-dark" src={`/diagrams/${name}-dark.svg`} alt="" aria-hidden="true" loading="lazy" decoding="async" width={width} height={height}>
+  <img class="only-dark" src={`/diagrams/${name}-dark.svg`} alt={alt} aria-hidden="true" loading="lazy" decoding="async" width={width} height={height}>
   {caption && <figcaption>{caption}</figcaption>}
 </figure>

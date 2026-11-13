@@ -25,6 +25,9 @@ interface Props {
 const { title, description = SITE_DESCRIPTION, image = '/og/default.jpg', type = 'website', noindex = false, article, jsonld = [], imageAlt, markdown, prev, next } = Astro.props
 const path = Astro.url.pathname.replace(/\/$/, '') || '/'
 const canonical = Astro.props.canonical ?? SITE_URL + (path === '/' ? '/' : path)
+// Every indexable page has a Markdown twin (posts and tools pages bring their own; scripts/markdown.mjs writes the rest
+// from the built HTML). The Worker also serves it for `Accept: text/markdown`.
+const mdUrl = markdown ?? (noindex ? undefined : path === '/' ? '/index.md' : `${path}.md`)
 // Keep <title> within ~60 characters: add the site name only when it fits.
 const fullTitle = !title ? `${SITE_NAME}: build modern apps with Laravel and Vue` : `${title} · ${SITE_NAME}`.length <= 60 ? `${title} · ${SITE_NAME}` : title
 const img = image.startsWith('http') ? image : SITE_URL + image
@@ -55,7 +58,7 @@ const graph = { '@context': 'https://schema.org', '@graph': [org, website, ...js
   <link rel="alternate" hreflang="x-default" href={canonical}>
   {prev && <link rel="prev" href={SITE_URL + prev}>}
   {next && <link rel="next" href={SITE_URL + next}>}
-  {markdown && <link rel="alternate" type="text/markdown" title="Markdown version" href={SITE_URL + markdown}>}
+  {mdUrl && <link rel="alternate" type="text/markdown" title="Markdown version" href={SITE_URL + mdUrl}>}
   {GOOGLE_SITE_VERIFICATION && <meta name="google-site-verification" content={GOOGLE_SITE_VERIFICATION}>}
   {BING_SITE_VERIFICATION && <meta name="msvalidate.01" content={BING_SITE_VERIFICATION}>}
   {noindex && <meta name="robots" content="noindex, follow">}

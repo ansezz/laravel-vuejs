@@ -8,5 +8,5 @@ const { category } = Astro.props as { category: Category }
 const posts = (await allPosts()).filter(p => p.categories.some(c => c.slug === category.slug))
 ---
 <Base title={`${category.name} articles`} description={category.description} noindex={posts.length === 0}>
-  <Archive kicker="Category" title={category.name} lead={category.description} posts={posts} crumbs={[{ label: 'Articles', href: '/posts' }, { label: category.name }]} art={categoryArt(category.slug)} />
+  <Archive kicker="Category" title={category.name} lead={category.description} posts={posts} crumbs={[{ label: 'Articles', href: '/posts' }, { label: category.name }]} art={categoryArt(category.slug)} artAlt={`Illustration for the ${category.name} category`} />
 </Base>

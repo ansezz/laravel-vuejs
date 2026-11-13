@@ -7,8 +7,8 @@ import Art from './Art.astro'
 import type { ImageMetadata } from 'astro'
 import { categories, type Post } from '../lib/content'
 import { pageUrl } from '../lib/paginate'
-interface Props { kicker: string; title: string; lead?: string; posts: Post[]; crumbs?: { label: string; href?: string }[]; art?: ImageMetadata; page?: { current: number; pages: number; prev?: string; next?: string } }
-const { kicker, title, lead, posts, crumbs, art, page } = Astro.props
+interface Props { kicker: string; title: string; lead?: string; posts: Post[]; crumbs?: { label: string; href?: string }[]; art?: ImageMetadata; artAlt?: string; page?: { current: number; pages: number; prev?: string; next?: string } }
+const { kicker, title, lead, posts, crumbs, art, artAlt = '', page } = Astro.props
 const path = Astro.url.pathname.replace(/\/$/, '')
 ---
 <PageHero kicker={kicker} title={title} lead={lead} crumbs={crumbs}>
@@ -16,7 +16,7 @@ const path = Astro.url.pathname.replace(/\/$/, '')
     <a class={`chip ${path === '/posts' ? 'chip-brand' : ''}`} href="/posts">All</a>
     {categories.map(c => <a class={`chip ${path === '/category/' + c.slug ? 'chip-brand' : ''}`} href={`/category/${c.slug}`}>{c.name}</a>)}
   </div>
-  {art && <div class="archive-art"><Art src={art} sizes="(max-width: 1240px) 100vw, 1180px" widths={[640, 960, 1280, 1600]} eager /></div>}
+  {art && <div class="archive-art"><Art src={art} alt={artAlt} sizes="(max-width: 1240px) 100vw, 1180px" widths={[640, 960, 1280, 1600]} eager /></div>}
 </PageHero>
 <section class="container section-tight">
   {posts.length ? (<>
