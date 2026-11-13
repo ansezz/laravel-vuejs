@@ -1,11 +1,11 @@
 import { SITE_URL, AI_CRAWLERS } from "../config/site";
 
 // Everyone may crawl the public site. AI and answer-engine crawlers are named explicitly so it is clear they are welcome
-// (some only read a group that names them). /auth/ holds placeholder pages, /api/ is the forms backend.
+// (some only read a group that names them). /auth/ holds placeholder pages, /api/ is the forms backend, except the public search index (/api/posts.json, listed in the API catalog).
 // Content-Signal (https://contentsignals.org): search and answering with our pages (ai-input) are welcome; training models
 // on them (ai-train) is not. It sits in every group because a crawler named below only reads its own group.
 const rules =
-  "Content-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\nDisallow: /auth/\nDisallow: /api/\nDisallow: /form-error\nDisallow: /thanks";
+  "Content-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\nDisallow: /auth/\nAllow: /api/posts.json\nDisallow: /api/\nDisallow: /form-error\nDisallow: /thanks";
 const body = `# robots.txt for ${SITE_URL}
 # Content signals: search=yes (index the pages for search), ai-input=yes (use them to answer questions in AI tools),
 # ai-train=no (do not train or fine-tune models on this content).
