@@ -1,0 +1,88 @@
+---
+// Cross-links between the four agent tools, plus the styles they share (results, badges, line views).
+import { AGENT_TOOLS } from '../data/agent-tools'
+interface Props { current: string }
+const { current } = Astro.props
+---
+<h2>More agent tools</h2>
+<nav class="ar-tools" aria-label="Agent tools">
+  {AGENT_TOOLS.filter(t => t.href !== current).map(t => (
+    <a href={t.href}><strong>{t.title}</strong><span>{t.lead}</span></a>
+  ))}
+</nav>
+
+<style is:global>
+  .ar-form { display: grid; gap: 14px; max-width: 46rem; }
+  .ar-status { min-height: 1.5em; margin: 1rem 0 0; font-weight: 550; }
+  .ar-result { display: grid; gap: 28px; margin: 1rem 0 3rem; }
+  .ar-head { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; scroll-margin-top: 90px; }
+  .ar-score { display: grid; grid-template-columns: auto auto; align-items: baseline; column-gap: 6px; padding: 18px 22px; border: 2px solid var(--text); background: var(--bg-elev); min-width: 9rem; }
+  .ar-score-num { font: 700 3.4rem/1 var(--font-display); }
+  .ar-score-of { color: var(--muted); }
+  .ar-score-grade { grid-column: 1 / -1; font: 700 1.1rem/1.4 var(--font-mono); }
+  .ar-grade-A .ar-score-grade, .ar-grade-B .ar-score-grade { color: var(--accent); }
+  .ar-grade-C .ar-score-grade, .ar-grade-D .ar-score-grade { color: var(--warm); }
+  .ar-grade-F .ar-score-grade { color: #c0262d; }
+  .ar-meta { flex: 1 1 22rem; display: grid; gap: 8px; }
+  .ar-meta h2, .ar-meta p { margin: 0; }
+  .ar-meta a { overflow-wrap: anywhere; }
+  .ar-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 10px; }
+  .ar-cat { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 12px 14px; border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--text); text-decoration: none; }
+  .ar-cat:hover { border-color: var(--brand); }
+  .ar-cat-title { font-weight: 600; }
+  .ar-cat-score { font: 700 1rem/1.4 var(--font-mono); }
+  .ar-cat-count { grid-column: 1 / -1; font-size: 0.8rem; color: var(--muted); }
+  .ar-bar { grid-column: 1 / -1; height: 6px; background: var(--surface-2); }
+  .ar-bar > span { display: block; height: 100%; background: var(--grad); }
+  .ar-group { display: grid; gap: 8px; scroll-margin-top: 90px; }
+  .ar-group h3, .ar-about h3 { margin: 0.5rem 0 0; }
+  .ar-about { display: grid; gap: 8px; margin-bottom: 1.5rem; }
+  .ar-check { border: 1px solid var(--border); background: var(--bg-elev); }
+  .ar-check > summary { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; padding: 10px 14px; cursor: pointer; }
+  .ar-check-title { font-weight: 600; }
+  .ar-check-summary { flex-basis: 100%; color: var(--text-2); font-size: 0.92rem; overflow-wrap: anywhere; }
+  .ar-check-body { padding: 0 14px 14px; display: grid; gap: 6px; }
+  .ar-check-body p { margin: 0; }
+  .ar-label { font: 600 0.75rem/1.4 var(--font-mono); text-transform: uppercase; color: var(--muted); }
+  .ar-evidence { margin: 0; padding: 10px 12px; background: var(--surface); font: 0.8rem/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; }
+  .ar-badge { font: 700 0.72rem/1 var(--font-mono); text-transform: uppercase; padding: 4px 7px; border: 1px solid currentColor; }
+  .ar-badge-pass { color: var(--accent); }
+  .ar-badge-warn { color: var(--warm); }
+  .ar-badge-fail { color: #c0262d; }
+  .ar-badge-unverified, .ar-badge-info { color: var(--muted); }
+  [data-theme='dark'] .ar-badge-fail, [data-theme='dark'] .ar-grade-F .ar-score-grade { color: #ff6b6b; }
+  .ar-tag { margin-left: 6px; font: 500 0.7rem/1 var(--font-mono); padding: 3px 6px; background: var(--surface-2); color: var(--muted); vertical-align: middle; }
+  .ar-code pre { max-height: 22rem; overflow: auto; }
+  .ar-faq { display: grid; gap: 8px; margin-bottom: 1.5rem; }
+
+  .ar-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 10px; margin: 0.5rem 0 1.5rem; }
+  .ar-tools a { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--text); text-decoration: none; }
+  .ar-tools a:hover { border-color: var(--brand); }
+  .ar-tools strong { font-weight: 600; }
+  .ar-tools span { font-size: 0.88rem; color: var(--muted); }
+  .ar-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .ar-row .field { flex: 1 1 18rem; }
+  textarea.ar-text { font: 0.85rem/1.5 var(--font-mono); min-height: 16rem; border: 1px solid var(--border-strong); padding: 10px 12px; }
+  .ar-lines { margin: 0; padding: 8px 0; background: var(--surface); font: 0.8rem/1.55 var(--font-mono); max-height: 32rem; overflow: auto; counter-reset: none; }
+  .ar-line { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr); padding: 0 10px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ar-line > span:first-child { color: var(--muted); text-align: right; padding-right: 12px; user-select: none; }
+  .ar-line-error { background: color-mix(in srgb, #c0262d 14%, transparent); }
+  .ar-line-warning { background: color-mix(in srgb, var(--warm) 14%, transparent); }
+  .ar-line-hit { background: color-mix(in srgb, var(--brand) 16%, transparent); }
+  .ar-findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .ar-findings li { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; border: 1px solid var(--border); background: var(--bg-elev); overflow-wrap: anywhere; }
+  .ar-badge-error { color: #c0262d; }
+  .ar-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 14px; }
+  .ar-split pre { margin: 0; max-height: 34rem; overflow: auto; padding: 10px 12px; background: var(--surface); font: 0.78rem/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ar-split h3 { margin: 0 0 6px; font-size: 1rem; }
+  .ar-tokens { display: grid; gap: 6px; }
+  .ar-tokens > div { display: grid; grid-template-columns: 9rem minmax(0, 1fr) 7rem; gap: 10px; align-items: center; font-size: 0.9rem; }
+  .ar-tokens .ar-bar { height: 10px; grid-column: auto; }
+  .ar-fixed { width: 100% !important; table-layout: fixed; }
+  .ar-fixed td, .ar-fixed th { overflow-wrap: anywhere; vertical-align: top; }
+  .ar-fixed th:first-child { width: 10rem; }
+  .ar-mono { font-family: var(--font-mono); font-size: 0.82rem; overflow-wrap: anywhere; }
+  .ar-yes { color: var(--accent); font-weight: 600; }
+  .ar-no { color: #c0262d; font-weight: 600; }
+  [data-theme='dark'] .ar-no, [data-theme='dark'] .ar-badge-error { color: #ff6b6b; }
+</style>

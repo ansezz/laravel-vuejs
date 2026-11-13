@@ -1,0 +1,52 @@
+---
+import ToolPage from '../../components/ToolPage.astro'
+import AgentToolsNav from '../../components/AgentToolsNav.astro'
+import { MARKDOWN_FAQ, toolJsonld } from '../../data/agent-tools'
+const title = 'Markdown for agents tester'
+const lead = 'Enter a URL. See the HTML next to the Markdown an agent gets with Accept: text/markdown or the .md copy, with approximate token counts, the headers that matter and pass/fail notes.'
+const description = 'Free Markdown for agents tester: compare a page\'s HTML with its Accept: text/markdown and .md versions, token counts, Vary, Link and canonical headers.'
+const jsonld = toolJsonld(title, '/tools/markdown-for-agents', description, MARKDOWN_FAQ, ['Accept: text/markdown negotiation check', '.md alternate link check', 'HTML and Markdown side by side', 'Approximate token counts', 'Content-Type, Vary, Link and canonical headers'])
+---
+<ToolPage title={title} lead={lead} description={description} jsonld={jsonld}>
+  <div data-mdtest>
+    <form class="ar-form" action="/api/tools/markdown-for-agents" method="get">
+      <div class="field">
+        <label for="md-url">Page URL</label>
+        <input id="md-url" class="input" name="url" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com/docs/page" required maxlength="2048">
+      </div>
+      <div class="pkg-actions">
+        <button class="btn btn-primary" type="submit">Test</button>
+        <button class="btn" type="button" data-example>Test laravel-vuejs.space</button>
+      </div>
+      <p class="pkg-set-note">Three requests at most (plus redirects), public URLs only, cached for 10 minutes.</p>
+    </form>
+    <p class="ar-status" data-status role="status" aria-live="polite"></p>
+    <div class="ar-result" data-result hidden></div>
+  </div>
+
+  <h2>What passes</h2>
+  <div class="tool-table-wrap">
+    <table class="tool-table">
+      <thead><tr><th scope="col">Check</th><th scope="col">Passes when</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Content negotiation</th><td>A request with Accept: text/markdown gets Markdown on the same URL (no redirect) with Content-Type: text/markdown.</td></tr>
+        <tr><th scope="row">Vary: Accept</th><td>Both the HTML and the Markdown responses send Vary: Accept, so caches keep them apart.</td></tr>
+        <tr><th scope="row">.md copy</th><td>The page links it with &lt;link rel="alternate" type="text/markdown"&gt; and it answers 200 as text/markdown.</td></tr>
+        <tr><th scope="row">Canonical</th><td>The page has a canonical link, and the Markdown copy sends Link: &lt;page&gt;; rel="canonical".</td></tr>
+        <tr><th scope="row">Link header</th><td>Optional: the HTML response's Link header points to the Markdown copy.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Questions</h2>
+  <div class="ar-faq">
+    {MARKDOWN_FAQ.map(f => <details class="ar-check"><summary><span class="ar-check-title">{f.q}</span></summary><div class="ar-check-body"><p>{f.a}</p></div></details>)}
+  </div>
+  <AgentToolsNav current="/tools/markdown-for-agents" />
+  <p class="pkg-actions"><a class="btn" href="/tools/markdown-for-agents.md">Markdown for assistants</a></p>
+</ToolPage>
+
+<script>
+  import { initMarkdownTool } from '../../lib/agent-tools-ui'
+  initMarkdownTool()
+</script>

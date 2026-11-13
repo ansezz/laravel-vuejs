@@ -7,6 +7,9 @@ import { traps } from '../../data/traps'
 const description = 'Machine checks, the setup commands in order, the lines the setup guide shows, a stack recipe, a file map, October release notes, a 2019 to 2026 pick list, a compatibility card, and an AGENTS.md file for Laravel and Vue projects.'
 const tools = [
   { href: '/tools/agent-readiness', title: 'AI agent readiness checker', lead: 'Paste a URL. Get a 0-100 score and a fix for each check: robots.txt, llms.txt, Markdown for agents, JSON-LD and bot access.' },
+  { href: '/tools/llms-txt', title: 'llms.txt generator and validator', lead: 'Check an llms.txt line by line, live or pasted, or build a starter file from a sitemap.' },
+  { href: '/tools/ai-robots-tester', title: 'AI crawler robots.txt tester', lead: 'Test a path against GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot and more. See the rule that decides.' },
+  { href: '/tools/markdown-for-agents', title: 'Markdown for agents tester', lead: 'HTML next to the Markdown agents get, with token counts and the Vary, Link and canonical headers.' },
   { href: '/starter', title: 'Starter prompt', lead: 'Tick Laravel and Vue modules. Copy one prompt that reads those guides.' },
   { href: '/fix', title: 'Fix the app you have', lead: 'Paste an error, or composer.json and package.json. Copy the prompt for the matching guides.' },
   { href: '/trap', title: 'Catch the bad line', lead: `${traps.length} prompts. One line in each would break the app. Click that line.` },
@@ -51,6 +54,9 @@ const tools = [
       '#compatibility': '/tools/compatibility',
       '#agents': '/tools/agents',
       '#agent-readiness': '/tools/agent-readiness',
+      '#llms-txt': '/tools/llms-txt',
+      '#ai-robots-tester': '/tools/ai-robots-tester',
+      '#markdown-for-agents': '/tools/markdown-for-agents',
     }
     const next = tools[location.hash]
     if (next) location.replace(next)

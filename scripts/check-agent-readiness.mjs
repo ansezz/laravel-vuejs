@@ -1,6 +1,9 @@
 // Offline tests for the AI agent readiness scanner (worker/agent-readiness.ts): URL safety, robots.txt rules,
 // llms.txt parsing, scoring, and a full scan against a fake site (no network).
 import { CHECKS, scoreOf, gradeOf, fixPrompt } from "../src/data/agent-readiness.ts";
+import { validateLlms, generateLlms } from "../src/data/llms-txt.ts";
+import { AI_BOTS } from "../src/data/robots.ts";
+import { fetchLlms, readSitemap, fetchRobots, probeMarkdown, guessVariant } from "../worker/agent-tools.ts";
 import { normalizeTarget, isPrivateIp, parseRobots, robotsVerdict, validSignal, parseLlms, visibleText, scan, MAX_FETCHES } from "../worker/agent-readiness.ts";
 
 let failures = 0;
@@ -140,5 +143,65 @@ if (!partial.error) {
   ok(by.cors === "pass", "page headers still graded when only other files fail");
 } else ok(false, `partial scan errored: ${partial.error}`);
 
+
+// ---------- llms.txt validator and generator ----------
+const goodLlms = "# Good\n\n> A good site.\n\n## Docs\n\n- [Start](https://good.example.com/start): first steps\n- [API](https://good.example.com/api): reference\n\n## Optional\n\n- [Privacy](https://good.example.com/privacy): policy\n";
+const v1 = validateLlms(goodLlms, { status: 200, contentType: "text/plain; charset=utf-8" });
+ok(v1.valid && v1.warnings === 0 && v1.title === "Good" && v1.summary === "A good site." && v1.links === 3 && v1.sections.length === 2, `good llms.txt is valid (${JSON.stringify(v1.findings)})`);
+ok(!validateLlms("<!doctype html><html></html>").valid, "HTML page is an error");
+ok(validateLlms("Intro\n# Title\n\n## A\n\n- [x](https://a.example.com/x): y").findings.some((f) => f.level === "error" && f.line === 1), "H1 not first is an error on line 1");
+const rel = validateLlms("# T\n\n> s\n\n## A\n\n- [x](/x): y\n- [x](/x): y\n");
+ok(rel.findings.some((f) => f.level === "error" && f.line === 7 && /Relative/.test(f.message)), "relative link error on its line");
+ok(rel.findings.some((f) => f.level === "warning" && f.line === 8 && /Duplicate/.test(f.message)), "duplicate link warning");
+ok(validateLlms("# T\n\n## A\n\n- [x](https://a.example.com/): y").findings.some((f) => f.level === "warning" && /summary/.test(f.message)), "missing summary warning");
+ok(!validateLlms(goodLlms, { status: 200, contentType: "text/html" }).valid, "served as text/html is an error");
+ok(!validateLlms("# T\n\n> s\n").valid, "no links is an error");
+ok(validateLlms("- [A](https://a.example.com/) ([Markdown](https://a.example.com/a.md)): note", undefined).findings.every((f) => !/Broken/.test(f.message)), "extra links after the first are fine");
+const gen = generateLlms({ name: "Good", summary: "A good site.", base: "https://good.example.com", urls: ["https://good.example.com/", "https://good.example.com/about", "https://good.example.com/privacy-policy", "https://good.example.com/docs/getting-started", "https://good.example.com/docs/api", { loc: "https://good.example.com/blog/hello", title: "Hello world" }] });
+ok(validateLlms(gen).valid, `generated llms.txt validates:\n${gen}`);
+ok(gen.includes("## Pages") && gen.includes("## Docs") && gen.includes("[Getting started](https://good.example.com/docs/getting-started)") && gen.includes("[Hello world]"), "generator groups by first path segment");
+ok(gen.indexOf("## Optional") > gen.indexOf("## Docs") && /## Optional\n\n- \[Privacy policy\]/.test(gen), "legal pages go to a last Optional section");
+
+// ---------- robots.txt tester data ----------
+for (const name of ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-User", "PerplexityBot", "Google-Extended", "CCBot", "Applebot-Extended", "Bytespider"]) ok(AI_BOTS.some((b) => b.name === name), `${name} is in the crawler list`);
+const rb = parseRobots("User-agent: *\nDisallow: /private\nCrawl-delay: 5\nFoo: bar\nnot a line\nContent-Signal: search=yes, ai-train=maybe\n");
+ok(robotsVerdict(rb, "GPTBot", "/private/x").line === 2, "verdict reports the deciding line");
+ok(rb.issues.some((i) => i.line === 4 && i.level === "warning") && rb.issues.some((i) => i.line === 5 && i.level === "error") && rb.issues.some((i) => i.line === 3 && i.level === "info") && rb.issues.some((i) => i.line === 6), "robots.txt issues have line numbers");
+ok(rb.groups[0].signals[0].line === 6, "Content-Signal keeps its line");
+
+const pub = async () => ["93.184.216.34"];
+const rf404 = await fetchRobots("https://none.example.com/blog/post?a=1", { resolve: pub, fetch: async () => new Response("nope", { status: 404 }) });
+ok(!rf404.error && rf404.status === 404 && /allow everything/.test(rf404.note) && rf404.path === "/blog/post?a=1", "404 robots.txt explained, path kept");
+const rfPriv = await fetchRobots("https://x.example.com", { resolve: async () => ["127.0.0.1"], fetch: async () => { throw new Error("must not fetch"); } });
+ok(rfPriv.error && /private/.test(rfPriv.error), "robots fetch refuses private hosts");
+const rfLive = await fetchRobots(site, { resolve: pub, fetch: fakeFetch });
+ok(!rfLive.error && rfLive.body.includes("Content-Signal"), "robots fetch returns the body");
+
+// ---------- llms.txt fetch and sitemap read ----------
+const lf = await fetchLlms(site, { resolve: pub, fetch: fakeFetch });
+ok(!lf.error && lf.status === 200 && lf.body.startsWith("# Good") && lf.full.status === 404, "llms.txt fetch with llms-full status");
+const sm = await readSitemap("https://good.example.com", { resolve: pub, fetch: async (url) => {
+  const p = new URL(url).pathname;
+  if (p === "/robots.txt") return new Response("User-agent: *\nSitemap: https://good.example.com/sitemap_index.xml\n", { headers: { "content-type": "text/plain" } });
+  if (p === "/sitemap_index.xml") return new Response("<sitemapindex><sitemap><loc>https://good.example.com/s1.xml</loc></sitemap><sitemap><loc>https://good.example.com/image-sitemap.xml</loc></sitemap><sitemap><loc>https://good.example.com/s2.xml</loc></sitemap></sitemapindex>", { headers: { "content-type": "application/xml" } });
+  if (p === "/s1.xml") return new Response("<urlset><url><loc>https://good.example.com/a</loc></url><url><loc>https://other.example.org/x</loc></url></urlset>");
+  if (p === "/s2.xml") return new Response("<urlset><url><loc><![CDATA[https://www.good.example.com/docs/b]]></loc></url></urlset>");
+  if (p === "/image-sitemap.xml") throw new Error("image sitemaps are skipped");
+  return fakeFetch(url, { headers: { Accept: "text/html" } });
+} });
+ok(!sm.error && sm.urls.length === 2 && sm.urls.includes("https://good.example.com/a") && sm.urls.includes("https://www.good.example.com/docs/b") && sm.name === "Good site", `sitemap index followed, other hosts dropped (${JSON.stringify(sm)})`);
+
+// ---------- Markdown for agents probe ----------
+ok(guessVariant(new URL("https://a.example.com/")) === "https://a.example.com/index.md" && guessVariant(new URL("https://a.example.com/docs/x/")) === "https://a.example.com/docs/x.md", "guessed .md URLs");
+const mp = await probeMarkdown(site, { resolve: pub, fetch: fakeFetch });
+ok(!mp.error && mp.negotiated.markdown && mp.variant.markdown && !mp.variant.guessed && mp.saving > 0, "probe finds both Markdown versions");
+ok(!mp.error && mp.notes.some((n) => n.status === "pass" && /same URL/.test(n.text)) && mp.notes.some((n) => n.status === "warn" && /HTML response has no Vary/.test(n.text)), `probe notes (${JSON.stringify(mp.notes)})`);
+const plain = await probeMarkdown("https://plain.example.com/page", { resolve: pub, fetch: async (url) => new URL(url).pathname === "/page" ? new Response("<!doctype html><html><head><link rel=canonical href=https://plain.example.com/page></head><body>hi</body></html>", { headers: { "content-type": "text/html" } }) : new Response("nope", { status: 404, headers: { "content-type": "text/html" } }) });
+ok(!plain.error && plain.notes.filter((n) => n.status === "fail").length === 2 && plain.saving === null && plain.variant.url === "https://plain.example.com/page.md", "HTML-only page fails negotiation and the alternate link");
+const plainMd = await probeMarkdown("https://typed.example.com/", { resolve: pub, fetch: async (url, init) => /markdown/.test(init.headers.Accept) && new URL(url).pathname === "/" ? new Response("# Hi\n", { headers: { "content-type": "text/plain" } }) : new URL(url).pathname === "/" ? new Response("<!doctype html><html><body>hi</body></html>", { headers: { "content-type": "text/html" } }) : new Response("no", { status: 404 }) });
+ok(!plainMd.error && plainMd.notes[0].status === "warn" && /labelled text\/plain/.test(plainMd.notes[0].text), "Markdown served as text/plain is partial, not fail");
+const mdDown = await probeMarkdown("https://down.example.com", { resolve: pub, fetch: async () => new Response("", { status: 503 }) });
+ok(mdDown.error && /503/.test(mdDown.error), "probe reports a page that is down");
+
 if (failures) { console.error(`${failures} agent readiness check(s) failed`); process.exit(1); }
-console.log("agent readiness scanner: all checks passed");
+console.log("agent tools (readiness scanner, llms.txt, robots.txt, Markdown probe): all checks passed");

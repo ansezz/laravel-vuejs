@@ -9,6 +9,7 @@
 
 import { REDIRECTS } from './redirects'
 import { normalizeTarget, scan } from './agent-readiness'
+import { fetchLlms, fetchRobots, probeMarkdown, readSitemap } from './agent-tools'
 
 export interface Env {
   ASSETS: Fetcher
@@ -73,7 +74,8 @@ const worker = {
       return withHeaders(res, url, false)
     }
     if (url.pathname === '/.well-known/api-catalog') return withHeaders(apiCatalog(request), url)
-    if (url.pathname === '/api/tools/agent-readiness') return withHeaders(await handleReadiness(request, env, ctx, url), url, false)
+    const tool = url.pathname.match(/^\/api\/tools\/(agent-readiness|llms-txt|ai-robots|markdown-for-agents)\/?$/)
+    if (tool) return withHeaders(await handleAgentTool(tool[1] as AgentTool, request, env, ctx, url), url, false)
     await Promise.all([loadHashes(env, url), loadLinks(env, url)])
     // Markdown for agents: `Accept: text/markdown` gets the page's Markdown twin (same URL, no redirect). Pages without a
     // twin, and every browser (they never ask for text/markdown), get the HTML as usual.
@@ -143,12 +145,14 @@ async function handleForm(name: string, request: Request, env: Env, ctx: Executi
   return reply(request, 200, { ok: true, message: thanks(form) }, {}, form, cheatsheetNext(form, input))
 }
 
-// AI agent readiness checker (/tools/agent-readiness): scans one public URL and returns the report as JSON.
-// Results are cached for 10 minutes per URL (cache hits don't count against the limit); fresh scans are rate-limited
-// per IP with the SCAN_LIMIT binding, or an in-memory counter when the binding is missing (local dev).
+// Agent tools: /api/tools/agent-readiness (full scan), llms-txt (live file, or ?mode=sitemap), ai-robots (live
+// robots.txt) and markdown-for-agents (HTML vs Markdown probe). Each takes one public URL and returns JSON.
+// Results are cached for 10 minutes per tool and URL (cache hits don't count against the limit); fresh requests are
+// rate-limited per IP with the SCAN_LIMIT binding, or an in-memory counter when the binding is missing (local dev).
+type AgentTool = 'agent-readiness' | 'llms-txt' | 'ai-robots' | 'markdown-for-agents'
 const SCAN_TTL = 600
 const scanHits = new Map<string, number[]>()
-function memoryLimit(ip: string, max = 5, windowMs = 60_000) {
+function memoryLimit(ip: string, max = 10, windowMs = 60_000) {
   const now = Date.now()
   const hits = (scanHits.get(ip) ?? []).filter(t => now - t < windowMs)
   if (scanHits.size > 5000) scanHits.clear()
@@ -160,7 +164,17 @@ function memoryLimit(ip: string, max = 5, windowMs = 60_000) {
 const scanJson = (status: number, body: unknown, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers } })
 
-async function handleReadiness(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
+async function runTool(tool: AgentTool, target: string, mode: string, deps: { fetch: typeof fetch }): Promise<{ body: unknown; error?: string; cacheable: boolean }> {
+  if (tool === 'agent-readiness') {
+    const r = await scan(target, deps)
+    return 'error' in r ? { body: r, error: r.error, cacheable: false } : { body: r, cacheable: r.checks.find(c => c.id === 'page')?.status === 'pass' }
+  }
+  const r = tool === 'llms-txt' ? await (mode === 'sitemap' ? readSitemap(target, deps) : fetchLlms(target, deps))
+    : tool === 'ai-robots' ? await fetchRobots(target, deps) : await probeMarkdown(target, deps)
+  return 'error' in r ? { body: r, error: r.error, cacheable: false } : { body: r, cacheable: true }
+}
+
+async function handleAgentTool(tool: AgentTool, request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, POST' } })
   if (request.method !== 'GET' && request.method !== 'POST') return scanJson(405, { error: 'Use GET or POST.' }, { Allow: 'GET, POST' })
   let raw = url.searchParams.get('url') ?? ''
@@ -173,8 +187,9 @@ async function handleReadiness(request: Request, env: Env, ctx: ExecutionContext
   }
   const target = normalizeTarget(raw)
   if (typeof target === 'string') return scanJson(400, { error: target })
+  const mode = tool === 'llms-txt' && url.searchParams.get('mode') === 'sitemap' ? 'sitemap' : ''
 
-  const cacheKey = new Request(`https://${APEX}/api/tools/agent-readiness?v=2&url=${encodeURIComponent(target.toString())}`)
+  const cacheKey = new Request(`https://${APEX}/api/tools/${tool}?v=2${mode ? `&mode=${mode}` : ''}&url=${encodeURIComponent(target.toString())}`)
   const cache = (caches as unknown as { default: Cache }).default
   const hit = await cache.match(cacheKey).catch(() => undefined)
   if (hit) {
@@ -186,19 +201,17 @@ async function handleReadiness(request: Request, env: Env, ctx: ExecutionContext
 
   const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
   const allowed = env.SCAN_LIMIT ? (await env.SCAN_LIMIT.limit({ key: ip }).catch(() => ({ success: memoryLimit(ip) }))).success : memoryLimit(ip)
-  if (!allowed) return scanJson(429, { error: 'Too many scans from your network. Please wait a minute and try again.' }, { 'Retry-After': '60' })
+  if (!allowed) return scanJson(429, { error: 'Too many requests from your network. Please wait a minute and try again.' }, { 'Retry-After': '60' })
 
-  let report: Awaited<ReturnType<typeof scan>>
-  try { report = await scan(target.toString(), { fetch: selfAware(env, ctx) }) } catch (e) {
-    console.error('agent readiness scan failed', target.toString(), e)
-    return scanJson(502, { error: 'The scan failed unexpectedly. Please try again.' })
+  let out: Awaited<ReturnType<typeof runTool>>
+  try { out = await runTool(tool, target.toString(), mode, { fetch: selfAware(env, ctx) }) } catch (e) {
+    console.error(`agent tool ${tool} failed`, target.toString(), e)
+    return scanJson(502, { error: 'The request failed unexpectedly. Please try again.' })
   }
-  if ('error' in report) return scanJson(422, report)
-  // Browsers always re-ask (no-store); the Worker keeps a 10-minute copy, but only of scans that could read the page.
-  if (report.checks.find(c => c.id === 'page')?.status === 'pass') {
-    ctx.waitUntil(cache.put(cacheKey, scanJson(200, report, { 'Cache-Control': `public, max-age=${SCAN_TTL}` })).catch(() => {}))
-  }
-  return scanJson(200, report, { 'X-Scan-Cache': 'MISS' })
+  if (out.error) return scanJson(422, out.body)
+  // Browsers always re-ask (no-store); the Worker keeps a 10-minute copy of results that could read the site.
+  if (out.cacheable) ctx.waitUntil(cache.put(cacheKey, scanJson(200, out.body, { 'Cache-Control': `public, max-age=${SCAN_TTL}` })).catch(() => {}))
+  return scanJson(200, out.body, { 'X-Scan-Cache': 'MISS' })
 }
 
 // A Worker can't fetch its own custom domain over the network (Cloudflare answers 522), so scans of this site are

@@ -41,9 +41,10 @@
       "allowed_destination_addresses": ["contact@laravel-vuejs.space"]
     }
   ],
-  // Per-IP limit for fresh scans of the AI agent readiness checker (/api/tools/agent-readiness); cached results don't count.
+  // Per-IP limit for fresh requests to the agent tools (/api/tools/agent-readiness, llms-txt, ai-robots,
+  // markdown-for-agents); cached results don't count.
   "ratelimits": [
-    { "name": "SCAN_LIMIT", "namespace_id": "4242", "simple": { "limit": 5, "period": 60 } }
+    { "name": "SCAN_LIMIT", "namespace_id": "4242", "simple": { "limit": 10, "period": 60 } }
   ],
   // Optional secret (set with `npx wrangler secret put IP_SALT`): salt used when hashing IPs for rate limiting.
   "observability": { "enabled": true },

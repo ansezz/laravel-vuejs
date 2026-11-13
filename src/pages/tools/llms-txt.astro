@@ -1,0 +1,67 @@
+---
+import ToolPage from '../../components/ToolPage.astro'
+import AgentToolsNav from '../../components/AgentToolsNav.astro'
+import { LLMS_FAQ, toolJsonld } from '../../data/agent-tools'
+const title = 'llms.txt generator and validator'
+const lead = 'Paste an llms.txt or fetch a live one and check it line by line: H1 first, summary, sections, absolute links, not an HTML page. Or build a starter file from a sitemap.'
+const description = 'Free llms.txt validator and generator: check a file line by line (H1, summary, sections, absolute links) or build a starter llms.txt from any sitemap.'
+const jsonld = toolJsonld(title, '/tools/llms-txt', description, LLMS_FAQ, ['Line-by-line llms.txt validation', 'Live file fetch with status and Content-Type checks', 'Starter llms.txt from a sitemap', 'Copy and download'])
+---
+<ToolPage title={title} lead={lead} description={description} jsonld={jsonld}>
+  <div data-llms>
+    <form class="ar-form" action="/api/tools/llms-txt" method="get">
+      <div class="ar-row">
+        <div class="field">
+          <label for="llms-site">Website</label>
+          <input id="llms-site" class="input" name="site" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com" maxlength="2048">
+        </div>
+      </div>
+      <div class="pkg-actions">
+        <button class="btn btn-primary" type="button" data-fetch>Fetch and validate live llms.txt</button>
+        <button class="btn" type="button" data-generate>Generate from sitemap</button>
+        <button class="btn" type="button" data-example>Try laravel-vuejs.space</button>
+      </div>
+      <div class="field">
+        <label for="llms-text">llms.txt (paste, or edit the fetched or generated file)</label>
+        <textarea id="llms-text" class="input ar-text" name="llms" spellcheck="false" placeholder={'# Project name\n\n> One-line summary of what the site is for.\n\n## Docs\n\n- [Getting started](https://example.com/start): install and first steps'}></textarea>
+      </div>
+      <div class="pkg-actions">
+        <button class="btn btn-primary" type="button" data-validate>Validate pasted text</button>
+      </div>
+      <p class="pkg-set-note">Pasted text is checked in your browser. Fetching reads only public URLs (at most 8 requests) and is cached for 10 minutes.</p>
+    </form>
+    <p class="ar-status" data-status role="status" aria-live="polite"></p>
+    <div class="ar-result" data-result hidden></div>
+  </div>
+
+  <h2>What the validator checks</h2>
+  <div class="tool-table-wrap">
+    <table class="tool-table">
+      <thead><tr><th scope="col">Check</th><th scope="col">Level</th><th scope="col">Why</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">The file is an HTML page</th><td>Error</td><td>Usually a catch-all route answering /llms.txt. The file must be plain Markdown.</td></tr>
+        <tr><th scope="row">First line is not "# Title"</th><td>Error</td><td>The H1 is the one required element: whose index this is.</td></tr>
+        <tr><th scope="row">Relative or malformed link</th><td>Error</td><td>Nothing can resolve a relative path from a plain text file.</td></tr>
+        <tr><th scope="row">No links at all</th><td>Error</td><td>The links are the content.</td></tr>
+        <tr><th scope="row">Wrong status or Content-Type (live fetch)</th><td>Error / warning</td><td>Serve it with HTTP 200 as text/plain or text/markdown, UTF-8.</td></tr>
+        <tr><th scope="row">No "> summary" under the H1</th><td>Warning</td><td>One line that orients a reader before any link.</td></tr>
+        <tr><th scope="row">No ## sections, empty sections, links outside a section</th><td>Warning</td><td>Sections such as Docs or Guides make the index skimmable.</td></tr>
+        <tr><th scope="row">More than one H1, duplicate links</th><td>Warning</td><td>One title, each page once.</td></tr>
+        <tr><th scope="row">Larger than 50 KB</th><td>Warning</td><td>Keep llms.txt an index; full text goes in llms-full.txt.</td></tr>
+        <tr><th scope="row">Link without a note, http:// link, Optional not last</th><td>Info</td><td>Small improvements a reader notices.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Questions</h2>
+  <div class="ar-faq">
+    {LLMS_FAQ.map(f => <details class="ar-check"><summary><span class="ar-check-title">{f.q}</span></summary><div class="ar-check-body"><p>{f.a}</p></div></details>)}
+  </div>
+  <AgentToolsNav current="/tools/llms-txt" />
+  <p class="pkg-actions"><a class="btn" href="/tools/llms-txt.md">Markdown for assistants</a><a class="btn" href="/llms.txt">Our own llms.txt</a></p>
+</ToolPage>
+
+<script>
+  import { initLlmsTool } from '../../lib/agent-tools-ui'
+  initLlmsTool()
+</script>

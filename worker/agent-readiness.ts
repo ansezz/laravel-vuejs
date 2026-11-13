@@ -14,11 +14,14 @@ import {
   type Report,
   type Status,
 } from '../src/data/agent-readiness.ts'
+import { parseRobots, robotsVerdict, validSignal, type Robots } from '../src/data/robots.ts'
+
+export { parseRobots, robotsVerdict, validSignal }
 
 export const MAX_FETCHES = 15
 export const TIMEOUT_MS = 8000
-const MAX_HTML = 1_500_000
-const MAX_TEXT = 256_000
+export const MAX_HTML = 1_500_000
+export const MAX_TEXT = 256_000
 const MAX_REDIRECTS = 3
 const CONCURRENCY = 4
 export const USER_AGENT = 'LaravelVueJsAgentReadiness/1.0 (+https://laravel-vuejs.space/tools/agent-readiness)'
@@ -104,6 +107,20 @@ async function dohResolve(host: string): Promise<string[]> {
 
 // ---------- fetching ----------
 
+// One context per scan or tool request: it holds the request budget, the DNS verdicts and the concurrency queue.
+export function makeCtx(deps: Deps = {}, budget = MAX_FETCHES): Ctx {
+  return {
+    fetch: deps.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a)),
+    resolve: deps.resolve ?? dohResolve,
+    budget: deps.maxFetches ?? budget,
+    used: 0,
+    timeoutMs: deps.timeoutMs ?? TIMEOUT_MS,
+    dns: new Map(),
+    active: 0,
+    queue: [],
+  }
+}
+
 export type Got = {
   status: number // 0 when the request did not complete
   headers: Headers
@@ -114,7 +131,7 @@ export type Got = {
   error?: string
 }
 
-type Ctx = {
+export type Ctx = {
   fetch: typeof fetch
   resolve: (host: string) => Promise<string[]>
   budget: number
@@ -128,7 +145,7 @@ type Ctx = {
 const noHeaders = () => new Headers()
 const failed = (url: string, error: string, hops: string[] = []): Got => ({ status: 0, headers: noHeaders(), body: '', url, truncated: false, hops, error })
 
-function checkHost(ctx: Ctx, host: string) {
+export function checkHost(ctx: Ctx, host: string) {
   const h = host.toLowerCase().replace(/^\[|\]$/g, '')
   let p = ctx.dns.get(h)
   if (!p) {
@@ -173,7 +190,7 @@ async function readCapped(res: Response, max: number) {
   return { body: new TextDecoder().decode(all), truncated }
 }
 
-async function get(ctx: Ctx, url: string, opt: { accept?: string; origin?: string; max?: number; follow?: number } = {}): Promise<Got> {
+export async function get(ctx: Ctx, url: string, opt: { accept?: string; origin?: string; max?: number; follow?: number } = {}): Promise<Got> {
   const hops: string[] = []
   let current = url
   for (let hop = 0; ; hop++) {
@@ -229,8 +246,8 @@ export const clip = (s: string, n = 300) => {
   const t = s.replace(/\s+/g, ' ').trim()
   return t.length > n ? `${t.slice(0, n - 1)}…` : t
 }
-const ctype = (g: Got) => (g.headers.get('content-type') ?? '').toLowerCase()
-const looksHtml = (body: string) => /^\s*(<!doctype html|<html|<head|<body)/i.test(body)
+export const ctype = (g: Got) => (g.headers.get('content-type') ?? '').toLowerCase()
+export const looksHtml = (body: string) => /^\s*(<!doctype html|<html|<head|<body)/i.test(body)
 const statusLine = (g: Got) => (g.status ? `HTTP ${g.status}${ctype(g) ? `, ${ctype(g).split(';')[0]}` : ''}` : g.error ?? 'no response') + (g.hops.length ? ` (after ${g.hops.join(' → ')})` : '')
 
 export function attrs(tag: string): Record<string, string> {
@@ -241,78 +258,19 @@ export function attrs(tag: string): Record<string, string> {
   }
   return out
 }
-const tags = (html: string, name: string) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'gi'))].map(m => m[0])
+export const tags = (html: string, name: string) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'gi'))].map(m => m[0])
 const decode = (s: string) => s.replace(/&(#x?[0-9a-f]+|amp|lt|gt|quot|apos|nbsp|#39);/gi, (_, e: string) => {
   const k = e.toLowerCase()
   if (k[0] === '#') { const n = k[1] === 'x' ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10); return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : '' }
   return ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' } as Record<string, string>)[k] ?? ''
 })
-const textOf = (html: string) => decode(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim()
+export const textOf = (html: string) => decode(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim()
 
 export function visibleText(html: string): string {
   return textOf(html
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<head\b[\s\S]*?<\/head>/gi, ' ')
     .replace(/<(script|style|noscript|template|svg|iframe|object|canvas)\b[\s\S]*?<\/\1>/gi, ' '))
-}
-
-export type RobotsGroup = { agents: string[]; rules: { allow: boolean; path: string }[]; signals: string[]; line: number }
-export type Robots = { groups: RobotsGroup[]; sitemaps: string[]; invalid: number }
-
-// RFC 9309 parser: groups start at User-agent lines; Allow/Disallow (and Content-Signal) lines belong to the open group.
-export function parseRobots(text: string): Robots {
-  const groups: RobotsGroup[] = []
-  const sitemaps: string[] = []
-  let current: RobotsGroup | null = null
-  let lastWasAgent = false
-  let invalid = 0
-  text.split(/\r\n|\r|\n/).forEach((raw, i) => {
-    const line = raw.replace(/#.*$/, '').trim()
-    if (!line) return
-    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/)
-    if (!m) { invalid++; return }
-    const key = m[1].toLowerCase(), value = m[2].trim()
-    if (key === 'user-agent') {
-      if (!current || !lastWasAgent) { current = { agents: [], rules: [], signals: [], line: i + 1 }; groups.push(current) }
-      current.agents.push(value.toLowerCase())
-      lastWasAgent = true
-      return
-    }
-    lastWasAgent = false
-    if (key === 'sitemap') { if (value) sitemaps.push(value); return }
-    if (!current) return
-    if (key === 'allow' || key === 'disallow') { if (value || key === 'allow') current.rules.push({ allow: key === 'allow', path: value }); return }
-    if (key === 'content-signal') current.signals.push(value)
-  })
-  return { groups, sitemaps, invalid }
-}
-
-function ruleMatches(rule: string, path: string) {
-  if (!rule) return false
-  const anchored = rule.endsWith('$')
-  const body = anchored ? rule.slice(0, -1) : rule
-  const re = new RegExp('^' + body.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + (anchored ? '$' : ''))
-  return re.test(path)
-}
-
-// Which rule decides whether `agent` may fetch `path`: the agent's own groups (merged), else the * groups.
-// Longest matching rule wins; Allow wins a tie. No matching rule means allowed.
-export function robotsVerdict(robots: Robots, agent: string, path: string): { allowed: boolean; rule?: string; group: string } {
-  const token = agent.toLowerCase()
-  let groups = robots.groups.filter(g => g.agents.includes(token))
-  let group = agent
-  if (!groups.length) { groups = robots.groups.filter(g => g.agents.includes('*')); group = '*' }
-  let best: { allow: boolean; path: string } | undefined
-  for (const r of groups.flatMap(g => g.rules)) {
-    if (!ruleMatches(r.path, path)) continue
-    if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow && !best.allow)) best = r
-  }
-  return { allowed: best ? best.allow : true, rule: best ? `${best.allow ? 'Allow' : 'Disallow'}: ${best.path}` : undefined, group }
-}
-
-export function validSignal(value: string): boolean {
-  const pairs = value.split(',').map(p => p.trim()).filter(Boolean)
-  return pairs.length > 0 && pairs.every(p => /^(search|ai-input|ai-train)\s*=\s*(yes|no)$/i.test(p))
 }
 
 export function parseLlms(text: string) {
@@ -358,16 +316,7 @@ const unreachable = (g: Got) => g.status === 0 || g.status >= 500 || g.status ==
 export async function scan(raw: string, deps: Deps = {}): Promise<Report | { error: string }> {
   const target = normalizeTarget(raw)
   if (typeof target === 'string') return { error: target }
-  const ctx: Ctx = {
-    fetch: deps.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a)),
-    resolve: deps.resolve ?? dohResolve,
-    budget: deps.maxFetches ?? MAX_FETCHES,
-    used: 0,
-    timeoutMs: deps.timeoutMs ?? TIMEOUT_MS,
-    dns: new Map(),
-    active: 0,
-    queue: [],
-  }
+  const ctx = makeCtx(deps)
   const refused = await checkHost(ctx, target.hostname)
   if (refused) return { error: `${target.hostname} cannot be scanned because ${refused}.` }
 
@@ -500,7 +449,7 @@ export async function scan(raw: string, deps: Deps = {}): Promise<Report | { err
   } else if (unreachable(llms)) add(result('llms', 'unverified', `llms.txt could not be read (${llms.error ?? `HTTP ${llms.status}`}).`, statusLine(llms)))
   else add(result('llms', 'fail', llms.status === 200 ? '/llms.txt answers with an HTML page (often a catch-all route), not plain text.' : `/llms.txt answers ${llms.status}.`, statusLine(llms)))
 
-  const signals = [...new Set(parsedRobots.groups.flatMap(g => g.signals))]
+  const signals = [...new Set(parsedRobots.groups.flatMap(g => g.signals.map(x => x.value)))]
   if (robotsText) add(result('content-signal', signals.some(validSignal) ? 'pass' : signals.length ? 'warn' : 'fail', signals.length ? `Content-Signal: ${signals.join(' | ')}${signals.some(validSignal) ? '' : ' (not in key=yes|no form)'}` : 'No Content-Signal line in robots.txt.', signals.length ? signals.map(s => `Content-Signal: ${s}`).join('\n') : 'robots.txt has no Content-Signal directive.'))
   else add(result('content-signal', robots.status === 404 || robots.status === 410 ? 'fail' : 'unverified', robots.status === 404 || robots.status === 410 ? 'There is no robots.txt to hold a Content-Signal line.' : 'robots.txt could not be read.', statusLine(robots)))
 
@@ -620,7 +569,7 @@ const order = (rows: CheckResult[]) => [...rows].sort((a, b) => CHECK_ORDER.inde
 export function robotsSnippet(robots: Robots, text: string, sitemap: string): string {
   const star = robots.groups.filter(g => g.agents.includes('*'))
   const rules = star.flatMap(g => g.rules).map(r => `${r.allow ? 'Allow' : 'Disallow'}: ${r.path}`)
-  const signal = star.flatMap(g => g.signals).find(validSignal) ?? 'search=yes, ai-input=yes, ai-train=no'
+  const signal = star.flatMap(g => g.signals.map(x => x.value)).find(validSignal) ?? 'search=yes, ai-input=yes, ai-train=no'
   return [
     'User-agent: *',
     `Content-Signal: ${signal}`,

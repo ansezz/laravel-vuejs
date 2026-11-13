@@ -4,7 +4,7 @@ import { CATEGORIES, fixPrompt, type CheckResult, type Report, type Status } fro
 
 const LABEL: Record<Status, string> = { pass: "Pass", warn: "Partial", fail: "Fail", unverified: "Could not verify", info: "Info" };
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, string> = {}, ...kids: (Node | string | null | undefined)[]) {
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, string> = {}, ...kids: (Node | string | null | undefined)[]) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
     if (k === "class") node.className = v;
@@ -26,13 +26,13 @@ async function copy(text: string, btn: HTMLButtonElement) {
   }
 }
 
-function copyButton(label: string, text: () => string, cls = "btn btn-sm") {
+export function copyButton(label: string, text: () => string, cls = "btn btn-sm") {
   const b = el("button", { type: "button", class: cls, text: label });
   b.addEventListener("click", () => copy(text(), b));
   return b;
 }
 
-function codeBlock(lang: string, body: string, label: string) {
+export function codeBlock(lang: string, body: string, label: string) {
   return el(
     "div",
     { class: "code ar-code" },
