@@ -8,6 +8,7 @@
 //   send_email binding (EMAIL), recording the send status on the row.
 
 import { REDIRECTS } from './redirects'
+import { normalizeTarget, scan } from './agent-readiness'
 
 export interface Env {
   ASSETS: Fetcher
@@ -17,6 +18,7 @@ export interface Env {
   MAIL_FROM: string
   MAIL_FROM_NAME: string
   IP_SALT?: string // optional secret used when hashing IPs
+  SCAN_LIMIT?: RateLimit // rate limit binding for the agent readiness checker (per IP)
 }
 
 type Form = 'contact' | 'hire' | 'newsletter' | 'job'
@@ -71,6 +73,7 @@ export default {
       return withHeaders(res, url, false)
     }
     if (url.pathname === '/.well-known/api-catalog') return withHeaders(apiCatalog(request), url)
+    if (url.pathname === '/api/tools/agent-readiness') return withHeaders(await handleReadiness(request, env, ctx, url), url, false)
     await Promise.all([loadHashes(env, url), loadLinks(env, url)])
     // Markdown for agents: `Accept: text/markdown` gets the page's Markdown twin (same URL, no redirect). Pages without a
     // twin, and every browser (they never ask for text/markdown), get the HTML as usual.
@@ -137,6 +140,61 @@ async function handleForm(name: string, request: Request, env: Env, ctx: Executi
   }
   if (row) ctx.waitUntil(notify(env, form, row.id, data))
   return reply(request, 200, { ok: true, message: thanks(form) }, {}, form, cheatsheetNext(form, input))
+}
+
+// AI agent readiness checker (/tools/agent-readiness): scans one public URL and returns the report as JSON.
+// Results are cached for 10 minutes per URL (cache hits don't count against the limit); fresh scans are rate-limited
+// per IP with the SCAN_LIMIT binding, or an in-memory counter when the binding is missing (local dev).
+const SCAN_TTL = 600
+const scanHits = new Map<string, number[]>()
+function memoryLimit(ip: string, max = 5, windowMs = 60_000) {
+  const now = Date.now()
+  const hits = (scanHits.get(ip) ?? []).filter(t => now - t < windowMs)
+  if (scanHits.size > 5000) scanHits.clear()
+  if (hits.length >= max) return false
+  hits.push(now)
+  scanHits.set(ip, hits)
+  return true
+}
+const scanJson = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers } })
+
+async function handleReadiness(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, POST' } })
+  if (request.method !== 'GET' && request.method !== 'POST') return scanJson(405, { error: 'Use GET or POST.' }, { Allow: 'GET, POST' })
+  let raw = url.searchParams.get('url') ?? ''
+  if (request.method === 'POST' && !raw) {
+    if (Number(request.headers.get('Content-Length') ?? 0) > 4096) return scanJson(413, { error: 'Request too large.' })
+    try {
+      const type = request.headers.get('Content-Type') ?? ''
+      raw = type.includes('json') ? String((await request.json<{ url?: string }>()).url ?? '') : String((await request.formData()).get('url') ?? '')
+    } catch { return scanJson(400, { error: 'Could not read the request.' }) }
+  }
+  const target = normalizeTarget(raw)
+  if (typeof target === 'string') return scanJson(400, { error: target })
+
+  const cacheKey = new Request(`https://${APEX}/api/tools/agent-readiness?url=${encodeURIComponent(target.toString())}`)
+  const cache = (caches as unknown as { default: Cache }).default
+  const hit = await cache.match(cacheKey).catch(() => undefined)
+  if (hit) {
+    const out = new Response(hit.body, hit)
+    out.headers.set('X-Scan-Cache', 'HIT')
+    return out
+  }
+
+  const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+  const allowed = env.SCAN_LIMIT ? (await env.SCAN_LIMIT.limit({ key: ip }).catch(() => ({ success: memoryLimit(ip) }))).success : memoryLimit(ip)
+  if (!allowed) return scanJson(429, { error: 'Too many scans from your network. Please wait a minute and try again.' }, { 'Retry-After': '60' })
+
+  let report: Awaited<ReturnType<typeof scan>>
+  try { report = await scan(target.toString()) } catch (e) {
+    console.error('agent readiness scan failed', target.toString(), e)
+    return scanJson(502, { error: 'The scan failed unexpectedly. Please try again.' })
+  }
+  if ('error' in report) return scanJson(422, report)
+  const res = scanJson(200, report, { 'Cache-Control': `public, max-age=${SCAN_TTL}`, 'X-Scan-Cache': 'MISS' })
+  ctx.waitUntil(cache.put(cacheKey, res.clone()).catch(() => {}))
+  return res
 }
 
 // After a newsletter signup from a cheat sheet page, plain HTML posts (no JS) go to that sheet's download page.

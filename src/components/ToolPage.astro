@@ -1,11 +1,11 @@
 ---
 import Base from '../layouts/Base.astro'
 import PageHero from './PageHero.astro'
-interface Props { title: string; lead: string; description?: string }
+interface Props { title: string; lead: string; description?: string; jsonld?: Record<string, unknown>[] }
 import { clip } from '../lib/content'
-const { title, lead, description = clip(lead, 155) } = Astro.props
+const { title, lead, description = clip(lead, 155), jsonld } = Astro.props
 ---
-<Base title={title} description={description}>
+<Base title={title} description={description} jsonld={jsonld}>
   <PageHero
     kicker="Tools"
     title={title}
