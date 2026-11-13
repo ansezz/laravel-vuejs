@@ -74,6 +74,9 @@ ${CHEATSHEETS.map((s) => `- [${s.title}](${SITE_URL}/cheatsheets/${s.slug}): ${s
 - [Compatibility card](${SITE_URL}/tools/compatibility) ([Markdown](${SITE_URL}/tools/compatibility.md)): version pairs copied from published articles
 - [AGENTS.md](${SITE_URL}/tools/agents) ([default file](${SITE_URL}/tools/agents.md)): Laravel 13, Vue 3.5, Inertia, Pest, and Pinia
 - [AI agent readiness checker](${SITE_URL}/tools/agent-readiness) ([Markdown](${SITE_URL}/tools/agent-readiness.md)): paste a URL for a 0-100 score on robots.txt, llms.txt, Markdown for agents, JSON-LD, AI bot access and security headers, with evidence and a fix for each check. JSON API: ${SITE_URL}/api/tools/agent-readiness?url=<url>
+- [llms.txt generator and validator](${SITE_URL}/tools/llms-txt) ([Markdown](${SITE_URL}/tools/llms-txt.md)): check an llms.txt line by line, live or pasted, or build a starter file from a sitemap
+- [AI crawler robots.txt tester](${SITE_URL}/tools/ai-robots-tester) ([Markdown](${SITE_URL}/tools/ai-robots-tester.md)): test a path against AI search, user-triggered and training crawlers, with the deciding rule and Content-Signal
+- [Markdown for agents tester](${SITE_URL}/tools/markdown-for-agents) ([Markdown](${SITE_URL}/tools/markdown-for-agents.md)): HTML next to the Markdown agents get (Accept: text/markdown and .md copy), with token counts and headers
 - [Package chart](${SITE_URL}/packages): download snapshot used by the recipe
 
 ## About

@@ -172,5 +172,11 @@ ${byCat}
 ## FAQ
 
 ${FAQ.map((f) => `### ${f.q}\n\n${f.a}`).join("\n\n")}
+
+## Related agent tools
+
+- [llms.txt generator and validator](${SITE_URL}/tools/llms-txt)
+- [AI crawler robots.txt tester](${SITE_URL}/tools/ai-robots-tester)
+- [Markdown for agents tester](${SITE_URL}/tools/markdown-for-agents)
 `;
 }

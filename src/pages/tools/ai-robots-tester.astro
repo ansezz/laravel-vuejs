@@ -1,0 +1,70 @@
+---
+import ToolPage from '../../components/ToolPage.astro'
+import AgentToolsNav from '../../components/AgentToolsNav.astro'
+import { ROBOTS_FAQ, toolJsonld } from '../../data/agent-tools'
+import { AI_BOTS, BOT_KINDS } from '../../data/robots'
+const title = 'AI crawler robots.txt tester'
+const lead = `Paste a draft robots.txt or fetch a live one, enter a path, and see which of ${AI_BOTS.length} AI crawlers may fetch it, with the rule that decides, grouped into search, user-triggered and training.`
+const description = 'Free AI crawler robots.txt tester: see if GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot and more may fetch a path, the rule that decides, and Content-Signal.'
+const jsonld = toolJsonld(title, '/tools/ai-robots-tester', description, ROBOTS_FAQ, ['RFC 9309 matching with wildcards and $ anchors', 'Verdict and deciding rule per AI crawler', 'Search, user-triggered and training groups', 'Content-Signal and syntax checks'])
+---
+<ToolPage title={title} lead={lead} description={description} jsonld={jsonld}>
+  <div data-robots>
+    <form class="ar-form" action="/api/tools/ai-robots" method="get">
+      <div class="ar-row">
+        <div class="field">
+          <label for="rb-site">Website (optional: fetch its live robots.txt)</label>
+          <input id="rb-site" class="input" name="site" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com/blog/post" maxlength="2048">
+        </div>
+      </div>
+      <div class="pkg-actions">
+        <button class="btn btn-primary" type="button" data-fetch>Fetch live robots.txt</button>
+        <button class="btn" type="button" data-example>Try laravel-vuejs.space</button>
+      </div>
+      <div class="field">
+        <label for="rb-text">robots.txt (paste a draft, or edit the fetched file)</label>
+        <textarea id="rb-text" class="input ar-text" name="robots" spellcheck="false" placeholder={'User-agent: *\nContent-Signal: search=yes, ai-input=yes, ai-train=no\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /'}></textarea>
+      </div>
+      <div class="ar-row">
+        <div class="field">
+          <label for="rb-path">Path to test</label>
+          <input id="rb-path" class="input" name="path" type="text" spellcheck="false" value="/" maxlength="2048">
+        </div>
+        <div class="field">
+          <label for="rb-agent">Another user agent (optional)</label>
+          <input id="rb-agent" class="input" name="agent" type="text" spellcheck="false" placeholder="e.g. YandexBot" maxlength="100">
+        </div>
+      </div>
+      <div class="pkg-actions"><button class="btn btn-primary" type="button" data-test>Test</button></div>
+      <p class="pkg-set-note">Matching runs in your browser. Fetching a live file reads only that site's /robots.txt and is cached for 10 minutes.</p>
+    </form>
+    <p class="ar-status" data-status role="status" aria-live="polite"></p>
+    <div class="ar-result" data-result hidden></div>
+  </div>
+
+  <h2>Crawlers checked</h2>
+  {BOT_KINDS.map(k => (
+    <section class="ar-about">
+      <h3>{k.title}</h3>
+      <p class="pkg-set-note">{k.lead}</p>
+      <div class="tool-table-wrap">
+        <table class="tool-table">
+          <thead><tr><th scope="col">User agent</th><th scope="col">Operator</th><th scope="col">What it does</th></tr></thead>
+          <tbody>{AI_BOTS.filter(b => b.kind === k.kind).map(b => <tr><th scope="row">{b.name}</th><td>{b.owner}</td><td>{b.note}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </section>
+  ))}
+
+  <h2>Questions</h2>
+  <div class="ar-faq">
+    {ROBOTS_FAQ.map(f => <details class="ar-check"><summary><span class="ar-check-title">{f.q}</span></summary><div class="ar-check-body"><p>{f.a}</p></div></details>)}
+  </div>
+  <AgentToolsNav current="/tools/ai-robots-tester" />
+  <p class="pkg-actions"><a class="btn" href="/tools/ai-robots-tester.md">Markdown for assistants</a></p>
+</ToolPage>
+
+<script>
+  import { initRobotsTool } from '../../lib/agent-tools-ui'
+  initRobotsTool()
+</script>
