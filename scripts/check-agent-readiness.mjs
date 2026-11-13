@@ -122,11 +122,23 @@ const hop = await scan("https://hop.example.com", {
   fetch: async (url) => { if (new URL(url).hostname === "internal.example.com") redirected = true; return new Response(null, { status: 302, headers: { location: "https://internal.example.com/" } }); },
 });
 ok(!redirected, "redirect to a private host is never fetched");
-ok(!hop.error && hop.checks.find((c) => c.id === "page").status !== "pass", "page check does not pass after a refused redirect");
+ok(hop.error && /private/.test(hop.error), "a redirect to a private host ends the scan with an error");
 
 // Timeouts are could-not-verify.
 const slow = await scan("https://slow.example.com", { resolve: async () => ["93.184.216.34"], timeoutMs: 50, fetch: (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })))) });
-ok(!slow.error && slow.checks.every((c) => c.status !== "fail" && c.status !== "pass" || c.id === "https"), "timeouts never count as a fail");
+ok(slow.error && /timed out/.test(slow.error), "a page that times out is reported, not scored");
+
+// A page that doesn't answer (5xx, timeout) is not scored at all.
+const cdn = await scan("https://down.example.com", { resolve: async () => ["93.184.216.34"], fetch: async () => new Response("error code: 522", { status: 522, headers: { "content-type": "text/plain" } }) });
+ok(cdn.error && /522/.test(cdn.error), "522 on the page returns an error, not a score");
+
+// A 5xx on a secondary file is could-not-verify, and its headers are not graded.
+const partial = await scan(site, { resolve: async () => ["93.184.216.34"], fetch: async (url, init) => new URL(url).pathname === "/" && !/markdown/.test(init.headers.Accept) ? fakeFetch(url, init) : new Response("bad gateway", { status: 502 }) });
+if (!partial.error) {
+  const by = Object.fromEntries(partial.checks.map((c) => [c.id, c.status]));
+  for (const id of ["robots", "sitemap", "llms", "content-signal", "ai-bots", "markdown-negotiation", "api-catalog", "mcp-card"]) ok(by[id] === "unverified", `502: ${id} is could-not-verify (got ${by[id]})`);
+  ok(by.cors === "pass", "page headers still graded when only other files fail");
+} else ok(false, `partial scan errored: ${partial.error}`);
 
 if (failures) { console.error(`${failures} agent readiness check(s) failed`); process.exit(1); }
 console.log("agent readiness scanner: all checks passed");

@@ -382,12 +382,20 @@ export async function scan(raw: string, deps: Deps = {}): Promise<Report | { err
   const html = page.status === 200 && /html|xml/.test(ctype(page)) ? page.body : page.status === 200 && looksHtml(page.body) ? page.body : ''
   if (page.truncated) notes.push(`Only the first ${Math.round(MAX_HTML / 1000)} KB of the page were read.`)
 
+  // Nothing to grade when the page itself doesn't answer (timeout, DNS, 5xx other than a 503 bot wall): say so instead of
+  // returning a score built from error responses.
+  if (page.status === 0 || (page.status >= 500 && page.status !== 503)) {
+    return { error: `Could not read ${target}: ${page.error ?? `the server answered HTTP ${page.status}`}. Nothing was scored; try again in a minute.` }
+  }
+
   const wallStatus = [401, 403, 429, 503].includes(page.status)
   const challenge = (page.headers.get('cf-mitigated') ?? '').toLowerCase() === 'challenge' ||
     /<title>\s*(just a moment|attention required|access denied|verifying you are human|please wait|security check)/i.test(page.body) ||
     (/(challenge-platform|captcha|px-captcha|_incapsula_|datadome|perimeterx)/i.test(page.body) && visibleText(page.body).split(' ').length < 80)
   const walled = wallStatus || challenge
   const pageOk = !!html && !walled
+  // Headers of a timeout or a 5xx (often an error page from a CDN in front of the site) say nothing about the site itself.
+  const answered = page.status > 0 && (page.status < 500 || page.status === 503)
 
   // 2. Everything else on the same host, in priority order (the budget runs out at the bottom of the list first).
   const robotsP = get(ctx, `${origin}/robots.txt`, { accept: 'text/plain,*/*;q=0.5' })
@@ -418,7 +426,7 @@ export async function scan(raw: string, deps: Deps = {}): Promise<Report | { err
   // ----- Content without JavaScript -----
   if (page.status === 200 && html && !walled) add(result('page', 'pass', `Answers 200 with HTML${page.hops.length ? ` after ${page.hops.length} redirect(s)` : ''}.`, statusLine(page)))
   else if (walled) add(result('page', 'unverified', 'The page answered with a bot wall, so its content could not be read.', statusLine(page)))
-  else if (page.status === 0) add(result('page', 'unverified', `The page could not be fetched: ${page.error}.`, statusLine(page)))
+  else if (page.status === 0 || page.status >= 500) add(result('page', 'unverified', `The page could not be fetched: ${page.error ?? `HTTP ${page.status}`}.`, statusLine(page)))
   else add(result('page', 'fail', page.status === 200 ? 'Answers 200, but not with HTML.' : `Answers ${page.status}${page.error ? ` (${page.error})` : ''}.`, statusLine(page)))
 
   const unv = (id: string) => add(result(id, 'unverified', walled ? 'Not verified: the page is behind a bot wall.' : 'Not verified: the page HTML could not be read.', statusLine(page)))
@@ -514,12 +522,12 @@ export async function scan(raw: string, deps: Deps = {}): Promise<Report | { err
       robotsText ? [...search, ...training].map(fmt).join('; ') : 'No robots.txt (HTTP 404): crawlers treat that as allow all.'))
   } else add(result('ai-bots', 'unverified', 'robots.txt could not be read, so AI crawler rules are unknown.', statusLine(robots)))
 
-  if (page.status === 0) add(result('bot-wall', 'unverified', `The page could not be fetched: ${page.error}.`, statusLine(page)))
+  if (!answered) add(result('bot-wall', 'unverified', `The page could not be fetched: ${page.error ?? `HTTP ${page.status}`}.`, statusLine(page)))
   else add(result('bot-wall', walled ? 'fail' : 'pass', walled ? `An identified crawler was refused (${wallStatus ? `HTTP ${page.status}` : 'challenge page'}).` : 'The page answered an identified crawler normally.', `${statusLine(page)}${page.headers.get('cf-mitigated') ? `; cf-mitigated: ${page.headers.get('cf-mitigated')}` : ''}; User-Agent: ${USER_AGENT}`))
 
   const xrt = page.headers.get('x-robots-tag') ?? ''
   const metaRobots = [meta('robots'), meta('googlebot')].filter(Boolean).join(', ')
-  if (page.status === 0 || walled) unv('indexable')
+  if (!answered || walled) unv('indexable')
   else {
     const noindex = /\b(noindex|none)\b/i.test(`${xrt} ${metaRobots}`)
     add(result('indexable', noindex ? 'fail' : 'pass', noindex ? 'The page asks not to be indexed.' : 'No noindex directive.', `X-Robots-Tag: ${xrt || '(none)'}; meta robots: ${metaRobots || '(none)'}`))
@@ -540,7 +548,7 @@ export async function scan(raw: string, deps: Deps = {}): Promise<Report | { err
   else add(result('markdown-alternate', 'warn', `Linked, but ${mdAltUrl} does not answer 200 with Markdown.`, `${mdAltUrl}: ${mdAlt ? statusLine(mdAlt) : 'not fetched'}`))
 
   const link = page.headers.get('link') ?? ''
-  if (page.status === 0) unv('link-header')
+  if (!answered) unv('link-header')
   else {
     const rels = [...link.matchAll(/rel="?([^";,]+)"?/gi)].map(m => m[1])
     add(result('link-header', link ? 'pass' : 'fail', link ? `Link header with rel: ${[...new Set(rels)].join(', ') || '(none)'}.` : 'No Link header on the page response.', link ? `Link: ${clip(link, 400)}` : 'Link: (none)'))
@@ -569,7 +577,7 @@ export async function scan(raw: string, deps: Deps = {}): Promise<Report | { err
     else if (http.status >= 300 && http.status < 400 && loc.startsWith('https://')) add(result('https', 'pass', `Served over HTTPS; http:// redirects (${http.status}) to HTTPS.`, `http://${final.host}${final.pathname} → ${http.status} ${clip(loc, 160)}`))
     else add(result('https', 'warn', `Served over HTTPS, but http:// does not redirect to HTTPS (HTTP ${http.status}).`, `http://${final.host}${final.pathname}: ${statusLine(http)}`))
   }
-  if (page.status === 0) ['hsts', 'nosniff', 'csp'].forEach(unv)
+  if (!answered) ['hsts', 'nosniff', 'csp'].forEach(unv)
   else {
     const hsts = page.headers.get('strict-transport-security') ?? ''
     const age = Number(hsts.match(/max-age=(\d+)/i)?.[1] ?? 0)
@@ -583,8 +591,8 @@ export async function scan(raw: string, deps: Deps = {}): Promise<Report | { err
   }
 
   // ----- CORS -----
-  const acao = page.headers.get('access-control-allow-origin') ?? md.headers.get('access-control-allow-origin') ?? ''
-  if (page.status === 0 && md.status === 0) unv('cors')
+  const acao = page.headers.get('access-control-allow-origin') ?? (md.status > 0 && md.status < 500 ? md.headers.get('access-control-allow-origin') : null) ?? ''
+  if (!answered) unv('cors')
   else add(result('cors', acao ? 'pass' : 'fail', acao ? `Access-Control-Allow-Origin: ${clip(acao, 80)}` : 'No Access-Control-Allow-Origin header.', `Access-Control-Allow-Origin: ${acao || '(none)'} (request sent with an Origin header)`))
 
   if (ctx.used >= ctx.budget) notes.push(`The scan used its full budget of ${ctx.budget} requests; any check marked "could not verify" because of it is left out of the score.`)

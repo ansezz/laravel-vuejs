@@ -51,7 +51,7 @@ const FORMS: Record<Form, { label: string; fields: Record<string, Field> }> = {
   },
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     if (url.hostname === `www.${APEX}`) {
@@ -96,6 +96,7 @@ export default {
     console.log(`[retention] anonymised ${r[0].meta.changes}, deleted ${r[1].meta.changes} submission(s) and ${r[2].meta.changes} unsubscribed address(es)`)
   },
 } satisfies ExportedHandler<Env>
+export default worker
 
 async function handleForm(name: string, request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   if (!(name in FORMS)) return reply(request, 404, { ok: false, error: 'Unknown form.' })
@@ -173,12 +174,13 @@ async function handleReadiness(request: Request, env: Env, ctx: ExecutionContext
   const target = normalizeTarget(raw)
   if (typeof target === 'string') return scanJson(400, { error: target })
 
-  const cacheKey = new Request(`https://${APEX}/api/tools/agent-readiness?url=${encodeURIComponent(target.toString())}`)
+  const cacheKey = new Request(`https://${APEX}/api/tools/agent-readiness?v=2&url=${encodeURIComponent(target.toString())}`)
   const cache = (caches as unknown as { default: Cache }).default
   const hit = await cache.match(cacheKey).catch(() => undefined)
   if (hit) {
     const out = new Response(hit.body, hit)
     out.headers.set('X-Scan-Cache', 'HIT')
+    out.headers.set('Cache-Control', 'no-store')
     return out
   }
 
@@ -187,14 +189,28 @@ async function handleReadiness(request: Request, env: Env, ctx: ExecutionContext
   if (!allowed) return scanJson(429, { error: 'Too many scans from your network. Please wait a minute and try again.' }, { 'Retry-After': '60' })
 
   let report: Awaited<ReturnType<typeof scan>>
-  try { report = await scan(target.toString()) } catch (e) {
+  try { report = await scan(target.toString(), { fetch: selfAware(env, ctx) }) } catch (e) {
     console.error('agent readiness scan failed', target.toString(), e)
     return scanJson(502, { error: 'The scan failed unexpectedly. Please try again.' })
   }
   if ('error' in report) return scanJson(422, report)
-  const res = scanJson(200, report, { 'Cache-Control': `public, max-age=${SCAN_TTL}`, 'X-Scan-Cache': 'MISS' })
-  ctx.waitUntil(cache.put(cacheKey, res.clone()).catch(() => {}))
-  return res
+  // Browsers always re-ask (no-store); the Worker keeps a 10-minute copy, but only of scans that could read the page.
+  if (report.checks.find(c => c.id === 'page')?.status === 'pass') {
+    ctx.waitUntil(cache.put(cacheKey, scanJson(200, report, { 'Cache-Control': `public, max-age=${SCAN_TTL}` })).catch(() => {}))
+  }
+  return scanJson(200, report, { 'X-Scan-Cache': 'MISS' })
+}
+
+// A Worker can't fetch its own custom domain over the network (Cloudflare answers 522), so scans of this site are
+// answered by this same handler in-process: the same files and headers a visitor gets. Plain-HTTP requests to it
+// are left unverified (the HTTP to HTTPS redirect happens at Cloudflare's edge, before the Worker).
+function selfAware(env: Env, ctx: ExecutionContext): typeof fetch {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const u = new URL(input instanceof Request ? input.url : input.toString())
+    if (u.hostname !== APEX && u.hostname !== `www.${APEX}`) return fetch(input, init)
+    if (u.protocol === 'http:') throw new Error('plain HTTP to this site is redirected at the edge and not checked in-process')
+    return worker.fetch(new Request(u.toString(), init), env, ctx)
+  }
 }
 
 // After a newsletter signup from a cheat sheet page, plain HTML posts (no JS) go to that sheet's download page.
