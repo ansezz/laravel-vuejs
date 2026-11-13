@@ -26,7 +26,7 @@ Open source blog and community for developers who build with **Laravel** and **V
 npm install
 cp .env.example .env   # optional: sponsor slot variables, all empty by default
 npm run dev            # http://localhost:4321
-npm run build          # dist/: astro build, then scripts/markdown.mjs (/<slug>.md, llms-full.txt) and scripts/csp.mjs (dist/_csp.json)
+npm run build          # dist/: astro build, then scripts/markdown.mjs (/<slug>.md, page twins, llms-full.txt, _links.json) and scripts/csp.mjs (dist/_csp.json)
 npm run preview        # serve dist/ with Astro
 npm run cf:dev         # serve dist/ through the Worker (wrangler dev, http://localhost:8787); run npm run db:migrate:local first for the forms
 ```
@@ -179,7 +179,8 @@ Configure with the build variables under [Environment variables](#environment-va
 - **Structured data:** one JSON-LD `@graph` per page: `Organization` and `WebSite` (with a `SearchAction` for `/search?q=`) everywhere, `TechArticle`/`BlogPosting` + `Person` + `BreadcrumbList` on posts, `BreadcrumbList` on listing pages, `FAQPage` on the FAQ, `ProfilePage` on the author page.
 - **Sitemaps:** `/sitemap.xml` is a sitemap index pointing at `/sitemap-pages.xml`, `/sitemap-posts.xml` and `/sitemap-taxonomies.xml`, with `lastmod` where we know it (legal pages use `LEGAL_UPDATED` in `src/lib/sitemap.ts`; bump it when you edit them).
 - **Feeds:** `/feed.xml` (also `/feed/posts.xml`, `/feed/categories.xml`, `/feed/tags.xml`).
-- **AI search / GEO:** `/llms.txt` (index), `/llms-full.txt` (full text of every article) and `/<slug>.md` (each post as clean Markdown; the Worker sends a `Link: rel="canonical"` header to the HTML page). `robots.txt` explicitly allows the main AI crawlers (`AI_CRAWLERS` in `src/config/site.ts`).
+- **AI search / GEO:** `/llms.txt` (index), `/llms-full.txt` (full text of every article) and `/<slug>.md` (each post as clean Markdown; the Worker sends a `Link: rel="canonical"` header to the HTML page). Every other indexable page has a Markdown twin too (`/index.md`, `/posts.md`, `/category/<slug>.md`, ...), linked from its `<head>` with `rel="alternate" type="text/markdown"`. `robots.txt` explicitly allows the main AI crawlers (`AI_CRAWLERS` in `src/config/site.ts`) and states `Content-Signal: search=yes, ai-input=yes, ai-train=no`.
+- **Agents:** a request with `Accept: text/markdown` gets the page's Markdown twin at the same URL (`Vary: Accept`, no redirect). HTML pages send a `Link` header (canonical, Markdown twin, sitemap, API catalog), every public file sends `Access-Control-Allow-Origin: *` (not the forms API), and `/.well-known/api-catalog` (RFC 9727) lists the public read-only files: the search index JSON, RSS, sitemap and llms.txt. The page-to-twin map is `dist/_links.json`, written by `scripts/markdown.mjs`.
 - **Author page:** `/author/anass-ez-zouaine` (E-E-A-T: who writes, how articles are tested and corrected). Keep it to verifiable facts.
 - **Checked in CI:** `npm run check:seo` fails the build on a missing or long title, a missing, duplicate, too short or too long description, a canonical that is not the page's own URL, more or less than one `<h1>`, a missing `og:image`, invalid or incomplete article JSON-LD, or a sitemap that disagrees with the indexable pages. Empty category and tag pages are `noindex` and left out of the sitemap. Legacy duplicate URLs get a 301 in the Worker (for example `/page/term-conditions`) rather than a second copy of the page.
 - **Pagination:** `/posts` shows 12 articles; older ones move to `/posts/page/2`, `/posts/page/3`, ... with `rel=prev/next`.

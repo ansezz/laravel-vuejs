@@ -41,7 +41,9 @@ const pages = [
   ['/', 'text/html', '<title>'],
   ['/posts', 'text/html', '<title>'],
   ['/search', 'text/html', '<title>'],
-  ['/robots.txt', 'text/plain', 'Sitemap: '],
+  ['/robots.txt', 'text/plain', 'Content-Signal: search=yes, ai-input=yes, ai-train=no'],
+  ['/index.md', 'markdown', '# '],
+  ['/.well-known/api-catalog', 'application/linkset+json', '"linkset"'],
   ['/sitemap.xml', 'xml', '<sitemapindex'],
   ['/sitemap-posts.xml', 'xml', '<urlset'],
   ['/feed.xml', 'xml', '<rss'],
@@ -95,6 +97,10 @@ try {
   report(!h('x-robots-tag'), 'no X-Robots-Tag on the canonical host', h('x-robots-tag'))
   const asset = await get('/robots.txt')
   report(asset.status === 200, 'robots.txt served')
+  report(h('link').includes('rel="canonical"') && h('link').includes('type="text/markdown"'), 'Link header (canonical, Markdown twin) on HTML', h('link').slice(0, 80))
+  report(h('vary').toLowerCase().includes('accept') && h('access-control-allow-origin') === '*', 'Vary: Accept and CORS on HTML', `vary=${h('vary')} acao=${h('access-control-allow-origin')}`)
+  const md = await get('/', { headers: { 'cache-control': 'no-cache', 'user-agent': 'laravel-vuejs check-live', accept: 'text/markdown' } })
+  report(md.status === 200 && (md.headers.get('content-type') ?? '').includes('text/markdown') && (await md.text()).startsWith('# '), 'Accept: text/markdown on / returns Markdown', `${md.status} ${md.headers.get('content-type')}`)
 } catch (e) { report(false, 'headers', e.message) }
 
 // 5. Routing: 404 page, trailing slash redirect, www redirect.

@@ -9,7 +9,7 @@ const x = 8 + (post.id * 37) % 70, y = 5 + (post.id * 29) % 60
 const img = postArt(post.slug)
 ---
 <div class={`cover ${img ? 'has-art' : ''}`} style={`--x:${x}%;--y:${y}%`} aria-hidden="true">
-  {img && <Art src={img} sizes={sizes} eager={eager} />}
+  {img && <Art src={img} alt={`Cover illustration for the article “${post.title}”`} sizes={sizes} eager={eager} />}
   {post.snippet && (
     <div class="cover-inner">
       <span class="cover-cmd"><b>$</b> {post.snippet}<i></i></span>
