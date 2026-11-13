@@ -61,6 +61,7 @@ export async function sitemapUrls(): Promise<
         "/tools/now",
         "/tools/compatibility",
         "/tools/agents",
+        "/tools/agent-readiness",
       ].map((loc) => ({ loc, lastmod: PACKAGE_UPDATED })),
       { loc: "/cheatsheets", lastmod: new Date(`${CHEATSHEETS.map((s) => s.checked).sort().at(-1)}T00:00:00Z`) },
       ...CHEATSHEETS.map((s) => ({ loc: `/cheatsheets/${s.slug}`, lastmod: new Date(`${s.checked}T00:00:00Z`) })),

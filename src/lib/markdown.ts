@@ -73,6 +73,7 @@ ${CHEATSHEETS.map((s) => `- [${s.title}](${SITE_URL}/cheatsheets/${s.slug}): ${s
 - [Then and now](${SITE_URL}/tools/now) ([Markdown](${SITE_URL}/tools/now.md)): the 2019 stack and the 2026 pick, with chart links where a package was counted
 - [Compatibility card](${SITE_URL}/tools/compatibility) ([Markdown](${SITE_URL}/tools/compatibility.md)): version pairs copied from published articles
 - [AGENTS.md](${SITE_URL}/tools/agents) ([default file](${SITE_URL}/tools/agents.md)): Laravel 13, Vue 3.5, Inertia, Pest, and Pinia
+- [AI agent readiness checker](${SITE_URL}/tools/agent-readiness) ([Markdown](${SITE_URL}/tools/agent-readiness.md)): paste a URL for a 0-100 score on robots.txt, llms.txt, Markdown for agents, JSON-LD, AI bot access and security headers, with evidence and a fix for each check. JSON API: ${SITE_URL}/api/tools/agent-readiness?url=<url>
 - [Package chart](${SITE_URL}/packages): download snapshot used by the recipe
 
 ## About

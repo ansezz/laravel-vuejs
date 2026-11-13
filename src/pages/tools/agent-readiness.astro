@@ -1,0 +1,112 @@
+---
+import ToolPage from '../../components/ToolPage.astro'
+import { CATEGORIES, CHECKS, FAQ } from '../../data/agent-readiness'
+import { SITE_URL, SITE_NAME } from '../../config/site'
+const title = 'AI agent readiness checker'
+const lead = `Paste a URL. Get a 0-100 score, an A-F grade and ${CHECKS.length} checks: robots.txt, llms.txt, Markdown for agents, JSON-LD, bot access and security headers, each with the evidence and a fix.`
+const description = 'Free AI agent readiness checker: score any URL 0-100 on robots.txt, llms.txt, Markdown for agents, JSON-LD, AI bot access and headers, with a fix per check.'
+const jsonld = [
+  {
+    '@context': 'https://schema.org', '@type': 'SoftwareApplication', name: 'AI agent readiness checker', url: `${SITE_URL}/tools/agent-readiness`,
+    applicationCategory: 'DeveloperApplication', operatingSystem: 'Web', isAccessibleForFree: true, description,
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }, publisher: { '@id': `${SITE_URL}/#organization` },
+    featureList: CATEGORIES.map(c => c.title),
+  },
+  { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: FAQ.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } })) },
+]
+---
+<ToolPage title={title} lead={lead} description={description} jsonld={jsonld}>
+  <form class="ar-form" data-ar-form action="/api/tools/agent-readiness" method="get">
+    <div class="field">
+      <label for="ar-url">Website URL</label>
+      <input id="ar-url" class="input" name="url" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com or https://example.com/page" required maxlength="2048">
+    </div>
+    <div class="pkg-actions">
+      <button class="btn btn-primary" type="submit">Scan</button>
+      <button class="btn" type="button" data-ar-example>Scan laravel-vuejs.space</button>
+    </div>
+    <p class="pkg-set-note">We fetch only that page and a fixed list of public files on the same host (at most 15 requests), with no login and no crawl. Results are cached for 10 minutes.</p>
+  </form>
+  <p class="ar-status" data-ar-status role="status" aria-live="polite"></p>
+  <div class="ar-result" data-ar-result hidden></div>
+
+  <h2>What it checks</h2>
+  <p class="pkg-set-note">A pass earns the check's full weight, a partial pass half, a fail nothing. "Could not verify" (a timeout, a server error, a bot wall in front of the page) and info rows stay out of the score. Grades: A from 90, B from 80, C from 70, D from 60, F below.</p>
+  {CATEGORIES.map(cat => (
+    <section class="ar-about">
+      <h3>{cat.title}</h3>
+      <p class="pkg-set-note">{cat.lead}</p>
+      <div class="tool-table-wrap">
+        <table class="tool-table">
+          <thead><tr><th scope="col">Check</th><th scope="col">Weight</th><th scope="col">What passes</th></tr></thead>
+          <tbody>
+            {CHECKS.filter(c => c.category === cat.id).map(c => (
+              <tr><th scope="row">{c.title}{c.optional && <span class="ar-tag">optional</span>}</th><td>{c.weight}</td><td>{c.what}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  ))}
+
+  <h2>Questions</h2>
+  <div class="ar-faq">
+    {FAQ.map(f => (
+      <details class="ar-check"><summary><span class="ar-check-title">{f.q}</span></summary><div class="ar-check-body"><p>{f.a}</p></div></details>
+    ))}
+  </div>
+  <p class="pkg-actions">
+    <a class="btn" href="/tools/agent-readiness.md">Markdown for assistants</a>
+    <a class="btn" href="/tools">All {SITE_NAME} tools</a>
+  </p>
+</ToolPage>
+
+<script>
+  import { initAgentReadiness } from '../../lib/agent-readiness-ui'
+  initAgentReadiness()
+</script>
+
+<style is:global>
+  .ar-form { display: grid; gap: 14px; max-width: 46rem; }
+  .ar-status { min-height: 1.5em; margin: 1rem 0 0; font-weight: 550; }
+  .ar-result { display: grid; gap: 28px; margin: 1rem 0 3rem; }
+  .ar-head { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; scroll-margin-top: 90px; }
+  .ar-score { display: grid; grid-template-columns: auto auto; align-items: baseline; column-gap: 6px; padding: 18px 22px; border: 2px solid var(--text); background: var(--bg-elev); min-width: 9rem; }
+  .ar-score-num { font: 700 3.4rem/1 var(--font-display); }
+  .ar-score-of { color: var(--muted); }
+  .ar-score-grade { grid-column: 1 / -1; font: 700 1.1rem/1.4 var(--font-mono); }
+  .ar-grade-A .ar-score-grade, .ar-grade-B .ar-score-grade { color: var(--accent); }
+  .ar-grade-C .ar-score-grade, .ar-grade-D .ar-score-grade { color: var(--warm); }
+  .ar-grade-F .ar-score-grade { color: #c0262d; }
+  .ar-meta { flex: 1 1 22rem; display: grid; gap: 8px; }
+  .ar-meta h2, .ar-meta p { margin: 0; }
+  .ar-meta a { overflow-wrap: anywhere; }
+  .ar-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 10px; }
+  .ar-cat { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 12px 14px; border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--text); text-decoration: none; }
+  .ar-cat:hover { border-color: var(--brand); }
+  .ar-cat-title { font-weight: 600; }
+  .ar-cat-score { font: 700 1rem/1.4 var(--font-mono); }
+  .ar-cat-count { grid-column: 1 / -1; font-size: 0.8rem; color: var(--muted); }
+  .ar-bar { grid-column: 1 / -1; height: 6px; background: var(--surface-2); }
+  .ar-bar > span { display: block; height: 100%; background: var(--grad); }
+  .ar-group { display: grid; gap: 8px; scroll-margin-top: 90px; }
+  .ar-group h3, .ar-about h3 { margin: 0.5rem 0 0; }
+  .ar-about { display: grid; gap: 8px; margin-bottom: 1.5rem; }
+  .ar-check { border: 1px solid var(--border); background: var(--bg-elev); }
+  .ar-check > summary { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; padding: 10px 14px; cursor: pointer; }
+  .ar-check-title { font-weight: 600; }
+  .ar-check-summary { flex-basis: 100%; color: var(--text-2); font-size: 0.92rem; overflow-wrap: anywhere; }
+  .ar-check-body { padding: 0 14px 14px; display: grid; gap: 6px; }
+  .ar-check-body p { margin: 0; }
+  .ar-label { font: 600 0.75rem/1.4 var(--font-mono); text-transform: uppercase; color: var(--muted); }
+  .ar-evidence { margin: 0; padding: 10px 12px; background: var(--surface); font: 0.8rem/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; }
+  .ar-badge { font: 700 0.72rem/1 var(--font-mono); text-transform: uppercase; padding: 4px 7px; border: 1px solid currentColor; }
+  .ar-badge-pass { color: var(--accent); }
+  .ar-badge-warn { color: var(--warm); }
+  .ar-badge-fail { color: #c0262d; }
+  .ar-badge-unverified, .ar-badge-info { color: var(--muted); }
+  [data-theme='dark'] .ar-badge-fail, [data-theme='dark'] .ar-grade-F .ar-score-grade { color: #ff6b6b; }
+  .ar-tag { margin-left: 6px; font: 500 0.7rem/1 var(--font-mono); padding: 3px 6px; background: var(--surface-2); color: var(--muted); vertical-align: middle; }
+  .ar-code pre { max-height: 22rem; overflow: auto; }
+  .ar-faq { display: grid; gap: 8px; margin-bottom: 1.5rem; }
+</style>
