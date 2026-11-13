@@ -2,8 +2,9 @@
 id: 22
 title: "Test a Laravel and Vue app"
 excerpt: "Pest hits the Laravel routes. Vitest and Vue Test Utils hit one component. The starter kit does not ship a Vitest script until you add one."
-description: "Test Laravel and Vue with Pest on the HTTP routes and Vitest plus Vue Test Utils on a single component."
+description: "Test a Laravel and Vue app: Pest feature tests on the HTTP routes and Inertia props, plus Vitest and Vue Test Utils for a component, with examples."
 seoTitle: "Test Laravel and Vue"
+updated: 2026-11-10T13:00:00Z
 date: 2026-10-10T05:50:00Z
 snippet: "php artisan test --filter=PostsTest"
 categories: [laravel, vuejs]
@@ -14,7 +15,7 @@ Your Pest suite is green and the page still renders blank, or your Vue tests pas
 
 <TLDR
   audience="Laravel + Vue developers adding tests"
-  learn={['What Pest covers and what Vitest covers', 'How to add Vitest to the starter kit', 'What not to mock']}
+  learn={['What Pest covers and what Vitest covers', 'How to add Vitest to the starter kit', 'How to fake an outbound HTTP call with Http::fake()', 'What not to mock']}
   applies="Laravel 13 · Pest · Vitest · @vue/test-utils · Vue 3"
 >
 
@@ -22,6 +23,7 @@ Your Pest suite is green and the page still renders blank, or your Vue tests pas
 - Vitest + `@vue/test-utils`: markup that renders from props, with no server.
 - The kit has no Vitest: install `vitest @vue/test-utils jsdom` and add `vitest.config.ts`.
 - Don’t mount a page and stub Inertia’s router just to see a heading.
+- Stub outbound HTTP with `Http::fake()` and `preventStrayRequests()` so the test never hits the real host.
 
 </TLDR>
 
@@ -126,12 +128,58 @@ Do not mount `posts/Index.vue` and stub `router.get` just to see a heading. That
 
 Typed props for the page itself are [TypeScript on Vue pages](/typescript-laravel-vue-pages). The stack you are testing is [Inertia, a SPA, or Nuxt](/laravel-vue-in-2026).
 
+## Fake an HTTP call
+
+When a page's props come from an outbound HTTP call, the Pest test should not hit the real host. `Http::fake()` stubs the client. `assertInertia` still checks the prop.
+
+```php title="tests/Feature/CreatePostTest.php"
+use Illuminate\Support\Facades\Http;
+use Inertia\Testing\AssertableInertia as Assert;
+
+Http::preventStrayRequests();
+
+Http::fake([
+    'https://maps.example/*' => Http::response(['label' => 'Rabat'], 200),
+]);
+
+$this->actingAs($user)
+    ->get('/posts/create')
+    ->assertOk()
+    ->assertInertia(fn (Assert $page) => $page
+        ->component('posts/Create')
+        ->where('label', 'Rabat')
+    );
+```
+
+The controller calls `Http::get('https://maps.example/place')` and passes `label` as a prop. The test never opens a socket. `preventStrayRequests()` fails the test when a URL is not faked, instead of silently calling the network. In the lab (Laravel 13.40, 8 tests), a matching pattern returned `Rabat`, and a request to another host threw `Illuminate\Http\Client\StrayRequestException`.
+
+You can also return a sequence for the same pattern, which is how you test a retry after a 429:
+
+```php
+Http::fake([
+    'https://maps.example/*' => Http::sequence()
+        ->push(['label' => 'Rabat'], 200)
+        ->pushStatus(429),
+]);
+```
+
+The [queue 429 guide](/laravel-queue-429-rate-limited-api) is the job side of that retry.
+
+<Callout type="gotcha" title="an empty fake is not your API">
+
+Do not call `Http::fake()` with no arguments and then assert the prop equals the real city's name. An empty fake returns 200 and an empty body. I confirmed that in the lab: `Http::fake()` then `Http::get(...)` was 200 with `''`. Do not disable TLS verification so the test can "just hit staging".
+
+</Callout>
+
+If the pattern does not match and you did not call `preventStrayRequests()`, Laravel will make the real request. That is the usual reason a "faked" test still hits the provider.
+
 ## Recap
 
 - Two runners, two jobs: Pest for the server, Vitest for components.
 - Add Vitest yourself; the kit does not ship it.
 - Component tests pass props, not routers.
 - Keep queries tested in Pest.
+- Stub outbound HTTP with `Http::fake()` and `preventStrayRequests()`. Assert the Inertia prop, not the real API.
 
 ## FAQ
 
@@ -139,17 +187,22 @@ Typed props for the page itself are [TypeScript on Vue pages](/typescript-larave
   { q: 'Does the Laravel Vue starter kit include Vitest?', a: 'No. It ships Pest for PHP. Install `vitest`, `@vue/test-utils` and `jsdom` to test Vue components.' },
   { q: 'How do I test Inertia props in Laravel?', a: 'Use `assertInertia` in a Pest feature test to check the component name and props like `posts.data`.' },
   { q: 'Should I mount Inertia pages in Vitest?', a: 'Usually not. Mount small components with props. Pages depend on Inertia’s router, and their data is better tested in Pest.' },
+  { q: 'How do I fake an HTTP call a Vue page depends on?', a: 'Call `Http::preventStrayRequests()`, then `Http::fake()` with a URL pattern and a stub. Assert the Inertia prop. An empty `Http::fake()` returns 200 and an empty body.' },
+  { q: 'Why did Http::fake still hit the real API?', a: 'The URL pattern did not match. Use `preventStrayRequests()` so an unmatched URL fails the test instead of opening a socket.' },
 ]} />
 
 ## Next steps
 
 - [CRUD with Inertia and Vue](/laravel-inertia-vue-crud)
 - [TypeScript props for Laravel + Vue pages](/typescript-laravel-vue-pages)
+- [Laravel queue jobs and HTTP 429](/laravel-queue-429-rate-limited-api)
 - [Server-side rendering with Inertia](/inertia-ssr)
 
 ## Sources
 
-- [Laravel 13: Testing](https://laravel.com/docs/13.x/testing)
+- [Laravel 13: Testing](https://laravel.com/framework/docs/13.x/testing)
+- [Laravel 13: Faking HTTP responses](https://laravel.com/framework/docs/13.x/http-client#faking-responses)
+- [Laravel 13: Preventing stray requests](https://laravel.com/framework/docs/13.x/http-client#preventing-stray-requests)
 - [Inertia v3: Testing](https://inertiajs.com/docs/v3/advanced/testing)
 - [Vitest: Getting started](https://vitest.dev/guide/)
 - [Vue Test Utils](https://test-utils.vuejs.org/guide/)

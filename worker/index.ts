@@ -7,6 +7,8 @@
 //   stores the submission in D1 and emails a notification through the Cloudflare Email Service
 //   send_email binding (EMAIL), recording the send status on the row.
 
+import { REDIRECTS } from './redirects'
+
 export interface Env {
   ASSETS: Fetcher
   DB: D1Database
@@ -54,13 +56,30 @@ export default {
       url.hostname = APEX
       return Response.redirect(url.toString(), 301)
     }
+    // Merged posts: one strong page per topic, the old URLs 301 to the section that replaced them.
+    const moved = REDIRECTS[url.pathname.replace(/\/+$/, '')]
+    if (moved) return Response.redirect(new URL(moved, url).toString(), 301)
+    // Legacy duplicate of the terms page: one URL per page, so search engines don't split it across two.
+    if (url.pathname === '/page/term-conditions') return Response.redirect(new URL('/page/terms-and-conditions', url).toString(), 301)
     // OG images moved from PNG to JPEG; keep old share-card URLs working.
     const og = url.pathname.match(/^\/og\/([a-z0-9-]+)\.png$/)
     if (og) return Response.redirect(new URL(`/og/${og[1]}.jpg`, url).toString(), 301)
     const match = url.pathname.match(/^\/api\/forms\/([a-z]+)\/?$/)
-    if (url.pathname === '/_csp.json') return new Response('Not found', { status: 404 })
-    const [res] = await Promise.all([match ? handleForm(match[1], request, env, ctx) : env.ASSETS.fetch(request), loadHashes(env, url)])
-    return withHeaders(res, url)
+    if (url.pathname === '/_csp.json' || url.pathname === '/_links.json') return new Response('Not found', { status: 404 })
+    if (match) {
+      const [res] = await Promise.all([handleForm(match[1], request, env, ctx), loadHashes(env, url)])
+      return withHeaders(res, url, false)
+    }
+    if (url.pathname === '/.well-known/api-catalog') return withHeaders(apiCatalog(request), url)
+    await Promise.all([loadHashes(env, url), loadLinks(env, url)])
+    // Markdown for agents: `Accept: text/markdown` gets the page's Markdown twin (same URL, no redirect). Pages without a
+    // twin, and every browser (they never ask for text/markdown), get the HTML as usual.
+    const twin = (request.method === 'GET' || request.method === 'HEAD') && wantsMarkdown(request) ? pageLinks[pagePath(url.pathname)]?.md : undefined
+    if (twin) {
+      const md = await env.ASSETS.fetch(new Request(new URL(twin, url), { method: request.method, headers: request.headers }))
+      if (md.ok) return withHeaders(md, url, true, twin)
+    }
+    return withHeaders(await env.ASSETS.fetch(request), url)
   },
 
   // Daily data retention (privacy policy): drop IP hashes and user agents after 30 days, delete submissions after
@@ -157,7 +176,62 @@ function loadHashes(env: Env, url: URL) {
   return hashesLoaded
 }
 
-function withHeaders(res: Response, url: URL) {
+// Per-page canonical URL and Markdown twin, written by scripts/markdown.mjs (dist/_links.json): used for the Link header
+// and for `Accept: text/markdown`.
+type PageLinks = Record<string, { canonical: string; md?: string }>
+let pageLinks: PageLinks = {}
+let markdownPages: Record<string, string> = {} // Markdown twin path -> canonical URL of its page
+let linksLoaded: Promise<void> | undefined
+function loadLinks(env: Env, url: URL) {
+  linksLoaded ??= env.ASSETS.fetch(new URL('/_links.json', url)).then(r => r.ok ? r.json<PageLinks>() : {})
+    .then((j: PageLinks) => {
+      pageLinks = j
+      markdownPages = Object.fromEntries(Object.values(j).filter(l => l.md).map(l => [l.md!, l.canonical]))
+    }).catch(() => { linksLoaded = undefined })
+  return linksLoaded
+}
+const pagePath = (p: string) => p.replace(/\/+$/, '') || '/'
+
+// True when the client asks for Markdown at least as strongly as for HTML (e.g. `Accept: text/markdown`).
+function wantsMarkdown(request: Request) {
+  let md = 0, html = 0
+  for (const part of (request.headers.get('Accept') ?? '').toLowerCase().split(',')) {
+    const [type, ...params] = part.trim().split(';').map(s => s.trim())
+    const q = Number(params.find(p => p.startsWith('q='))?.slice(2) ?? 1)
+    if (type === 'text/markdown' || type === 'text/x-markdown') md = Math.max(md, q)
+    else if (type === 'text/html') html = Math.max(html, q)
+  }
+  return md > 0 && md >= html
+}
+
+// RFC 9727 API catalog: the public, read-only machine-readable files this static site already publishes. There is no
+// authenticated API; everything listed is a plain GET with no key.
+const API_CATALOG = JSON.stringify({
+  linkset: [{
+    anchor: `https://${APEX}/.well-known/api-catalog`,
+    item: [
+      { href: `https://${APEX}/api/posts.json`, type: 'application/json', title: 'Search index: every published article (slug, URL, title, excerpt, date, topics, text)' },
+      { href: `https://${APEX}/feed.xml`, type: 'application/rss+xml', title: 'RSS feed of the latest articles' },
+      { href: `https://${APEX}/sitemap.xml`, type: 'application/xml', title: 'Sitemap index' },
+      { href: `https://${APEX}/llms.txt`, type: 'text/plain', title: 'llms.txt: index of the site for language models, with links to the Markdown copy of every article' },
+      { href: `https://${APEX}/llms-full.txt`, type: 'text/plain', title: 'Full text of every article as Markdown' },
+    ],
+  }],
+}, null, 2)
+function apiCatalog(request: Request) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } })
+  return new Response(request.method === 'HEAD' ? null : API_CATALOG, {
+    headers: {
+      'Content-Type': 'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+      Link: `<https://${APEX}/.well-known/api-catalog>; rel="api-catalog"`,
+    },
+  })
+}
+
+// publicRead: every static file is public and read-only (no cookies, no credentials), so browser-based agents may fetch
+// it cross-origin. The forms API is not. twin: the Markdown file served for `Accept: text/markdown` on a page URL.
+function withHeaders(res: Response, url: URL, publicRead = true, twin?: string) {
   const out = new Response(res.body, res)
   const h = out.headers
   h.set('X-Content-Type-Options', 'nosniff')
@@ -169,11 +243,22 @@ function withHeaders(res: Response, url: URL) {
   if ((h.get('Content-Type') ?? '').includes('text/html')) h.set('Content-Security-Policy', csp(scriptHashes))
   if (res.ok && url.pathname.startsWith('/_astro/')) h.set('Cache-Control', 'public, max-age=31536000, immutable')
   else if (res.ok && /^\/(og|images)\//.test(url.pathname)) h.set('Cache-Control', 'public, max-age=604800')
-  // Markdown copies of posts: right MIME type, and a canonical Link header so search engines credit the HTML page.
-  const md = url.pathname.match(/^\/([a-z0-9-]+)\.md$/)
-  if (res.ok && md) {
+  if (publicRead) h.set('Access-Control-Allow-Origin', '*')
+  // Markdown copies of pages: right MIME type, and a canonical Link header so search engines credit the HTML page.
+  // Page URLs answer HTML or Markdown depending on Accept, so they (and their caches) vary on it.
+  const mdPath = twin ?? (url.pathname.endsWith('.md') ? url.pathname : undefined)
+  const page = pageLinks[pagePath(url.pathname)]
+  if (res.ok && mdPath) {
     h.set('Content-Type', 'text/markdown; charset=utf-8')
-    h.set('Link', `<https://${APEX}/${md[1]}>; rel="canonical"`)
+    const canonical = markdownPages[mdPath] ?? (/^\/[a-z0-9-]+\.md$/.test(mdPath) ? `https://${APEX}${mdPath.slice(0, -3)}` : undefined)
+    if (canonical) h.set('Link', `<${canonical}>; rel="canonical"`)
+    if (twin) h.append('Vary', 'Accept')
+  } else if ((h.get('Content-Type') ?? '').includes('text/html')) {
+    h.append('Vary', 'Accept')
+    if (res.ok && page) {
+      h.set('Link', [`<${page.canonical}>; rel="canonical"`, ...(page.md ? [`<https://${APEX}${page.md}>; rel="alternate"; type="text/markdown"`] : []),
+        `<https://${APEX}/sitemap.xml>; rel="sitemap"`, `<https://${APEX}/.well-known/api-catalog>; rel="api-catalog"`].join(', '))
+    }
   }
   if (res.ok && /^\/llms(-full)?\.txt$/.test(url.pathname)) h.set('Content-Type', 'text/plain; charset=utf-8')
   // Cheat sheet PDFs sit behind the newsletter form (soft gate): keep them out of search results.

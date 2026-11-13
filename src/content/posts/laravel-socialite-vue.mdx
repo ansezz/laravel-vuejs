@@ -2,8 +2,9 @@
 id: 29
 title: "GitHub login with Laravel Socialite and Vue"
 excerpt: "The GitHub button is a normal link. The callback reads the Socialite user, finds or creates a local user, and logs that session in."
-description: "Add GitHub login to a Laravel and Vue app with Socialite, a full-page redirect, and a user matched on email."
+description: "Add GitHub login to a Laravel and Vue app with Socialite: a full-page redirect, the callback route, and matching or creating the user by email safely."
 seoTitle: "GitHub login with Socialite"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T07:00:00Z
 snippet: "composer require laravel/socialite"
 categories: [laravel, vuejs]
@@ -120,11 +121,30 @@ The users table from the starter kit requires `password`. The random string sati
 
 </TryIt>
 
+## A full redirect, not a popup
+
+OAuth needs the whole window to go to GitHub and come back to your callback. Use a plain anchor for the button:
+
+```vue
+<a href="/auth/github/redirect">Continue with GitHub</a>
+```
+
+An Inertia `<Link>` makes an XHR visit. Laravel answers with a 302 to `github.com`, and the browser won't follow a cross-origin redirect inside that request. If the button really must be an Inertia visit, return `Inertia::location()` from the redirect route. For an Inertia request, it sends `409` with an `X-Inertia-Location` header, and the client then does a full navigation:
+
+```php
+public function redirect()
+{
+    return Inertia::location(Socialite::driver('github')->redirect()->getTargetUrl());
+}
+```
+
+A normal browser request to the same route still gets a 302, so the anchor keeps working. Popups add a second window that has to pass the result back to the first. They also break on mobile browsers that block them, so the redirect is simpler. The client secret stays in `.env`. Never put it in a `VITE_` variable, because those end up in the JavaScript bundle.
+
 ## Where this stops
 
-Socialite does not replace Fortify's password reset. Email and password stay [Fortify](/laravel-fortify-vue). The callback above does not check a [permission](/laravel-vue-permissions). A new GitHub user is a normal user until you give them one.
+Socialite does not replace Fortify's password reset. Email and password stay [Fortify](/laravel-fortify-vue). The callback above does not check a [permission](/laravel-vue-policies#roles-and-permissions-with-spatie). A new GitHub user is a normal user until you give them one.
 
-Add scopes only when you need an API GitHub will not return by default. The login above uses the default user. Extra scopes are a decision you can point at the [Socialite docs](https://laravel.com/docs/13.x/socialite), not a list to paste in before the first redirect works.
+Add scopes only when you need an API GitHub will not return by default. The login above uses the default user. Extra scopes are a decision you can point at the [Socialite docs](https://laravel.com/framework/docs/13.x/socialite), not a list to paste in before the first redirect works.
 
 ## Recap
 
@@ -144,10 +164,11 @@ Add scopes only when you need an API GitHub will not return by default. The logi
 ## Next steps
 
 - [Laravel Fortify with Vue](/laravel-fortify-vue): email and password stay here.
-- [Laravel permissions on a Vue page](/laravel-vue-permissions)
-- [Laravel docs: Socialite](https://laravel.com/docs/13.x/socialite)
+- [Laravel permissions on a Vue page](/laravel-vue-policies#roles-and-permissions-with-spatie)
+- [Laravel docs: Socialite](https://laravel.com/framework/docs/13.x/socialite)
 
 ## Sources
 
-- [Laravel 13: Socialite](https://laravel.com/docs/13.x/socialite)
+- [Laravel 13: Socialite](https://laravel.com/framework/docs/13.x/socialite)
 - [GitHub: Creating an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
+- [Laravel docs: Socialite routing](https://laravel.com/framework/docs/13.x/socialite#routing)

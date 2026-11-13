@@ -52,7 +52,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "standup",
     "Standup, the daily board",
-    "laravel-policy-view-any-vue",
+    "laravel-vue-policies",
     "Gate a Vue index with viewAny",
     [
       "Build Standup, a board a team fills each morning. Each person posts what they did and what is next.",
@@ -121,7 +121,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "hours",
     "Hours, the time log",
-    "laravel-migrate-on-deploy-vue",
+    "deploy-laravel-vue",
     "Run migrations in the release, not in a request",
     [
       "Build Hours, a log of time one person spent on tasks. It does not send invoices and it does not take payment.",
@@ -135,7 +135,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "relay",
     "Relay, the announcement board",
-    "laravel-should-broadcast-vue",
+    "laravel-reverb-vue",
     "Queue a broadcast instead of blocking the save",
     [
       "Build Relay, an announcement board for one room. Post a note and the board updates for everyone there.",
@@ -151,7 +151,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "atlas",
     "Atlas, the trip log",
-    "laravel-eager-load-vue",
+    "laravel-automatic-eager-loading",
     "Eager load a relation for a Vue list",
     [
       "Build Atlas, a log of trips. Each stop names the person who wrote it.",
@@ -165,7 +165,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "lane",
     "Lane, the card board",
-    "laravel-queue-work-vs-listen",
+    "laravel-vue-queued-job",
     "queue:work in production, listen locally",
     [
       "Build Lane, a board of cards for one project. Columns are todo, doing, and done.",
@@ -193,7 +193,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "plot",
     "Plot, the garden log",
-    "simple-paginate-vue",
+    "laravel-vue-pagination",
     "Render simplePaginate without a last page",
     [
       "Build Plot, a log of beds in one garden. Each bed records what is planted.",
@@ -220,7 +220,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "table",
     "Table, the potluck board",
-    "inertia-preserve-state-vue",
+    "inertia-form-component-vue",
     "preserveState keeps the Vue page you have",
     [
       "Build Table, a board for one shared meal. People sign what dish they will bring, then sign out.",
@@ -277,7 +277,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "issue",
     "Issue, the small magazine",
-    "inertia-ssr-process-cloud",
+    "inertia-ssr",
     "Keep the Inertia SSR process running",
     [
       "Build a small magazine one editor publishes. A reader opens the public list of pieces.",
@@ -291,7 +291,7 @@ export const spinIdeas: readonly SpinIdea[] = [
   idea(
     "shift",
     "Shift, the weekly rota",
-    "laravel-policy-view-any-vue",
+    "laravel-vue-policies",
     "Gate a Vue index with viewAny",
     [
       "Build Shift, a rota for one cafe week. Staff see the shifts they are allowed to open.",

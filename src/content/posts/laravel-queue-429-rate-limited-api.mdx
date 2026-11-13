@@ -1,0 +1,210 @@
+---
+id: 186
+title: "Laravel queue jobs and HTTP 429: release(), Backoff, MaxExceptions and retryUntil"
+seoTitle: "Laravel Queue Jobs and 429: release, Backoff, retryUntil"
+excerpt: "A rate-limited API returns 429. What happens to your queued job? We ran a real database queue worker to see how release(), Tries, MaxExceptions, Backoff and retryUntil interact. 6 tests."
+description: "Handle HTTP 429 in Laravel queue jobs: release with Retry-After, why releases burn Tries, how Backoff arrays index by attempt, MaxExceptions and retryUntil."
+date: 2026-11-10T11:39:00Z
+snippet: "return $this->release((int) $response->header('Retry-After') ?: 60);"
+categories: [laravel]
+tags: [laravel, php, testing]
+---
+You queue a job that pushes orders to a CRM, and the CRM starts answering `429 Too Many Requests`. Throwing an exception and letting the queue retry looks fine in development. In production, the job fails after a few tries, the backoff fires at the wrong times, or the CRM gets hit again before its `Retry-After` window ends. We ran a real database queue worker in tests to see exactly how Laravel counts attempts.
+
+<TLDR
+  audience="Laravel developers whose queued jobs call third-party APIs with rate limits"
+  learn={['Releasing a job for the Retry-After delay instead of throwing', 'Why release() uses up Tries, and how MaxExceptions avoids that', 'How a Backoff array picks its delay (by attempt, not by exception)', 'When to use retryUntil and the RateLimited middleware']}
+  tested="Laravel 13.40 · database queue worker · PHP 8.4 · Pest 4 (6 tests, 17 assertions)"
+>
+
+- On a 429, call `$this->release($retryAfter)` and return. Don't throw. The job comes back after exactly that many seconds.
+- Every `release()` counts as an attempt. With `#[Tries(3)]`, three 429s in a row fail the job with `MaxAttemptsExceededException`.
+- Use a high `#[Tries]` plus `#[MaxExceptions(3)]` so 429s can wait as long as needed, while real errors still fail fast. Or use `retryUntil()` for a time limit.
+- `#[Backoff([10, 30, 60])]` only applies when an exception is thrown, and it picks the entry for the **attempt number**. Releases move you along that list.
+
+</TLDR>
+
+## The job
+
+```php title="app/Jobs/PushOrderToCrm.php"
+namespace App\Jobs;
+
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Attributes\Backoff;
+use Illuminate\Queue\Attributes\MaxExceptions;
+use Illuminate\Queue\Attributes\Tries;
+use Illuminate\Support\Facades\Http;
+use Throwable;
+
+#[Tries(10)]
+#[MaxExceptions(3)]
+#[Backoff([10, 30, 60])]
+class PushOrderToCrm implements ShouldQueue
+{
+    use Queueable;
+
+    public function __construct(public int $orderId) {}
+
+    public function handle(): void
+    {
+        $response = Http::timeout(10)
+            ->post('https://crm.example.com/api/orders', ['order' => $this->orderId]);
+
+        if ($response->status() === 429) {
+            $this->release((int) $response->header('Retry-After') ?: 60);
+
+            return;
+        }
+
+        $response->throw(); // 5xx and other errors become exceptions
+    }
+
+    public function failed(?Throwable $e): void
+    {
+        // Mark the order so the UI can show "CRM sync failed"
+    }
+}
+```
+
+Laravel 13 configures jobs with attributes such as `#[Tries]`, `#[MaxExceptions]` and `#[Backoff]`. The `tries()` and `backoff()` methods still work when you need logic.
+
+<Callout type="tip" title="Retry-After can be a date">
+[RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#field.retry-after) allows `Retry-After` to be a number of seconds or an HTTP date. `(int)` on a date gives `0`, so the `?: 60` fallback kicks in. If your API sends dates, parse them with `Carbon::parse()` and pass the `DateTime` to `release()`, which accepts it.
+</Callout>
+
+## What we measured
+
+Each test dispatched to the `database` queue and ran `queue:work --once` with a fake clock and `Http::fake()`.
+
+| Scenario | What happened |
+|---|---|
+| 429 with `Retry-After: 42` | Job back in `jobs` with `attempts = 1`, available in exactly **42 s** |
+| `#[Tries(3)]`, 429 every time | 3 HTTP calls. On the 4th pickup the job failed with **`MaxAttemptsExceededException`**, and `failed()` ran |
+| `#[Tries(10)]` + `#[MaxExceptions(3)]`, mix of 429 and 500 | Failed on the **3rd 500**, after 5 attempts. The two 429s didn't count as exceptions |
+| `#[Backoff([10, 30, 60])]` in that run | Delays were 5 (429), **30** (500 on attempt 2), 5 (429), **60** (500 on attempt 4) |
+| `#[Tries(1)]` + `retryUntil()` 10 min | 5 releases with no failure. The first pickup after 10 minutes failed |
+| `RateLimited('crm')`, limit 2/min, 3 jobs | 2 HTTP calls. The 3rd job was released for **63 s** without calling the API, and that still counted as an attempt |
+
+## Releases burn Tries
+
+The [queue docs](https://laravel.com/framework/docs/13.x/queues#max-attempts) list a manual `release()` and middleware releases as attempts, and our run matched. With `#[Tries(3)]` and a CRM that kept answering 429, the third release was the last. On the next pickup, Laravel didn't call `handle()` and failed the job:
+
+```text
+Illuminate\Queue\MaxAttemptsExceededException:
+App\Jobs\PushOrderToCrm has been attempted too many times.
+```
+
+That's the classic surprise: the API was never down, it only asked you to slow down, and the job still failed.
+
+## Fix 1: high Tries, low MaxExceptions
+
+`MaxExceptions` counts only unhandled exceptions, not releases. So `#[Tries(10)]` plus `#[MaxExceptions(3)]` means "wait out up to ten 429 windows, but give up after three real errors." In our sequence (429, 500, 429, 500, 500), the job failed on the third 500, not on the tenth try.
+
+## Gotcha: Backoff arrays index by attempt
+
+The docs describe `#[Backoff([1, 5, 10])]` as delays for the first, second and third retry. The worker picks the delay with:
+
+```php
+$backoff[$job->attempts() - 1] ?? last($backoff)
+```
+
+So the delay depends on the **attempt number**, and releases count as attempts. In our run, the first 500 happened on attempt 2 and waited 30 seconds, not 10. The second 500 was on attempt 4, which is past the end of the list, so it got the last value, 60. If you mix releases and exceptions, write the array as "delay by attempt", or use a `backoff()` method that computes the delay itself.
+
+`Backoff` never applies to `release()`. A release uses the delay you pass, and `release()` with no argument makes the job available again immediately.
+
+## Fix 2: retryUntil for "keep trying for 10 minutes"
+
+```php
+public function retryUntil(): \DateTime
+{
+    return now()->plus(minutes: 10);
+}
+```
+
+The docs say [`retryUntil` takes precedence](https://laravel.com/framework/docs/13.x/queues#time-based-attempts) over `Tries`. With `#[Tries(1)]` and `retryUntil()`, our job was released five times with no failure. The first pickup after the deadline failed it. This is the setup the docs recommend for the `ThrottlesExceptions` middleware.
+
+## Fix 3: don't call the API when you know you're over
+
+If you know the API's limit, for example 120 requests per minute, check it before calling:
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\RateLimiter;
+
+RateLimiter::for('crm', fn () => Limit::perMinute(120));
+```
+
+```php title="app/Jobs/PushOrderToCrm.php"
+use Illuminate\Queue\Middleware\RateLimited;
+
+public function middleware(): array
+{
+    return [new RateLimited('crm')];
+}
+```
+
+All jobs that use `'crm'` share one bucket. When the bucket is full, the middleware releases the job without running `handle()`. In our test, the delay was the limiter's remaining window plus 3 seconds, which is the middleware's built-in margin. Like any release, it counts as an attempt, so keep the `Tries` or `retryUntil` setup from above. Use `->releaseAfter(30)` for a fixed delay, or `RateLimitedWithRedis` on Redis.
+
+<Callout type="gotcha" title="Don’t sleep inside the job">
+`Http::retry(3, 60_000)` on a 429 keeps the worker process asleep for minutes, blocks every other job on that worker, and can hit the job timeout. Release the job instead: the worker moves on, and the queue brings the job back when it's due. If you do retry briefly inside a job, [`Sleep::fake()`](/laravel-sleep-fake-test-retries) keeps those tests fast.
+</Callout>
+
+## Test it without a worker
+
+Laravel can fake a job's queue interactions, so you can unit-test the 429 branch directly:
+
+```php title="tests/Feature/PushOrderToCrmTest.php"
+use App\Jobs\PushOrderToCrm;
+use Illuminate\Support\Facades\Http;
+
+test('a 429 releases the job for Retry-After seconds', function () {
+    Http::fake(['crm.example.com/*' => Http::response([], 429, ['Retry-After' => '42'])]);
+
+    $job = (new PushOrderToCrm(1))->withFakeQueueInteractions();
+    $job->handle();
+
+    $job->assertReleased(delay: 42);
+    $job->assertNotFailed();
+});
+```
+
+To check how attempts are counted, as in the table above, set `queue.default` to `database`, dispatch the job, call `$this->artisan('queue:work', ['--once' => true])`, and move the clock with `$this->travel(61)->seconds()` between runs.
+
+## Show it in Vue
+
+Store the sync state on the order in `failed()`, for example `$order->update(['crm_sync' => 'failed'])`, and pass it as a prop. The Vue page then shows a badge and a "retry" button that posts to a route that dispatches the job again. If you want to show failed jobs to admins, see [failed jobs in a Vue admin page](/laravel-vue-queued-job#show-failed-jobs-to-an-admin).
+
+## Recap
+
+- A 429 is "wait", not "error": `release(Retry-After)` and return.
+- Every release counts against `Tries`. Pair a high `#[Tries]` with `#[MaxExceptions]`, or use `retryUntil()`.
+- `#[Backoff]` applies only to exceptions, and it picks the delay by attempt number.
+- `RateLimited` middleware keeps you under a known limit across all jobs that share a key.
+- `withFakeQueueInteractions()->assertReleased(delay:)` tests the branch in a few lines.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Does release() count as an attempt in Laravel queues?', a: 'Yes. Each release increments the job’s attempts, so a job with Tries(3) that is released three times fails with MaxAttemptsExceededException on the next pickup.' },
+  { q: 'How do I respect Retry-After in a Laravel job?', a: 'Read the header from the HTTP response and call $this->release($seconds), then return. release() also accepts a DateTime if the header is an HTTP date.' },
+  { q: 'What is the difference between Tries and MaxExceptions?', a: 'Tries limits all attempts, including releases. MaxExceptions limits only attempts that ended with an unhandled exception, so rate-limit releases do not use it up.' },
+  { q: 'Does Backoff apply to released jobs?', a: 'No. Backoff is used only when the job throws. A release uses the delay you pass to release(). With a Backoff array, the delay is picked by the attempt number.' },
+  { q: 'Should I use retryUntil or Tries for rate-limited APIs?', a: 'retryUntil is usually easier: the job may be released as often as needed until the deadline. If both are set, retryUntil takes precedence.' },
+]} />
+
+## Next steps
+
+- [Laravel queued jobs with Vue](/laravel-vue-queued-job), the basics of dispatching from a Vue action
+- [Fake HTTP in Laravel tests](/test-laravel-vue#fake-an-http-call), for `Http::fake()` and sequences
+- [Sleep::fake() for retry tests](/laravel-sleep-fake-test-retries), when you do retry inside the job
+- [queue:work vs queue:listen](/laravel-vue-queued-job#run-the-queue-worker), for running workers
+
+## Sources
+
+- [Laravel docs: Queues, max attempts and timeout](https://laravel.com/framework/docs/13.x/queues#max-job-attempts-and-timeout)
+- [Laravel docs: Queues, rate limiting middleware](https://laravel.com/framework/docs/13.x/queues#rate-limiting)
+- [Laravel docs: Queues, testing job / queue interactions](https://laravel.com/framework/docs/13.x/queues#testing-job-queue-interactions)
+- [Source: `Illuminate\Queue\Worker::calculateBackoff`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Queue/Worker.php)
+- [RFC 9110: Retry-After](https://www.rfc-editor.org/rfc/rfc9110#field.retry-after)
+- [MDN: 429 Too Many Requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/429)

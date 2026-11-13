@@ -2,8 +2,9 @@
 id: 27
 title: "Inertia partial reloads in Vue"
 excerpt: "router.reload can ask Laravel for one prop. Deferred props wait until after the first paint. Merge appends on those partial visits only."
-description: "Reload one Inertia prop from Vue, defer the slow ones, and append paginated rows with Inertia::merge()."
+description: "Inertia partial reloads in Vue: reload only the props you name with router.reload({ only }), defer slow props, and append paginated rows with Inertia::merge()."
 seoTitle: "Inertia partial reloads"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T06:40:00Z
 categories: [laravel, vuejs]
 tags: [laravel, vuejs, inertia]
@@ -169,6 +170,20 @@ Open the Network tab, click a link with `:only="['posts']"`, and look at the req
 
 </TryIt>
 
+## Prefetch the next page
+
+Partial reloads make the current page cheaper. Prefetching makes the next one feel instant:
+
+```vue
+<Link href="/posts" prefetch>Posts</Link>
+<Link href="/posts" prefetch="click">Posts</Link>
+<Link href="/reports" prefetch cache-for="1m">Reports</Link>
+```
+
+By default, Inertia fetches the page after the pointer rests on the link for 75 ms and keeps the response for 30 seconds. `prefetch="click"` starts on mousedown. `prefetch="mount"` fetches as soon as the link renders. Use that only for the one link the user almost always clicks next.
+
+A prefetch is a real `GET` to your controller. Only prefetch pages whose `GET` is safe to run on hover: no writes, no "mark as read". Never prefetch a logout or any other action. It also costs a request per hover, so leave it off long tables of links.
+
 ## Which tool for which job
 
 | You want | Use |
@@ -213,3 +228,5 @@ Live updates from the server are [Reverb](/laravel-reverb-vue), not a timer that
 - [Inertia v3: Deferred props](https://inertiajs.com/docs/v3/data-props/deferred-props)
 - [Inertia v3: Merging props](https://inertiajs.com/docs/v3/data-props/merging-props)
 - [Inertia v3: Load when visible](https://inertiajs.com/docs/v3/data-props/load-when-visible)
+- [Inertia docs: Prefetching](https://inertiajs.com/docs/v3/data-props/prefetching)
+- [Inertia docs: Links](https://inertiajs.com/docs/v3/the-basics/links)

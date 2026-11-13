@@ -4,6 +4,7 @@ title: "Laravel Vite and Vue"
 excerpt: "The starter kit already runs Vite. The pieces people break are the @ alias, a secret in a VITE_ variable, and a public/hot file left on the server."
 description: "Configure Laravel Vite for Vue: the @ alias, which env vars reach the browser, and why public/hot breaks production."
 seoTitle: "Laravel Vite and Vue"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T08:00:00Z
 snippet: "npm run dev"
 categories: [laravel, vuejs]
@@ -20,7 +21,7 @@ The starter kit's Vite setup works on day one. Then someone adds an alias and de
 - `npm run dev` writes `public/hot`; `npm run build` writes `public/build`. Never deploy `public/hot`.
 - `@` points at `resources/js`. Add the alias beside the kit's plugins; don't replace them.
 - Every `VITE_` variable is public. Secrets stay in Laravel's `.env`, read on the server.
-- Restart `npm run dev` (or rebuild) after changing `.env`.
+- Vite 4 and later restarts `npm run dev` when you save `.env`; run `npm run build` again for a production bundle.
 
 </TLDR>
 
@@ -45,7 +46,7 @@ If `public/hot` is on the server, every page loads JavaScript from the URL in th
 
 </Callout>
 
-Restart `npm run dev` after `.env` changes. Vite reads `VITE_*` at startup and inlines them at build time. A key you add later is not in the bundle until you build again.
+Vite 4 and later restarts the dev server when you save a `.env` file in `envDir`; reload the page if the value still looks old. Values are inlined at build time, so a production bundle still needs `npm run build` again. Details are in [Vite restarts when env files change](#vite-restarts-when-env-files-change).
 
 <TryIt title="Check before you deploy">
 
@@ -109,22 +110,45 @@ A Reverb app key is public by design. A database password, a GitHub client secre
 
 The Laravel origin, the Reverb host, and the Reverb port are the usual public values. Set them before `npm run build`. The [Reverb guide](/laravel-reverb-vue) is why the key has to be in the bundle at all.
 
+## Vite restarts when env files change
+
+Only keys that start with `VITE_` reach `import.meta.env`. A public value looks like this:
+
+```ini
+VITE_APP_NAME="${APP_NAME}"
+```
+
+```ts
+const name = import.meta.env.VITE_APP_NAME;
+```
+
+Anything without the prefix is invisible to Vite, including `APP_KEY` and provider keys. The [AI SDK guide](/laravel-ai-sdk-vue) keeps those on the server.
+
+Vite 4 and later (including the Vite 8 the starter kit ships) watch the `.env` files in `envDir` and restart the dev server when you save one. You will see `.env changed, restarting server...` in the terminal. If the value still looks old, reload the page. A manual restart is only needed on Vite 3 and older, or when the file sits outside `envDir`. A production bundle still needs `npm run build` again; values are inlined at build time.
+
+<Callout type="gotcha">
+
+Do not print `import.meta.env` on a production page to debug. It lists every public variable. Do not move a secret into `VITE_` for one afternoon and leave it.
+
+</Callout>
+
 ## Where this stops
 
 Vite does not authenticate the API. Cookie setup for a separate dev server on port 5173 is [CORS](/laravel-vue-cors) and [Sanctum](/laravel-sanctum-vue-spa). Same-origin Inertia, opened through the Laravel URL, does not need that CORS file.
+
 
 ## Recap
 
 - `public/hot` is for your machine only; production uses `public/build`.
 - Restore `@` beside the kit's plugins, never instead of them.
 - `VITE_` variables ship to every visitor; secrets stay server-side.
-- Restart or rebuild after `.env` changes.
+- Vite restarts itself when you save `.env`; rebuild for production.
 
 ## FAQ
 
 <FAQ items={[
   { q: 'Why does my production Laravel site try to load assets from localhost:5173?', a: 'A `public/hot` file was deployed. Delete it; with it present, Laravel points the browser at the dev server URL inside it.' },
-  { q: 'Why is my new VITE_ variable undefined?', a: 'Vite reads `VITE_*` variables at startup and inlines them at build time. Restart `npm run dev`, or run `npm run build` again.' },
+  { q: 'Why is my new VITE_ variable undefined?', a: 'Vite 4 and later restarts the dev server when you save `.env` in `envDir`; reload the page if the value still looks old. A production bundle is inlined at build time, so run `npm run build` again.' },
   { q: 'Can I put an API secret in a VITE_ variable?', a: 'No. Anything prefixed `VITE_` ends up in the JavaScript bundle that every visitor downloads. Keep secrets in Laravel config.' },
 ]} />
 
@@ -133,10 +157,11 @@ Vite does not authenticate the API. Cookie setup for a separate dev server on po
 - [Deploy a Laravel + Vue app](/deploy-laravel-vue): the build and the `public/hot` checklist.
 - [Laravel Sail with Vue and Vite](/laravel-sail-vue): HMR inside Docker.
 - [Typed routes with Wayfinder](/laravel-wayfinder-vue): the `@/actions` imports.
-- [Laravel docs: Vite](https://laravel.com/docs/13.x/vite)
+- [Laravel docs: Vite](https://laravel.com/framework/docs/13.x/vite)
 
 ## Sources
 
-- [Laravel 13: Asset bundling (Vite)](https://laravel.com/docs/13.x/vite)
+- [Laravel 13: Asset bundling (Vite)](https://laravel.com/framework/docs/13.x/vite)
 - [Vite: Env variables and modes](https://vite.dev/guide/env-and-mode)
 - [Vite: resolve.alias](https://vite.dev/config/shared-options#resolve-alias)
+- [Laravel docs: Vite environment variables](https://laravel.com/framework/docs/13.x/vite#environment-variables)

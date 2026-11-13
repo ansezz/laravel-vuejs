@@ -4,6 +4,7 @@ title: "Show a queued Laravel job in Vue"
 excerpt: "Dispatch the job, store pending, ready, or failed, and reload that row in the Vue page until the file can be downloaded."
 description: "Dispatch a Laravel job, store pending, ready, or failed, and reload that status in a Vue page until the file is ready."
 seoTitle: "Show a Laravel queue in Vue"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T09:00:00Z
 snippet: "php artisan make:job BuildExport"
 categories: [laravel, vuejs]
@@ -234,12 +235,116 @@ Start an export with no worker running and watch it sit on "Preparing the file."
 
 `php artisan test --filter=ExportTest`. `Queue::fake()` proves the dispatch. Calling `handle()` proves the file write and the status change without a worker. The download test is the same ownership check as the controller: another user, and a row that is still `pending`, both receive 403.
 
+## Run the queue worker
+
+`composer run dev` already starts a queue listener with the app. That is the right process while you are changing a job class: `queue:listen` boots the framework for every job, so it picks up your edits. `php artisan serve` alone does not start a worker; in that case run `php artisan queue:listen` in another terminal.
+
+In production, run the long-lived worker:
+
+```shell
+php artisan queue:work
+```
+
+`queue:work` boots once and does not see new code until the process restarts. On a VPS, `php artisan queue:restart` after deploy signals those workers to exit after the current job. Laravel Cloud restarts its workers itself, so `queue:restart` is not a Cloud deploy command. The [deploy guide](/deploy-laravel-vue) has the table.
+
+<Callout type="gotcha">
+
+Do not call `queue:work` from a controller so a Vue button "starts the worker". The button dispatches a job. A supervisor, or the platform, runs the worker.
+
+</Callout>
+
+`queue:listen` under systemd in production will work, slowly, because it reboots the framework for every job. Do not add it to a release because a forum post listed it.
+
+## Show failed jobs to an admin
+
+A new Laravel 13 app already has a `failed_jobs` table in `0001_01_01_000002_create_jobs_table.php`. You only need `php artisan make:queue-failed-table` on an older app that is missing that migration. Do not run the maker in a fresh app; you would add a second migration for a table that already exists.
+
+`QUEUE_CONNECTION` has to be something that records failures. `sync` runs the job in the request and does not use this table.
+
+This page already stores `failed` on your `exports` row in `failed()`. The `failed_jobs` table is the framework's copy: every failed job, including mail and broadcasts, with a payload and an exception. An admin page may show the safe columns:
+
+```php
+'failed' => DB::table('failed_jobs')->orderByDesc('id')->limit(20)->get(['id', 'uuid', 'failed_at']),
+```
+
+Retry from a command you trust, not from a public button:
+
+```shell
+php artisan queue:retry all
+```
+
+<Callout type="gotcha">
+
+Do not put `payload` or `exception` in an Inertia prop. The exception text can include request data. Do not let every signed-in user open this list.
+
+</Callout>
+
+## Record when a schedule last ran
+
+`php artisan schedule:list` prints the next due time. It does not store a last run. If an admin page must show "last ran", write a timestamp yourself from the command.
+
+```php
+use Illuminate\Support\Facades\Schedule;
+
+Schedule::command('reports:daily')->daily()->withoutOverlapping();
+```
+
+`withoutOverlapping()` uses the cache so a slow run is not started twice. It is not a history table.
+
+Inside the command, after the work:
+
+```php
+Cache::forever('reports.daily.last_run', now()->toIso8601String());
+```
+
+Share that string with the admin page. `forever` here means "until the next success overwrites it", not "keep a history".
+
+<Callout type="gotcha">
+
+Do not scrape the scheduler's mutex and show it as the last success. The mutex means "it is running or it crashed while holding the lock". Do not run `schedule:work` from the Vue page. The system cron runs `schedule:run` every minute, or the platform does.
+
+</Callout>
+
+## Prune old rows on a schedule
+
+The `exports` table in this guide will grow. Prune a table you can afford to lose, such as expired exports or old invitations. Do not point that scope at `User`.
+
+```php
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\MassPrunable;
+
+class Export extends Model
+{
+    use MassPrunable;
+
+    public function prunable(): Builder
+    {
+        return static::where('created_at', '<=', now()->subDays(30))
+            ->whereIn('status', ['ready', 'failed']);
+    }
+}
+```
+
+```php
+Schedule::command('model:prune')->daily();
+```
+
+`MassPrunable` deletes in SQL and does not fire model events. Use `Prunable` when you need `deleting`. Run `php artisan model:prune --pretend` before you trust the scope. Something on the server has to call `schedule:run` every minute; the [deploy guide](/deploy-laravel-vue) is the release around that cron.
+
+<Callout type="gotcha">
+
+Do not prune from a Vue button that calls this on `User`. Do not write `where('created_at', '>=', ...)` and think you kept the old rows. That keeps the new ones and deletes the rest. Read the comparison twice.
+
+</Callout>
+
 ## Recap
 
 - Store your own status; the `jobs` table is not a UI.
 - Poll with a partial reload and stop when the status changes.
 - Private disk + owner check for downloads.
 - `Queue::fake()` for the dispatch, `handle()` for the work.
+- `queue:listen` locally, `queue:work` in production; Cloud restarts workers for you.
+- Show only safe `failed_jobs` columns; write your own last-run stamp; prune tables you can afford to lose.
 
 ## FAQ
 
@@ -247,6 +352,9 @@ Start an export with no worker running and watch it sit on "Preparing the file."
   { q: 'Why is my Laravel job stuck on pending?', a: 'No worker is processing the queue. `composer run dev` starts one; with `php artisan serve` alone, run `php artisan queue:work`.' },
   { q: 'How do I show queued job progress in Vue?', a: 'Store a status row, pass it as a prop, and poll with `router.reload({ only: [\'export\'] })` until it leaves `pending`, or broadcast with Reverb.' },
   { q: 'Why does an Inertia Link not download my file?', a: 'Inertia treats a Link as a page visit. Use a plain `<a href>` for downloads.' },
+  { q: "Should I use queue:work or queue:listen?", a: "`queue:listen` locally so it reloads your code each job. `queue:work` in production, and restart it on deploy (Laravel Cloud does that for you)." },
+  { q: "Can I show the failed_jobs exception on an admin page?", a: "No. Pass only safe columns such as `id`, `uuid`, and `failed_at`. The exception and payload can include request data." },
+  { q: "Does schedule:list store the last run?", a: "No. It prints the next due time. Write a timestamp from the command if the Vue page needs one." },
 ]} />
 
 ## Next steps
@@ -257,6 +365,12 @@ Start an export with no worker running and watch it sit on "Preparing the file."
 
 ## Sources
 
-- [Laravel 13: Queues](https://laravel.com/docs/13.x/queues)
-- [Laravel 13: File storage, downloads](https://laravel.com/docs/13.x/filesystem#downloading-files)
+- [Laravel 13: Queues](https://laravel.com/framework/docs/13.x/queues)
+- [Laravel 13: File storage, downloads](https://laravel.com/framework/docs/13.x/filesystem#downloading-files)
 - [Inertia v3: Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads)
+- [Laravel docs: Running the queue worker](https://laravel.com/framework/docs/13.x/queues#running-the-queue-worker)
+- [Laravel docs: Supervisor configuration](https://laravel.com/framework/docs/13.x/queues#supervisor-configuration)
+- [Laravel docs: Dealing with failed jobs](https://laravel.com/framework/docs/13.x/queues#dealing-with-failed-jobs)
+- [Laravel docs: Task scheduling](https://laravel.com/framework/docs/13.x/scheduling)
+- [Laravel docs: Task hooks](https://laravel.com/framework/docs/13.x/scheduling#task-hooks)
+- [Laravel docs: Pruning models](https://laravel.com/framework/docs/13.x/eloquent#pruning-models)

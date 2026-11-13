@@ -3,6 +3,7 @@ id: 160
 title: "Laravel automatic eager loading: kill N+1 with one line"
 seoTitle: "Laravel Automatic Eager Loading: Kill N+1 in One Line"
 excerpt: "Hidden gem: one line in AppServiceProvider turns every forgotten with() into one batched query. 51 queries became 2 in our Laravel 13.37 test."
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-19T02:30:00Z
 snippet: "Model::automaticallyEagerLoadRelationships();"
 categories: [laravel, vuejs]
@@ -25,7 +26,7 @@ You shipped the posts page with `with('author')`. Two sprints later someone adds
 
 ## What automatic eager loading is and why people miss it
 
-Automatic eager loading shipped in Laravel 12.8 (April 2025, [PR #53655](https://github.com/laravel/framework/pull/53655)). Laravel 12.9 added `withRelationshipAutoloading()` on single models and fixed a closure serialization error with queued models. The Laravel 12 docs labelled the feature beta. The [13.x docs](https://laravel.com/docs/13.x/eloquent-relationships#automatic-eager-loading) no longer carry that warning.
+Automatic eager loading shipped in Laravel 12.8 (April 2025, [PR #53655](https://github.com/laravel/framework/pull/53655)). Laravel 12.9 added `withRelationshipAutoloading()` on single models and fixed a closure serialization error with queued models. The Laravel 12 docs labelled the feature beta. The [13.x docs](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatic-eager-loading) no longer carry that warning.
 
 It sits between "Lazy Eager Loading" and "Preventing Lazy Loading" in a very long relationships page. If you learned Eloquent before 2025, you already "know" eager loading and never scroll back.
 
@@ -149,6 +150,21 @@ public function boot(): void
 }
 ```
 
+## Explicit with() and column lists
+
+Automatic eager loading is a safety net. For a list page, an explicit `with()` still says exactly what the page needs, and it can limit the columns:
+
+```php
+$posts = Post::query()
+    ->with('author:id,name')
+    ->latest('id')
+    ->paginate(12);
+```
+
+Keep the key in the column list: `author:id,name` works because `id` is how Laravel matches each author to its posts. Leave it out and every `author` comes back `null`. Don't eager load every relation "just in case". With Inertia, every loaded relation is serialized into the page JSON.
+
+To catch a missing `with()` in development, enable `Model::preventLazyLoading(! app()->isProduction())` in a service provider. A lazy load then throws instead of quietly running one query per row.
+
 ## Gotchas
 
 **Touch it once, load it for everyone.** We read `$posts->first()->author` for a page heading. Laravel loaded the author for all 50 posts, because that is the whole idea. On a 5,000-row export where you only need one author, that is 4,999 rows you did not ask for.
@@ -163,7 +179,7 @@ A loaded relation is serialized. In the lab we passed a raw collection of posts 
 
 **A new query per row is still N+1.** Each query returns its own collection. `Post::where('id', $id)->get()` inside a `foreach` gets no help, because each collection only has one model in it.
 
-**Child to parent costs one extra query.** Reading `$comment->post` while looping a post's comments ran one more `posts where id in (...)` query, for posts you already had in memory. [`chaperone()`](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children) on the `hasMany` hydrates the parent for free (2 queries instead of 3). The two features stack fine.
+**Child to parent costs one extra query.** Reading `$comment->post` while looping a post's comments ran one more `posts where id in (...)` query, for posts you already had in memory. [`chaperone()`](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children) on the `hasMany` hydrates the parent for free (2 queries instead of 3). The two features stack fine.
 
 **Single models gain nothing.** `Post::find(1)->author` still runs 2 queries, the same as lazy loading. `Post::create()` followed by `->author` lazy loads as usual. The win only appears when there is a collection to batch.
 
@@ -229,17 +245,17 @@ If your app has a list page and a debug bar, try it today and compare the query 
 
 ## Next steps
 
-- [Eager load a relation for a Vue list](/laravel-eager-load-vue), the manual `with()` version
 - [API resources for Vue](/laravel-api-resources-vue), to keep Inertia payloads to the fields you chose
 - [Inertia partial reloads](/inertia-partial-reloads), so heavy props are not reloaded on every visit
-- [Laravel docs: Automatic eager loading](https://laravel.com/docs/13.x/eloquent-relationships#automatic-eager-loading)
+- [Laravel docs: Automatic eager loading](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatic-eager-loading)
 
 ## Sources
 
-- [Laravel 13 docs: Automatic eager loading](https://laravel.com/docs/13.x/eloquent-relationships#automatic-eager-loading)
-- [Laravel 13 docs: Preventing lazy loading](https://laravel.com/docs/13.x/eloquent-relationships#preventing-lazy-loading)
-- [Laravel 13 docs: Automatically hydrating parent models (`chaperone`)](https://laravel.com/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
+- [Laravel 13 docs: Automatic eager loading](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatic-eager-loading)
+- [Laravel 13 docs: Preventing lazy loading](https://laravel.com/framework/docs/13.x/eloquent-relationships#preventing-lazy-loading)
+- [Laravel 13 docs: Automatically hydrating parent models (`chaperone`)](https://laravel.com/framework/docs/13.x/eloquent-relationships#automatically-hydrating-parent-models-on-children)
 - [laravel/framework v12.8.0 release (PR #53655)](https://github.com/laravel/framework/releases/tag/v12.8.0)
 - [laravel/framework v12.9.0 release (PRs #55344, #55345)](https://github.com/laravel/framework/releases/tag/v12.9.0)
 - [laravel/framework PR #56211: factories and automatic eager loading](https://github.com/laravel/framework/pull/56211)
 - [Source: `Illuminate\Database\Eloquent\Collection::withRelationshipAutoloading`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Eloquent/Collection.php)
+- [Laravel docs: Eager loading](https://laravel.com/framework/docs/13.x/eloquent-relationships#eager-loading)

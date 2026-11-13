@@ -1,5 +1,6 @@
 ---
 import Base from '../../layouts/Base.astro'
+import { clip } from '../../lib/content'
 import PageHero from '../../components/PageHero.astro'
 import { traps } from '../../data/traps'
 
@@ -21,7 +22,7 @@ const tools = [
   { href: '/tools/agents', title: 'AGENTS.md', lead: 'Pick the stack. Download a rules file, or fetch the default one.' },
 ]
 ---
-<Base title="Tools" description={description}>
+<Base title="Tools" description={clip(description, 155)}>
   <PageHero
     kicker="For developers and assistants"
     title="Tools"

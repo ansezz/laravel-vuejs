@@ -2,8 +2,9 @@
 id: 33
 title: "Laravel policies on a Vue page"
 excerpt: "A policy decides whether this user can update this post. The Vue page receives that boolean. The controller still calls authorize."
-description: "Authorize a single Laravel post with a policy, and pass the same boolean to the Vue edit link."
+description: "Authorize a Laravel model with a policy in the controller, and pass the same can-edit boolean to the Vue page so the edit button matches the server."
 seoTitle: "Laravel policies on a Vue page"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T07:40:00Z
 snippet: "php artisan make:policy PostPolicy --model=Post"
 categories: [laravel, vuejs]
@@ -25,7 +26,7 @@ tags: [laravel, vuejs, permissions]
 
 </TLDR>
 
-The posts in the [setup guide](/application-setup) have no owner. A policy needs one. This page adds `user_id`, then allows update only for that user. A permission such as "editor" is a different question and stays in [permissions](/laravel-vue-permissions). The screen is still the [CRUD guide](/laravel-inertia-vue-crud). The app is [Inertia, a SPA, or Nuxt](/laravel-vue-in-2026).
+The posts in the [setup guide](/application-setup) have no owner. A policy needs one. This page adds `user_id`, then allows update only for that user. A permission such as "editor" is a different question and stays in [permissions](#roles-and-permissions-with-spatie). The screen is still the [CRUD guide](/laravel-inertia-vue-crud). The app is [Inertia, a SPA, or Nuxt](/laravel-vue-in-2026).
 
 ## The column
 
@@ -147,6 +148,139 @@ The factory needs `user_id` once the column exists. `assertForbidden` is the ass
 
 Spatie permissions and this policy can both exist. An editor permission can allow `update` even when the user is not the owner, inside the policy, with `$user->can('posts.update')`. Put that combination in the policy so there is still one method the controller calls. Do not check the role in the Vue page.
 
+## Require login first
+
+A policy answers "may this user do this to this row". The question before it is "is anyone logged in", and that belongs on the route:
+
+```php title="routes/web.php"
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('/posts', [PostController::class, 'index'])->name('posts.index');
+    Route::resource('posts', PostController::class)->except('index');
+});
+```
+
+A guest's Inertia visit gets a redirect to the `login` route before the controller runs. Inertia follows it, so the Vue page never mounts and there's nothing to catch in `router.on('error')`. The test for this setup checks both halves: a guest gets the redirect to `/login`, and a signed-in user gets a 200. `verified` sends users with an unverified email to the verification notice.
+
+In Vue, `page.props.auth.user` is for display only, for example showing a name or hiding a menu. It isn't a guard. Don't add Vue Router guards that copy this middleware into an Inertia app. If you call the route with a raw `fetch()` instead of an Inertia visit, you get the login page's HTML back, not JSON.
+
+## Authorize in the controller
+
+The policy only protects you if every request that changes data asks it. In Laravel 11 and later, the base `Controller` class is empty, so `$this->authorize()` doesn't exist unless you add the `AuthorizesRequests` trait yourself. Use the `Gate` facade instead:
+
+```php title="app/Http/Controllers/PostController.php"
+use Illuminate\Support\Facades\Gate;
+
+public function edit(Post $post): Response
+{
+    Gate::authorize('update', $post);
+
+    return Inertia::render('posts/Edit', [
+        'post' => $post->only(['id', 'title', 'body']),
+    ]);
+}
+
+public function update(UpdatePostRequest $request, Post $post): RedirectResponse
+{
+    Gate::authorize('update', $post);
+
+    $post->update($request->validated());
+
+    return to_route('posts.show', $post);
+}
+```
+
+`Gate::authorize()` throws an `AuthorizationException`, which becomes a 403. Inertia shows its error page and the Edit component never mounts. Check `edit` and `update` separately: they're two different requests, and someone can send the `PUT` without ever opening the form. Policy methods should return `true` or `false`, not call `abort()`.
+
+## Share the answer as a boolean
+
+The Vue page can't run a PHP policy, so send the answer:
+
+```php
+return Inertia::render('posts/Show', [
+    'post' => $post->only(['id', 'title']),
+    'can' => [
+        'update' => $request->user()?->can('update', $post) ?? false,
+        'delete' => $request->user()?->can('delete', $post) ?? false,
+    ],
+]);
+```
+
+```vue
+<Link v-if="can.update" :href="`/posts/${post.id}/edit`">Edit</Link>
+```
+
+Use `v-if`, not CSS, so the button isn't in the DOM. Don't send the user model or a list of every ability so the page can work it out: Vue can't see the policy anyway. The boolean is a snapshot from the last response, which is why the controller still checks.
+
+## Gate the index with viewAny
+
+An index has no single post to pass, so the policy uses `viewAny`, which receives only the user. Call it with the class name:
+
+```php
+public function viewAny(User $user): bool
+{
+    return $user->hasVerifiedEmail();
+}
+
+public function index(Request $request): Response
+{
+    Gate::authorize('viewAny', Post::class);
+
+    return Inertia::render('posts/Index', [
+        'posts' => $request->user()->posts()->latest('id')->paginate(12),
+    ]);
+}
+```
+
+Passing an instance would call `view` instead. `viewAny` answers "can this person open the list?". The query answers "which rows?". If users may only see their own posts, scope the query as well. Don't send every row and filter in Vue.
+
+## Roles and permissions with Spatie
+
+A policy answers "does this user own this post?". A permission answers "is this user an editor?". For the second, [spatie/laravel-permission](https://spatie.be/docs/laravel-permission/v6/introduction) is the common package:
+
+```bash
+composer require spatie/laravel-permission
+php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
+php artisan migrate
+```
+
+```php title="app/Models/User.php"
+use Spatie\Permission\Traits\HasRoles;
+
+class User extends Authenticatable
+{
+    use HasRoles;
+}
+```
+
+Give permissions from a seeder or an admin command, never from the Vue page:
+
+```php
+$user->givePermissionTo('posts.publish');
+$user->assignRole('editor');
+```
+
+Spatie registers its permissions with Laravel's gate, so `$user->can('posts.publish')` works, and so does sharing it as a boolean the same way as above. Combine the two when you need both: `$user->can('posts.publish') && $user->can('update', $post)`. Don't turn "only the author" into another permission string. That rule needs the post, so it belongs in a policy.
+
+## Permission middleware on the route
+
+When a whole route is for one permission, refuse the request before the controller runs. Register the aliases in `bootstrap/app.php`:
+
+```php title="bootstrap/app.php"
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->alias([
+        'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
+        'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+    ]);
+})
+```
+
+```php title="routes/web.php"
+Route::post('/posts/{post}/publish', PublishPostController::class)
+    ->middleware(['auth', 'permission:posts.publish']);
+```
+
+A user without `posts.publish` gets a 403. Spell the permission the same way in the seeder and in the route, because `posts.publish` and `post.publish` are two different permissions. Laravel's own `can` middleware does the same for policies: `->can('update', 'post')`.
+
 ## Recap
 
 - Owner column from the logged-in user, never from input.
@@ -164,11 +298,18 @@ Spatie permissions and this policy can both exist. An editor permission can allo
 
 ## Next steps
 
-- [Laravel permissions on a Vue page](/laravel-vue-permissions)
 - [CRUD with Inertia and Vue](/laravel-inertia-vue-crud)
 - [Test a Laravel and Vue app](/test-laravel-vue)
 
 ## Sources
 
-- [Laravel 13: Authorization, policies](https://laravel.com/docs/13.x/authorization#creating-policies)
+- [Laravel 13: Authorization, policies](https://laravel.com/framework/docs/13.x/authorization#creating-policies)
 - [Inertia v3: Authorization](https://inertiajs.com/docs/v3/security/authorization)
+- [spatie/laravel-permission documentation](https://spatie.be/docs/laravel-permission)
+- [Laravel 13: Authorization](https://laravel.com/framework/docs/13.x/authorization)
+- [Laravel docs: Writing policies](https://laravel.com/framework/docs/13.x/authorization#writing-policies)
+- [Laravel docs: Authorizing actions using policies](https://laravel.com/framework/docs/13.x/authorization#authorizing-actions-using-policies)
+- [spatie/laravel-permission docs: Middleware](https://spatie.be/docs/laravel-permission/v6/basic-usage/middleware)
+- [spatie/laravel-permission on GitHub](https://github.com/spatie/laravel-permission)
+- [Laravel docs: Protecting routes](https://laravel.com/framework/docs/13.x/authentication#protecting-routes)
+- [Inertia docs: Authentication](https://inertiajs.com/docs/v3/security/authentication)

@@ -4,6 +4,7 @@ title: "Laravel API resources for a Vue client"
 excerpt: "A resource is the JSON shape a SPA or Nuxt reads. An Inertia page can keep passing the model. Axios sees the rows on response.data.data."
 description: "Shape Laravel JSON for Vue with PostResource and a paginated collection, and read rows from response.data.data."
 seoTitle: "Laravel API resources for Vue"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T06:50:00Z
 snippet: "php artisan make:resource PostResource"
 categories: [laravel, vuejs]
@@ -107,11 +108,53 @@ it('returns a paginated resource', function () {
 
 </TryIt>
 
+## Format money on the server
+
+Store integer cents. Format once on the server with `Number::currency`, and pass a string the page can print:
+
+```php title="app/Http/Resources/OrderResource.php"
+use Illuminate\Support\Number;
+
+'price' => Number::currency($this->total_cents / 100, in: 'USD'),
+```
+
+In tests on Laravel 13, `Number::currency(1234.5, in: 'USD')` returns `$1,234.50`, and `Number::currency(1234.5, in: 'EUR', locale: 'de')` returns `1.234,50 €` (with a non-breaking space before the symbol). It needs the PHP `intl` extension, so a missing extension is a deploy problem, not a Vue problem.
+
+Don't add two prices in the component with `+`. Binary floats make that wrong. Tax is another integer on the server. Don't use a `float` column for money, and don't send cents to the browser to format with string concatenation. Don't install a second currency package in the starter kit for one label.
+
+## Format timestamps in the user's zone
+
+Don't set `APP_TIMEZONE` to the signed-in user's city. That default is the app timezone, and every row would shift when someone else signs in. The database connection should store UTC. Convert for display in the resource:
+
+```php title="app/Http/Resources/PostResource.php"
+$zone = in_array($request->user()->timezone, timezone_identifiers_list(), true)
+    ? $request->user()->timezone
+    : config('app.timezone');
+
+'createdAt' => $this->created_at->timezone($zone)->toIso8601String(),
+```
+
+A model's `toArray()` date is a UTC ISO string ending in `Z`. If you convert, do it once and let Vue print the string. Adding the offset again in the component is how a 10:00 post becomes 12:00. In tests on Laravel 13, `2026-11-10 02:00:00` UTC is `10:00` in `Asia/Kuala_Lumpur`.
+
+Don't store a local datetime in a `timestamp` column by formatting it in PHP and writing the string. The next reader in another zone cannot undo a conversion you did not record. Don't trust a timezone name that is not in `timezone_identifiers_list()`.
+
 ## What not to put in the resource
 
 Do not call `Storage::url` for a private file and hand the URL to any logged-in user. Public covers from the [upload guide](/laravel-vue-file-upload) can be a `/storage/...` path. Anything else stays behind a controller that checks the user.
 
 Do not embed the entire author model. Pass `author: $this->user?->only(['id', 'name'])` when you add that relation. Until the post has a user, leave it out. The [policy guide](/laravel-vue-policies) is what adds `user_id`.
+
+## Version the API under /api/v1
+
+When a mobile app or a partner calls the same data, give the JSON API its own versioned prefix. Install the API routes with `php artisan install:api`, which also installs Sanctum. Then group the routes:
+
+```php title="routes/api.php"
+Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+    Route::apiResource('posts', Api\V1\PostController::class)->only(['index', 'show']);
+});
+```
+
+The URL is `/api/v1/posts`, because `routes/api.php` already adds `/api`. Keep the controllers and resources under `Api\V1` too. A breaking change to a field then becomes a `V2` resource, and old clients keep working. Your Inertia pages don't call these routes. They get props from `routes/web.php` controllers, and those can reuse the same resource classes. Don't point an Inertia `<Link>` at `/api/v1/...`: a JSON body isn't an Inertia response, so the visit fails.
 
 ## Where this stops
 
@@ -128,6 +171,8 @@ Inertia pages should not fetch this endpoint to paint the list they already rece
 - `toArray` is the allow-list; add keys deliberately.
 - A paginated collection keeps `links` and `meta`; rows are on `data`.
 - Private files and full related models stay out.
+- Format money with `Number::currency` and pass a string; store integer cents.
+- Store timestamps in UTC and convert once to an allow-listed user timezone.
 
 ## FAQ
 
@@ -135,6 +180,8 @@ Inertia pages should not fetch this endpoint to paint the list they already rece
   { q: 'Why is my Laravel data on response.data.data in Vue?', a: '`response.data` is the Axios body; Laravel resources wrap rows in a `data` key. Both are by design.' },
   { q: 'Do I need API resources with Inertia?', a: 'Usually not. Inertia controllers pass props to the page. Use a resource when a separate SPA, Nuxt or a mobile app calls the endpoint.' },
   { q: 'Can I remove the data wrapper from Laravel resources?', a: '`JsonResource::withoutWrapping()` removes it for single resources, but paginated collections still return `data`, `links` and `meta`. Most Vue clients just read `data`.' },
+  { q: "Should I add prices in Vue?", a: "No. Store integer cents, format once with `Number::currency` on the server, and pass a string the page can print. Binary floats make `price + tax` in JavaScript the wrong total." },
+  { q: "Should APP_TIMEZONE follow the signed-in user?", a: "No. That default is the app timezone, and every row would shift when someone else signs in. Store UTC, allow-list the user's zone with `timezone_identifiers_list()`, and convert once in the resource." },
 ]} />
 
 ## Next steps
@@ -145,5 +192,12 @@ Inertia pages should not fetch this endpoint to paint the list they already rece
 
 ## Sources
 
-- [Laravel 13: Eloquent API resources](https://laravel.com/docs/13.x/eloquent-resources)
+- [Laravel 13: Eloquent API resources](https://laravel.com/framework/docs/13.x/eloquent-resources)
 - [Axios: Response schema](https://axios-http.com/docs/res_schema)
+- [Laravel docs: Route prefixes](https://laravel.com/framework/docs/13.x/routing#route-group-prefixes)
+- [Laravel docs: Routing](https://laravel.com/framework/docs/13.x/routing)
+- [Laravel docs: Number::currency()](https://laravel.com/framework/docs/13.x/helpers#method-number-currency)
+- [MDN: Intl.NumberFormat](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat)
+- [Laravel docs: Configuration](https://laravel.com/framework/docs/13.x/configuration)
+- [Laravel docs: Dates](https://laravel.com/framework/docs/13.x/helpers#dates)
+- [PHP manual: timezone_identifiers_list()](https://www.php.net/manual/en/function.timezone-identifiers-list.php)

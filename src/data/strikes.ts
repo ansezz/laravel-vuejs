@@ -49,7 +49,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "conflict",
-    guide: "/inertia-error-409-vue",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Read an Inertia 409 after deploy",
     reason:
       "Do not abort(409) from a controller to mean this record changed. Inertia already uses 409 for the asset version.",
@@ -57,7 +57,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "cors",
-    guide: "/cors-supports-credentials-vue",
+    guide: "/laravel-vue-cors",
     guideTitle: "Turn on CORS credentials for a separate Vue app",
     reason:
       "Do not set allowed_origins to ['*'] in the same file as supports_credentials => true.",
@@ -70,7 +70,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "csrf",
-    guide: "/laravel-vue-419-after-deploy",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Fix a 419 after you deploy",
     reason:
       "Do not disable VerifyCsrfToken for the whole web group. The token is the check.",
@@ -83,7 +83,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "worker",
-    guide: "/laravel-queue-work-vs-listen",
+    guide: "/laravel-vue-queued-job",
     guideTitle: "queue:work in production, listen locally",
     reason:
       "Do not call queue:work from a controller so a Vue button starts the worker. The button dispatches a job.",
@@ -146,7 +146,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "echo",
-    guide: "/laravel-should-broadcast-vue",
+    guide: "/laravel-reverb-vue",
     guideTitle: "Queue a broadcast instead of blocking the save",
     reason: "Do not listen with useEcho on a public channel.",
     find: (line) => {
@@ -158,7 +158,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "simple",
-    guide: "/simple-paginate-vue",
+    guide: "/laravel-vue-pagination",
     guideTitle: "Render simplePaginate without a last page",
     reason:
       "simplePaginate omits last_page. Do not compute page 2 of undefined.",
@@ -171,7 +171,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "proxy",
-    guide: "/laravel-trust-proxies-https",
+    guide: "/deploy-laravel-vue#trust-proxies-so-https-sticks",
     guideTitle: "Trust proxies so HTTPS sticks",
     reason: "Do not call trustProxies(at: '*') on a machine exposed directly.",
     find: (line) => {
@@ -238,7 +238,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "logout",
-    guide: "/inertia-preserve-state-vue",
+    guide: "/inertia-form-component-vue",
     guideTitle: "preserveState keeps the Vue page you have",
     reason:
       "Do not set preserveState: true on a logout request. The old page's props, including the user, stay on screen until something else navigates.",
@@ -251,7 +251,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "migrate",
-    guide: "/laravel-migrate-on-deploy-vue",
+    guide: "/deploy-laravel-vue#run-migrations-in-the-release-not-in-a-request",
     guideTitle: "Run migrations in the release, not in a request",
     reason:
       "Do not call Artisan::call('migrate') from a controller the Vue page can hit. Two deploys, or two curious browsers, should not race that.",
@@ -264,7 +264,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "telescope",
-    guide: "/laravel-telescope-dev-only",
+    guide: "/application-setup",
     guideTitle: "Install Telescope for local debugging",
     reason:
       "Do not return true for every user so a Vue admin link can open Telescope. Leave the viewTelescope gate on local.",
@@ -277,7 +277,7 @@ export const strikes: StrikeRule[] = [
   },
   {
     id: "window",
-    guide: "/inertia-ssr-process-cloud",
+    guide: "/inertia-ssr",
     guideTitle: "Keep the Inertia SSR process running",
     reason: "Do not read window in setup.",
     find: (line) => {

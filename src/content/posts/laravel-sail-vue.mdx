@@ -4,6 +4,7 @@ title: "Laravel Sail with Vue and Vite"
 excerpt: "Sail runs PHP, the database, and npm in Docker. The Vue dev server is a Sail command, and HMR fails when the browser cannot see that container."
 description: "Run a Laravel and Vue app with Sail: sail:install, sail up, migrations, npm run dev, and the documented HMR host."
 seoTitle: "Laravel Sail and Vue"
+updated: 2026-11-10T13:00:00Z
 date: 2026-10-10T05:40:00Z
 snippet: "php artisan sail:install"
 categories: [laravel, vuejs]
@@ -101,6 +102,8 @@ Restart `./vendor/bin/sail npm run dev` after the change. If the browser still r
 
 `public/hot` appears while that dev server is running. It must not be deployed. The [deploy guide](/deploy-laravel-vue) covers that file.
 
+Do not delete `public/hot` by hand while the dev server is still running and expect it to stay gone. Vite writes the file back. Do not set `server.hmr.host` to a name that only resolves inside the container. The browser on the host is the thing opening the WebSocket, so the hostname has to work from there.
+
 ## Where this stops
 
 Sail does not choose your auth or your router. Cookie auth for a second origin is [Sanctum](/laravel-sanctum-vue-spa). Asset URLs, the `@` alias, and `VITE_` variables are [Vite](/laravel-vite-vue).
@@ -126,9 +129,9 @@ Sail does not choose your auth or your router. Cookie auth for a second origin i
 - [Set up a Laravel 13 + Vue 3 app](/application-setup): the first page, now inside Sail.
 - [Laravel Vite and Vue](/laravel-vite-vue): `public/hot`, the alias and `VITE_` variables.
 - [Deploy a Laravel + Vue app](/deploy-laravel-vue): what changes off your machine.
-- [Laravel docs: Sail](https://laravel.com/docs/13.x/sail)
+- [Laravel docs: Sail](https://laravel.com/framework/docs/13.x/sail)
 
 ## Sources
 
-- [Laravel 13: Sail](https://laravel.com/docs/13.x/sail)
-- [Laravel 13: Vite, running the development server in Sail on WSL2](https://laravel.com/docs/13.x/vite#configuring-hmr-in-sail-on-wsl2)
+- [Laravel 13: Sail](https://laravel.com/framework/docs/13.x/sail)
+- [Laravel 13: Vite, running the development server in Sail on WSL2](https://laravel.com/framework/docs/13.x/vite#configuring-hmr-in-sail-on-wsl2)

@@ -249,7 +249,7 @@ export const cases: WhichCase[] = [
   {
     id: "worker",
     task: "Run a queued job after the Vue form saves.",
-    guide: "/laravel-queue-work-vs-listen",
+    guide: "/laravel-vue-queued-job",
     guideTitle: "queue:work in production, listen locally",
     rule: "Do not call queue:work from a controller so a Vue button starts the worker. The button dispatches a job.",
     files: [
@@ -339,7 +339,7 @@ export const cases: WhichCase[] = [
   {
     id: "conflict",
     task: "Tell the author this post changed under them.",
-    guide: "/inertia-error-409-vue",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Read an Inertia 409 after deploy",
     rule: "Do not abort(409) from a controller to mean this record changed. Inertia already uses 409 for the asset version, and the client will reload instead of showing your sentence.",
     files: [
@@ -385,7 +385,7 @@ export const cases: WhichCase[] = [
   {
     id: "cors",
     task: "Let a separate Vue app send the session cookie.",
-    guide: "/cors-supports-credentials-vue",
+    guide: "/laravel-vue-cors",
     guideTitle: "Turn on CORS credentials for a separate Vue app",
     rule: "Do not set allowed_origins to ['*'] in the same file as supports_credentials => true.",
     files: [
@@ -435,7 +435,7 @@ export const cases: WhichCase[] = [
   {
     id: "csrf",
     task: "Stop the 419 on a same-host Inertia form.",
-    guide: "/laravel-vue-419-after-deploy",
+    guide: "/deploy-laravel-vue",
     guideTitle: "Fix a 419 after you deploy",
     rule: "Do not disable VerifyCsrfToken for the whole web group. The token is the check.",
     files: [
@@ -525,7 +525,7 @@ export const cases: WhichCase[] = [
   {
     id: "echo",
     task: "Hear a published post in the Vue page.",
-    guide: "/laravel-should-broadcast-vue",
+    guide: "/laravel-reverb-vue",
     guideTitle: "Queue a broadcast instead of blocking the save",
     rule: "Do not listen with useEcho on a public channel.",
     files: [
@@ -568,7 +568,7 @@ export const cases: WhichCase[] = [
   {
     id: "simple",
     task: "Show the next page of posts.",
-    guide: "/simple-paginate-vue",
+    guide: "/laravel-vue-pagination",
     guideTitle: "Render simplePaginate without a last page",
     rule: "simplePaginate omits last_page. Do not compute page 2 of undefined.",
     files: [
@@ -614,7 +614,7 @@ export const cases: WhichCase[] = [
   {
     id: "proxy",
     task: "Make HTTPS stick on a public server.",
-    guide: "/laravel-trust-proxies-https",
+    guide: "/deploy-laravel-vue#trust-proxies-so-https-sticks",
     guideTitle: "Trust proxies so HTTPS sticks",
     rule: "Do not call trustProxies(at: '*') on a machine exposed directly.",
     files: [
@@ -837,7 +837,7 @@ export const cases: WhichCase[] = [
   {
     id: "logout",
     task: "Log the user out from the Vue page.",
-    guide: "/inertia-preserve-state-vue",
+    guide: "/inertia-form-component-vue",
     guideTitle: "preserveState keeps the Vue page you have",
     rule: "Do not set preserveState: true on a logout request. The old page's props, including the user, stay on screen until something else navigates.",
     files: [
@@ -878,7 +878,7 @@ export const cases: WhichCase[] = [
   {
     id: "migrate",
     task: "Run the new migration when you deploy.",
-    guide: "/laravel-migrate-on-deploy-vue",
+    guide: "/deploy-laravel-vue#run-migrations-in-the-release-not-in-a-request",
     guideTitle: "Run migrations in the release, not in a request",
     rule: "Do not call Artisan::call('migrate') from a controller the Vue page can hit. Two deploys, or two curious browsers, should not race that.",
     files: [
@@ -922,7 +922,7 @@ export const cases: WhichCase[] = [
   {
     id: "telescope",
     task: "Open Telescope from a Vue admin link.",
-    guide: "/laravel-telescope-dev-only",
+    guide: "/application-setup",
     guideTitle: "Install Telescope for local debugging",
     rule: "Do not return true for every user so a Vue admin link can open Telescope. Leave the viewTelescope gate on local.",
     files: [
@@ -966,7 +966,7 @@ export const cases: WhichCase[] = [
   {
     id: "window",
     task: "Read the browser location during setup.",
-    guide: "/inertia-ssr-process-cloud",
+    guide: "/inertia-ssr",
     guideTitle: "Keep the Inertia SSR process running",
     rule: "Do not read window in setup.",
     files: [

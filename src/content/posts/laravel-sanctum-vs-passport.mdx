@@ -25,7 +25,7 @@ tags: [laravel, vuejs, sanctum, passport]
 
 </TLDR>
 
-Laravel's own split is the one to use. If the app must speak OAuth 2, use Passport. If you are authenticating a single-page app, a mobile app, or issuing API tokens, use Sanctum. Sanctum does not support OAuth 2. The [Passport docs](https://laravel.com/docs/13.x/passport) state that directly.
+Laravel's own split is the one to use. If the app must speak OAuth 2, use Passport. If you are authenticating a single-page app, a mobile app, or issuing API tokens, use Sanctum. Sanctum does not support OAuth 2. The [Passport docs](https://laravel.com/framework/docs/13.x/passport) state that directly.
 
 | You are authenticating | Use |
 |---|---|
@@ -152,7 +152,7 @@ Save it as `Authorize.vue` inside `pages/auth/OAuth`, next to the kit's other au
 
 <Callout type="tip" title="skipping the prompt for your own client">
 
-A first-party client can skip this prompt. Extend Passport's `Client` and return `$this->firstParty()` from `skipsAuthorization`. The [docs](https://laravel.com/docs/13.x/passport) show that override. A third-party client should keep the prompt.
+A first-party client can skip this prompt. Extend Passport's `Client` and return `$this->firstParty()` from `skipsAuthorization`. The [docs](https://laravel.com/framework/docs/13.x/passport) show that override. A third-party client should keep the prompt.
 
 </Callout>
 
@@ -214,6 +214,6 @@ Protect your API with `auth:api`. Callers send `Authorization: Bearer` and the a
 
 ## Sources
 
-- [Laravel 13: Passport](https://laravel.com/docs/13.x/passport)
-- [Laravel 13: Sanctum](https://laravel.com/docs/13.x/sanctum)
+- [Laravel 13: Passport](https://laravel.com/framework/docs/13.x/passport)
+- [Laravel 13: Sanctum](https://laravel.com/framework/docs/13.x/sanctum)
 - [OAuth 2.0 for Browser-Based Apps (IETF draft)](https://datatracker.ietf.org/doc/draft-ietf-oauth-browser-based-apps/)

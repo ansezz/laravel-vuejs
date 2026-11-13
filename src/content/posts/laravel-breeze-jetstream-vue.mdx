@@ -4,6 +4,7 @@ title: "Breeze, Jetstream, and the Vue starter kit"
 excerpt: "Both packages still install. laravel new no longer offers them. The Vue starter kit already has the screens those tutorials are trying to publish."
 description: "Breeze and Jetstream still install. laravel new offers the Vue starter kit instead. Map the old screens before you add either package."
 seoTitle: "Breeze, Jetstream, and the Vue kit"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T08:30:00Z
 snippet: "laravel new my-app"
 categories: [laravel, vuejs]
@@ -85,7 +86,7 @@ Run neither inside an app you created with the Vue starter kit. Breeze's `vue` s
 
 ### Teams
 
-The [Laravel 13 starter kit docs](https://laravel.com/docs/13.x/starter-kits) say the Vue kit may be generated with team support. Each user then belongs to a team, and the team screens ship in that app. That option is chosen when the app is created. Adding Jetstream later is not how you turn teams on.
+The [Laravel 13 starter kit docs](https://laravel.com/framework/docs/13.x/starter-kits) say the Vue kit may be generated with team support. Each user then belongs to a team, and the team screens ship in that app. That option is chosen when the app is created. Adding Jetstream later is not how you turn teams on.
 
 ### API tokens
 
@@ -102,6 +103,29 @@ php artisan route:list --path=two-factor
 ```
 
 </TryIt>
+
+## Profile settings: re-verify a changed email
+
+The starter kit's `Settings\ProfileController` shows the pattern to keep when you change the profile form:
+
+```php title="app/Http/Controllers/Settings/ProfileController.php"
+public function update(ProfileUpdateRequest $request): RedirectResponse
+{
+    $request->user()->fill($request->validated());
+
+    if ($request->user()->isDirty('email')) {
+        $request->user()->email_verified_at = null;
+    }
+
+    $request->user()->save();
+
+    Inertia::flash('toast', ['type' => 'success', 'message' => __('Profile updated.')]);
+
+    return to_route('profile.edit');
+}
+```
+
+Clearing `email_verified_at` when the address changes stops a user swapping in an address they don't own while staying verified. `ProfileUpdateRequest` ignores the user's own row on the unique email rule (see [unique on update](/laravel-form-request-inertia#ignore-the-current-row-on-unique)). `validated()` keeps `is_admin` or `email_verified_at` out of `fill()`, even if someone posts them. The Vue page binds `ProfileController.update.form()` to `<Form>` and shows `errors.email` with `InputError`.
 
 ## What to build next
 
@@ -128,11 +152,12 @@ Auth is done when `laravel new` finishes and the kit's login page accepts a user
 - [Laravel Fortify with Vue](/laravel-fortify-vue): the actions behind the kit's screens.
 - [Sanctum or Passport for a Vue app](/laravel-sanctum-vs-passport): the token question.
 - [Set up a Laravel 13 + Vue 3 app](/application-setup)
-- [Laravel docs: Starter kits](https://laravel.com/docs/13.x/starter-kits)
+- [Laravel docs: Starter kits](https://laravel.com/framework/docs/13.x/starter-kits)
 
 ## Sources
 
-- [Laravel 13: Starter kits](https://laravel.com/docs/13.x/starter-kits)
+- [Laravel 13: Starter kits](https://laravel.com/framework/docs/13.x/starter-kits)
 - [laravel/breeze on GitHub](https://github.com/laravel/breeze)
 - [laravel/jetstream on GitHub](https://github.com/laravel/jetstream)
-- [Laravel 13: Fortify](https://laravel.com/docs/13.x/fortify)
+- [Laravel 13: Fortify](https://laravel.com/framework/docs/13.x/fortify)
+- [Laravel docs: Unique rule](https://laravel.com/framework/docs/13.x/validation#rule-unique)

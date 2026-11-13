@@ -117,7 +117,7 @@ const TOPIC = {
     title: "Roles and permissions",
     detail:
       "Spatie permissions when a policy per model is not the right split.",
-    guide: "laravel-vue-permissions",
+    guide: "laravel-vue-policies",
     when: "Roles",
   },
   passport: {

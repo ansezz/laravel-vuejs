@@ -41,7 +41,7 @@ $rates->all(); // HTTP call
 $rates->all(); // cached, no HTTP call
 ```
 
-Why people miss it: it shipped inside the Laravel 11 release, which was busy with the slim skeleton, Reverb and per-second rate limiting. The [docs entry](https://laravel.com/docs/13.x/helpers#method-once) is a few lines in the "Miscellaneous" helpers list, alphabetically between `old()` and `optional()`. If you didn't read the helpers page top to bottom, you never saw it.
+Why people miss it: it shipped inside the Laravel 11 release, which was busy with the slim skeleton, Reverb and per-second rate limiting. The [docs entry](https://laravel.com/framework/docs/13.x/helpers#method-once) is a few lines in the "Miscellaneous" helpers list, alphabetically between `old()` and `optional()`. If you didn't read the helpers page top to bottom, you never saw it.
 
 It keeps getting better, too. Laravel 11.36.1 made it remember `null` results ([PR #53949](https://github.com/laravel/framework/pull/53949)), Laravel 12.19 added the `HasOnceHash` interface for value objects ([PR #56009](https://github.com/laravel/framework/pull/56009)), and Laravel 13.39 (October 27, 2026) fixed a subtle bug where a new object could receive an old object's cached value ([PR #62121](https://github.com/laravel/framework/pull/62121)).
 
@@ -281,14 +281,14 @@ Now grep your app for `?array $` and `=== null) {` inside getters. Each match is
 
 ## Next steps
 
-- [Inertia shared props in Vue](/inertia-shared-props-vue), where the permissions example plugs in
-- [Laravel + Vue permissions](/laravel-vue-permissions), for the full roles and abilities setup
+- [Inertia shared props in Vue](/inertia-vue-persistent-layout#shared-props-for-the-layout), where the permissions example plugs in
+- [Laravel + Vue permissions](/laravel-vue-policies#roles-and-permissions-with-spatie), for the full roles and abilities setup
 - [Cache::flexible](/laravel-cache-flexible-swr), when the value should survive across requests
-- [Laravel docs: once()](https://laravel.com/docs/13.x/helpers#method-once)
+- [Laravel docs: once()](https://laravel.com/framework/docs/13.x/helpers#method-once)
 
 ## Sources
 
-- [Laravel 13 docs: once()](https://laravel.com/docs/13.x/helpers#method-once)
+- [Laravel 13 docs: once()](https://laravel.com/framework/docs/13.x/helpers#method-once)
 - [laravel/framework PR #49744: Adds once memoization function (Laravel 11.0)](https://github.com/laravel/framework/pull/49744)
 - [laravel/framework PR #53949: Once remember null values](https://github.com/laravel/framework/pull/53949)
 - [laravel/framework PR #56009: ComputesOnceableHashInterface, now HasOnceHash](https://github.com/laravel/framework/pull/56009)

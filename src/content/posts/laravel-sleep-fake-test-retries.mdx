@@ -1,0 +1,323 @@
+---
+id: 181
+title: "Laravel Sleep::fake(): test 7 seconds of backoff in under 1 ms"
+seoTitle: "Laravel Sleep::fake(): Test Retry and Backoff Fast"
+excerpt: "Hidden gem: swap sleep() for Laravel's Sleep class and your retry, backoff and polling tests run in milliseconds and assert every wait. 19 Pest tests inside."
+date: 2026-11-09T02:30:00Z
+snippet: "Sleep::fake(); Sleep::assertSequence([Sleep::for(1)->second()]);"
+categories: [laravel]
+tags: [laravel, php, testing]
+---
+Your export job polls a slow API with a backoff of 1, 2 and 4 seconds. The code is fine. The test that covers it takes 7 seconds, so somebody marks it `->skip()`, and the backoff logic stays untested until it breaks in production. Laravel has had a fix for this since 10.10, and it's one word: `Sleep`.
+
+<TLDR
+  audience="Laravel 10–13 developers who retry, back off, poll or wait in code they want to test"
+  learn={['What the `Sleep` class is and why `sleep()` makes tests slow and blind', 'Native `usleep()` vs `Sleep::for()` side by side, with real timings', 'Testing `Http::retry()`, `retry()` and a `Retry-After` handler without waiting', 'Gotchas: missing units, sleeps that happen at destruct, and cache locks that spin in real time']}
+  tested="Laravel 13.40 · PHP 8.4 · Pest (19 tests, 49 assertions)"
+>
+
+- Write `Sleep::for(2)->seconds()` instead of `sleep(2)`. In production it waits exactly the same.
+- In tests, `Sleep::fake()` skips every wait and records it, so `Sleep::assertSequence([...])` can check your backoff. Our poller with 7 s of backoff ran in under 0.5 ms.
+- `retry()`, `Http::retry()`, `Cache::lock()->block()` and the cache/Redis limiters already sleep through `Sleep`, so `Sleep::fake()` covers them for free.
+- For anything that measures time (locks, `now()`), use `Sleep::fake(syncWithCarbon: true)`. With plain `fake()`, a blocked lock spun over 30,000 times in 750 ms of real time.
+
+</TLDR>
+
+## What Sleep is and why people miss it
+
+`Illuminate\Support\Sleep` is a small wrapper around PHP's `sleep()` and `usleep()`. It reads like a sentence and, more importantly, it can be faked:
+
+```php title="app/Services/ExportPoller.php"
+use Illuminate\Support\Sleep;
+
+Sleep::for(2)->seconds();
+Sleep::for(500)->milliseconds();
+Sleep::for(1)->second()->and(250)->milliseconds();
+Sleep::until(now()->addMinute());
+Sleep::sleep(2);      // same as sleep(2)
+Sleep::usleep(5000);  // same as usleep(5000)
+```
+
+It shipped in Laravel 10.10 (May 2023, [PR #46904](https://github.com/laravel/framework/pull/46904)) and lives near the bottom of the helpers page, under "Other Utilities". Nobody scrolls there looking for a testing tool, so most apps still call `sleep()` and live with slow tests or no tests.
+
+Laravel itself switched to it a long time ago. The `retry()` helper, `Http::retry()`, `Cache::lock()->block()`, `Cache::funnel()` and the Redis throttle/funnel limiters all pause through `Sleep`.
+
+<Diagram name="laravel-sleep-fake-test-retries" alt="Your code calls Sleep::for(n) with a unit, either directly or through retry(), Http::retry(), a cache lock block() or a limiter. When the Sleep object is destroyed it checks whether Sleep::fake() is on. In production it is off, so PHP's sleep and usleep really pause. In tests it is on, so nothing pauses: the duration is appended to a recorded sequence, optional whenFakingSleep callbacks run, and with syncWithCarbon now() moves forward by the same amount. Your test then checks the sequence with assertSequence, assertSlept, assertSleptTimes or assertNeverSlept." caption="Same call, two paths. The fake doesn't just skip the wait, it remembers it." />
+
+## The usual way vs Sleep
+
+Same poller twice: check an export, back off, check again. The left one uses `usleep()`. The right one uses `Sleep` with longer, more realistic delays.
+
+<CodeCompare before="usleep(): 600 ms in the test, untestable" after="Sleep: 7 s of backoff in 0.42 ms">
+
+```php title="app/Services/ExportPoller.php"
+public function waitUntilReady(callable $isReady, int $maxChecks = 5): bool
+{
+    for ($i = 1; $i <= $maxChecks; $i++) {
+        if ($isReady()) {
+            return true;
+        }
+
+        usleep(200_000 * $i); // 200 ms, 400 ms, ...
+    }
+
+    return false;
+}
+```
+
+```php title="app/Services/ExportPoller.php"
+public function waitUntilReady(callable $isReady, int $maxChecks = 5): bool
+{
+    for ($i = 1; $i <= $maxChecks; $i++) {
+        if ($isReady()) {
+            return true;
+        }
+
+        Sleep::for(2 ** ($i - 1))->seconds(); // 1 s, 2 s, 4 s, 8 s
+    }
+
+    return false;
+}
+```
+
+</CodeCompare>
+
+And the test for the right one:
+
+```php title="tests/Feature/ExportPollerTest.php"
+use Illuminate\Support\Sleep;
+
+it('backs off 1, 2 then 4 seconds before the export is ready', function () {
+    Sleep::fake();
+
+    $checks = 0;
+    $ready = (new ExportPoller)->waitUntilReady(fn () => ++$checks >= 4);
+
+    expect($ready)->toBeTrue();
+
+    Sleep::assertSequence([
+        Sleep::for(1)->second(),
+        Sleep::for(2)->seconds(),
+        Sleep::for(4)->seconds(),
+    ]);
+});
+```
+
+The `usleep()` version waited 600 ms of real time in our lab **even with `Sleep::fake()` on**, and `Sleep::assertNeverSlept()` passed, because the fake never saw it. The `Sleep` version ran 7 seconds of backoff in 0.42–0.48 ms and proved the exact delays.
+
+| | `sleep()` / `usleep()` | `Sleep::for()` |
+|---|---|---|
+| Production behaviour | waits | waits (same functions underneath) |
+| Test speed | real time | instant with `Sleep::fake()` |
+| Can you assert the delays? | no | `assertSequence`, `assertSlept`, `assertSleptTimes`, `assertNeverSlept` |
+| Moves `now()` in tests | no | yes, with `syncWithCarbon: true` |
+| Units | seconds or microseconds, you do the math | minutes, seconds, milliseconds, microseconds, `and()` |
+
+## Real-world example: a flaky carrier API and a rate-limited one
+
+### Exponential backoff with Http::retry()
+
+A shipping carrier answers 502/503 a few times a day. You retry server errors with growing delays and give up on 4xx right away:
+
+```php title="app/Services/CarrierRates.php"
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Http;
+
+public function quote(string $zip): array
+{
+    return Http::baseUrl(config('services.carrier.url'))
+        ->timeout(5)
+        ->retry(
+            [500, 1000, 2000], // ms between attempts
+            when: fn ($e) => $e instanceof RequestException && $e->response->serverError(),
+        )
+        ->get('/rates', ['zip' => $zip])
+        ->json();
+}
+```
+
+You never wrote `Sleep` here, and you can still test the backoff, because `Http::retry()` waits through the `retry()` helper, which uses `Sleep`:
+
+```php title="tests/Feature/CarrierRatesTest.php"
+it('retries 5xx with backoff', function () {
+    Sleep::fake();
+    Http::fake(['carrier.example.test/*' => Http::sequence()
+        ->push('down', 503)
+        ->push('down', 502)
+        ->push(['price' => 1290], 200)]);
+
+    expect((new CarrierRates)->quote('10115'))->toBe(['price' => 1290]);
+
+    Sleep::assertSequence([
+        Sleep::for(500)->milliseconds(),
+        Sleep::for(1)->second(),
+    ]);
+    Http::assertSentCount(3);
+});
+
+it('does not retry a 422', function () {
+    Sleep::fake();
+    Http::fake(['carrier.example.test/*' => Http::response('bad zip', 422)]);
+
+    expect(fn () => (new CarrierRates)->quote('nope'))->toThrow(RequestException::class);
+
+    Sleep::assertNeverSlept();
+    Http::assertSentCount(1);
+});
+```
+
+The first test covers 1.5 s of waiting and finished in about 15 ms. The second one is the test people usually forget: it proves you don't hammer an API that already told you the input is wrong.
+
+### Honouring Retry-After from a 429
+
+An accounting API returns `429` with `Retry-After: 30`. You wait what it asks, then try again:
+
+```php title="app/Services/InvoiceSync.php"
+public function push(array $invoice): int
+{
+    $attempts = 0;
+
+    while (true) {
+        $attempts++;
+        $response = Http::post(config('services.books.url').'/invoices', $invoice);
+
+        if ($response->status() !== 429 || $attempts >= 3) {
+            return $response->status();
+        }
+
+        Sleep::for((int) $response->header('Retry-After') ?: 1)->seconds();
+    }
+}
+```
+
+```php title="tests/Feature/InvoiceSyncTest.php"
+use Carbon\CarbonInterval;
+
+it('waits exactly as long as Retry-After says', function () {
+    Sleep::fake();
+    Http::fake(['books.example.test/*' => Http::sequence()
+        ->push('slow down', 429, ['Retry-After' => '30'])
+        ->push(['id' => 7], 201)]);
+
+    expect((new InvoiceSync)->push(['total' => 99]))->toBe(201);
+
+    Sleep::assertSlept(fn (CarbonInterval $d) => $d->totalSeconds == 30, times: 1);
+});
+```
+
+A 30-second test became an instant one, and it checks the number you actually care about.
+
+<Callout type="pro-tip" title="Inside queue jobs, release instead of sleeping for long waits">
+
+`Sleep` blocks the worker for the whole wait. For a few hundred milliseconds that's fine. For `Retry-After: 30` inside a job, prefer `$this->release(30)` so the worker picks up other jobs meanwhile. Keep `Sleep` for short, in-process waits and for commands.
+
+</Callout>
+
+## The rest of the API, in one place
+
+```php title="tests/Feature/SleepApiTest.php"
+// Return a value after sleeping
+Sleep::for(2)->seconds()->then(fn () => 'done'); // 'done'
+
+// Skip the sleep conditionally
+Sleep::for(5)->seconds()->when($shouldWait);
+Sleep::for(5)->seconds()->unless(app()->runningUnitTests());
+
+// Count, filter or rule out sleeps
+Sleep::assertSleptTimes(3);
+Sleep::assertSlept(fn (CarbonInterval $d) => $d->totalSeconds >= 30, times: 1);
+Sleep::assertNeverSlept();
+Sleep::assertInsomniac(); // sleeps happened, but all of them were 0
+
+// React to each fake sleep
+Sleep::whenFakingSleep(fn (CarbonInterval $d) => $log[] = $d->totalMilliseconds); // [1250.0]
+
+// Keep now() moving with the fake clock
+Sleep::fake(syncWithCarbon: true);
+```
+
+Each of these is covered by a test in our lab. `Sleep::for(90)->seconds()` with `syncWithCarbon: true` moved a frozen `now()` by exactly 90 seconds, and `Sleep::until(now()->addSeconds(3))` recorded a 3-second sleep.
+
+## Gotchas
+
+**A number without a unit throws, late.** `Sleep::for(500)` with no `->milliseconds()` doesn't fail on that line. It throws `RuntimeException: Unknown duration unit.` when the object is destroyed. Always finish the chain with a unit.
+
+**The sleep happens on destruct, not on that line.** `Sleep` waits in `__destruct()`. A bare `Sleep::for(1)->second();` statement is destroyed at once, so it behaves as you expect. But keep it in a variable and the wait moves:
+
+```php
+$pause = Sleep::for(1)->second(); // nothing yet
+$this->info('next line');         // runs first
+unset($pause);                    // the second passes here
+```
+
+Our test recorded `['next line', 'slept']`. Don't store `Sleep` objects; use `->then()` if you want a value back.
+
+**Native `sleep()` is invisible to the fake.** Packages and older code that call `sleep()` or `usleep()` still wait in your tests, and `assertNeverSlept()` happily passes. The queue worker's own idle sleep is native too, which is fine: you don't test that.
+
+<Callout type="gotcha" title="Cache locks and limiters measure time, so fake the clock too">
+
+`Cache::lock('report')->block(1)` sleeps through `Sleep`, but it decides when to give up by reading `now()`. With plain `Sleep::fake()`, the waits are skipped and the clock doesn't move, so the loop spins until real time runs out. In our lab it looped **30,000–36,000 times in 750 ms** (it varies per run) before throwing `LockTimeoutException`.
+
+With `Sleep::fake(syncWithCarbon: true)` (and `freezeTime()`), the same test threw after 3 fake 250 ms sleeps in under 1 ms. Laravel 13.37 made `Cache::funnel()` and the Redis limiters' `block()` measure time the same way ([PR #62017](https://github.com/laravel/framework/pull/62017)), so the same rule applies to them: when the code under test checks the clock, sync it.
+
+</Callout>
+
+**The fake resets between tests.** Laravel's `TestCase` calls `Sleep::fake(false)` in teardown, so one faked test can't leak into the next. Plain PHPUnit tests that don't extend Laravel's `TestCase` don't get that cleanup.
+
+## Try it yourself
+
+<TryIt title="Find the sleeps your tests can't see">
+
+```bash
+grep -rnE "\b(u)?sleep\(" app/ --include=*.php | grep -v "Sleep::"
+```
+
+Swap each hit for `Sleep::for(...)->seconds()` or `->milliseconds()`, add `Sleep::fake()` to the test, and assert the sequence. Then run `php artisan test --profile` before and after to see which tests got faster.
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★★ Seconds per test, minutes per CI run on retry-heavy suites |
+| How often you'll reach for it | ★★★★☆ Any retry, backoff, polling, rate-limit or lock code |
+| Risk if misused | ★★☆☆☆ Missing units and stored objects fail loudly; locks need `syncWithCarbon` |
+| **Overall** | **4.5 / 5**: a one-word change that turns slow, skipped tests into fast, precise ones |
+
+## Recap
+
+- Write `Sleep::for(n)->seconds()` instead of `sleep(n)`; production behaviour stays the same.
+- `Sleep::fake()` skips every wait and records it; check it with `assertSequence()` or `assertSlept()`.
+- `retry()`, `Http::retry()`, cache locks and limiters already use `Sleep`, so their backoff is testable today.
+- Use `Sleep::fake(syncWithCarbon: true)` when the code reads the clock, like `Cache::lock()->block()`.
+- Always add a unit, and don't keep `Sleep` objects in variables.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version has the Sleep class?', a: 'Laravel 10.10 (May 2023, PR #46904). `when()`/`unless()` and `whenFakingSleep()` came later in 10.x, and `syncWithCarbon` in 10.48. We tested on Laravel 13.40.' },
+  { q: 'Does Sleep::fake() also fake PHP sleep() and usleep()?', a: 'No. It only affects code that goes through the `Sleep` class. Native calls still pause and are not recorded, so `assertNeverSlept()` can pass while your test waits.' },
+  { q: 'How do I test Http::retry() backoff without waiting?', a: 'Call `Sleep::fake()` before the request. `Http::retry()` waits through the `retry()` helper, which uses `Sleep`, so `Sleep::assertSequence([Sleep::for(500)->milliseconds(), ...])` checks every delay.' },
+  { q: 'Why does my lock block() test still take a second with Sleep::fake()?', a: 'The lock decides when to give up by reading the clock, and plain `fake()` does not move it, so the loop spins in real time. Use `Sleep::fake(syncWithCarbon: true)`, ideally with `freezeTime()`.' },
+  { q: 'Should I use Sleep inside queued jobs?', a: 'For short waits, yes. For long ones like a 30-second Retry-After, release the job with `$this->release(30)` so the worker is free in the meantime.' },
+]} />
+
+## Next steps
+
+- [Testing with Http::fake()](/test-laravel-vue#fake-an-http-call), for the request side of these tests
+- [Http::pool()](/laravel-http-pool-concurrent-requests), when you want calls to overlap instead of wait
+- [Testing a Laravel + Vue app](/test-laravel-vue), to fit these tests into your suite
+- [Laravel docs: Sleep](https://laravel.com/framework/docs/13.x/helpers#sleep)
+
+## Sources
+
+- [Laravel 13 docs: Helpers, Sleep and Testing Sleep](https://laravel.com/framework/docs/13.x/helpers#sleep)
+- [laravel/framework PR #46904: Add the Sleep class (Laravel 10.10)](https://github.com/laravel/framework/pull/46904)
+- [laravel/framework PR #46963: Improve Sleep assertions](https://github.com/laravel/framework/pull/46963)
+- [laravel/framework PR #47228: Sleep testing hooks (whenFakingSleep)](https://github.com/laravel/framework/pull/47228)
+- [laravel/framework PR #50392: Sleep syncing with Carbon (Laravel 10.48)](https://github.com/laravel/framework/pull/50392)
+- [laravel/framework PR #62017: Respect faked Sleep in limiter block() timeout (Laravel 13.37)](https://github.com/laravel/framework/pull/62017)
+- [Source: `Illuminate\Support\Sleep`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Support/Sleep.php)
+- [Source: `retry()` helper](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Support/helpers.php)
+- [Laravel 13 docs: queue job release](https://laravel.com/framework/docs/13.x/queues#manually-releasing-a-job)

@@ -1,56 +1,180 @@
 ---
 id: 101
-title: "Bind a Vue page to a route model"
-seoTitle: "Route model binding"
-excerpt: "Type-hint Post $post and the URL {post} resolves the row. A missing row is a 404."
-description: "Type-hint Post $post and the URL {post} resolves the row. A missing row is a 404."
+title: "Laravel route model binding for Inertia pages: ids, slugs, scoping and 404s"
+seoTitle: "Laravel Route Model Binding with Inertia and Vue"
+excerpt: "Route model binding for a Laravel + Vue app: bind by id or slug, scope child models to their parent, customise missing models and render a real 404 page in Vue."
+description: "Laravel route model binding for Inertia and Vue pages: bind by id or slug, scope nested models, customise missing() and render a proper 404 page in Vue."
 date: 2026-10-11T10:48:00Z
+updated: 2026-11-10T12:00:00Z
 snippet: "public function show(Post $post)"
 categories: [laravel, vuejs]
 tags: [laravel, vuejs, inertia]
 ---
-People searching "Laravel route model binding Vue" still `Post::find($id)` and then forget the 404. Type-hint the model. The parameter name matches the route segment. The [CRUD guide](/laravel-inertia-vue-crud) uses this on edit and update.
+Route model binding lets Laravel turn `/posts/15` into a `Post` before your controller runs. A missing row becomes a 404, so a Vue page never mounts without its data. This guide covers binding by id, binding by slug, scoping a child to its parent, sending a missing model somewhere useful, and rendering the 404 as a Vue page instead of Laravel's default HTML.
 
-<TLDR audience="Laravel + Vue developers on Inertia" applies="Laravel 13 · Inertia 3 · Vue 3">
+<TLDR audience="Laravel + Vue developers on Inertia" applies="Laravel 13 · inertia-laravel 3 · Vue 3">
 
-- Type-hint `Post $post` and the URL `{post}` resolves the row.
-- A missing row is a 404.
-- Do not take the id from the query string when it is already in the path.
-- Do not pass the whole model if the page needs two columns.
+- Type-hint the model and name the parameter the same: `{post}` and `Post $post`. Missing rows are a 404 before your code runs.
+- `{post:slug}` binds by another column for one route. `getRouteKeyName()` changes it for every route.
+- Add `scopeBindings()` to nested routes, or a comment ID from another post still resolves.
+- Use `Inertia::handleExceptionsUsing()` to render 404s as a Vue page, with the real 404 status.
 
 </TLDR>
 
-## The fix
+Each behaviour below runs in a Pest file on Laravel 13.39 with inertia-laravel 3.7 (7 tests, 31 assertions).
 
-```php
+## Bind by id
+
+```php title="routes/web.php"
 Route::get('/posts/{post}', [PostController::class, 'show'])->name('posts.show');
 ```
 
-```php
+```php title="app/Http/Controllers/PostController.php"
 public function show(Post $post): Response
 {
     return Inertia::render('posts/Show', [
-        'post' => $post->only(['id', 'title']),
+        'post' => $post->only('id', 'title', 'body'),
     ]);
 }
 ```
 
-`/posts/15` loads post 15. `/posts/99999` is a 404 before the method runs. The Vue page always receives a post.
+`/posts/15` loads post 15. `/posts/99999` is a 404, and `show()` never runs. That is why the Vue page doesn't need a `v-if="post"` guard. Send `only()` the columns the page renders, or use an [API resource](/laravel-api-resources-vue): the whole model ends up in the page's JSON and HTML. If you aren't using a route parameter, `Post::findOrFail($id)` returns the same 404.
 
-A nested route such as `/posts/{post}/comments/{comment}` should scope the comment to the post. `scopeBindings()` on the route group does that. Without it, a comment id from another post still resolves.
+## Bind by slug
 
-## What to avoid
+A public URL reads better as `/blog/hello-world`. Choose the column in the route:
 
-<Callout type="gotcha">
+```php title="routes/web.php"
+Route::get('/blog/{post:slug}', [BlogController::class, 'show'])->name('blog.show');
+```
 
-Do not take the id from the query string when it is already in the path. Do not pass the whole model if the page needs two columns. `only()` keeps the payload small.
+Or change the default for the model, so every `{post}` binds by slug:
+
+```php title="app/Models/Post.php"
+public function getRouteKeyName(): string
+{
+    return 'slug';
+}
+```
+
+Give `slug` a unique index. That index is what makes the binding mean exactly one row. Generate the slug once, when the post is created, and keep it when the title changes. Shared links and the URLs [Wayfinder](/laravel-wayfinder-vue) generates must keep working. If you do allow a slug to change, validate it with `Rule::unique('posts', 'slug')->ignore($post)` and 301 the old one. Don't bind by `title`: titles change and aren't unique.
+
+The Vue side doesn't change. Wayfinder detects the binding key in the route, so `show(post.slug)` or `show({ slug: post.slug })` builds the right URL.
+
+## Scope a child to its parent
+
+```php title="routes/web.php"
+Route::scopeBindings()->group(function () {
+    Route::get('/posts/{post}/comments/{comment}', [CommentController::class, 'show']);
+});
+```
+
+Without `scopeBindings()`, Laravel resolves `{comment}` by ID alone. In the test for this page, `/posts/1/comments/7` returned comment 7 even though it belonged to post 2. With scoping, Laravel looks the comment up through `$post->comments()`, and the same URL is a 404. Scoping is automatic when the child uses a custom key, as in `{comment:slug}`. Scoping isn't authorization: still check the [policy](/laravel-vue-policies) for what the user may do.
+
+## When the model is missing
+
+The 404 is usually right. For an old slug, a redirect is kinder:
+
+```php title="routes/web.php"
+Route::get('/blog/{post:slug}', [BlogController::class, 'show'])
+    ->missing(fn (Request $request) => redirect()->route('blog.index', ['search' => $request->route('post')]));
+```
+
+The `missing` closure runs only when binding fails. Don't use it to hide every missing record behind a redirect to the index with a "not found" flash. Search engines and users both need the 404 for a page that really is gone.
+
+## Render the 404 as a Vue page
+
+During development, Inertia shows any non-Inertia response, including Laravel's 404 HTML, in a modal. In production, render your own page. inertia-laravel 3 has a hook for it:
+
+```php title="app/Providers/AppServiceProvider.php"
+use Inertia\ExceptionResponse;
+use Inertia\Inertia;
+
+public function boot(): void
+{
+    Inertia::handleExceptionsUsing(function (ExceptionResponse $response) {
+        if (in_array($response->statusCode(), [403, 404, 500, 503])) {
+            return $response->render('ErrorPage', ['status' => $response->statusCode()])
+                ->withSharedData();
+        }
+    });
+}
+```
+
+```vue title="resources/js/pages/ErrorPage.vue"
+<script setup lang="ts">
+import { computed } from "vue";
+
+const props = defineProps<{ status: 403 | 404 | 500 | 503 }>();
+
+const title = computed(() => ({
+  403: "You can't open this page",
+  404: "Page not found",
+  500: "Something went wrong",
+  503: "Back soon",
+})[props.status]);
+</script>
+
+<template>
+  <h1>{{ title }}</h1>
+  <a href="/">Go home</a>
+</template>
+```
+
+The response keeps its status. In the test, the Inertia request for a missing post returned `404` with component `ErrorPage` and `props.status` set to 404. `withSharedData()` adds your shared props, such as `auth`, because a binding failure happens outside the Inertia middleware. Leave `APP_DEBUG=true` locally to keep the stack trace modal. Don't catch the exception and return `Inertia::render('Errors/404')` from a controller: that sends a 200.
+
+## Soft-deleted models
+
+A model that uses `SoftDeletes` doesn't bind once it's trashed. Edit and show return 404. Opt a single route in with `->withTrashed()`, usually the restore route. The [soft deletes guide](/laravel-soft-deletes-index-vue) has the full trash screen.
+
+## Test it
+
+```php title="tests/Feature/PostBindingTest.php"
+test('binds by slug and 404s for an unknown one', function () {
+    $post = Post::factory()->create(['slug' => 'hello-world']);
+
+    $this->get('/blog/hello-world')->assertOk();
+    $this->get('/blog/nope')->assertNotFound();
+});
+
+test('a comment from another post does not resolve', function () {
+    [$a, $b] = Post::factory()->count(2)->create();
+    $comment = $b->comments()->create(['body' => 'on b']);
+
+    $this->get("/posts/{$a->id}/comments/{$comment->id}")->assertNotFound();
+    $this->get("/posts/{$b->id}/comments/{$comment->id}")->assertOk();
+});
+```
 
 
-</Callout>
+
+## Recap
+
+- `{post}` plus `Post $post` gives you a model or a 404 before your code runs.
+- `{post:slug}` for one route, `getRouteKeyName()` for all of them. Keep a unique index.
+- `scopeBindings()` on nested routes.
+- `missing()` for a useful redirect. `handleExceptionsUsing()` for a Vue 404 page that keeps the 404 status.
 
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I bind a Vue page to a route model?', a: 'Type-hint Post $post and the URL {post} resolves the row. A missing row is a 404.' },
-  { q: 'What goes wrong with Laravel route model binding Vue?', a: 'Many developers still `Post::find($id)` and then forget the 404. Do not take the id from the query string when it is already in the path.' },
+  { q: "Why does my Vue page never receive a null post?", a: "Implicit binding throws ModelNotFoundException before the controller runs, so a missing row becomes a 404 and the page never renders." },
+  { q: "How do I bind a Laravel route by slug?", a: "Use {post:slug} in the route, or return 'slug' from getRouteKeyName() on the model to change it everywhere. Add a unique index on the column." },
+  { q: "Why can I open a comment through the wrong post?", a: "Nested implicit bindings are not scoped unless you call scopeBindings() or use a custom key on the child, so the child is looked up by its ID alone." },
+  { q: "How do I show a Vue 404 page in an Inertia app?", a: "Register Inertia::handleExceptionsUsing() in a service provider and render an ErrorPage component for 403, 404, 500 and 503. The status code is preserved." },
 ]} />
+
+## Next steps
+
+- [Soft deletes in a Laravel + Vue app](/laravel-soft-deletes-index-vue)
+- [Authorize Inertia pages with policies](/laravel-vue-policies)
+- [Typed Laravel routes in Vue with Wayfinder](/laravel-wayfinder-vue)
+- [CRUD with Inertia and Vue](/laravel-inertia-vue-crud)
+
+## Sources
+
+- [Laravel docs: Route model binding](https://laravel.com/framework/docs/13.x/routing#route-model-binding)
+- [Laravel docs: Customizing missing model behavior](https://laravel.com/framework/docs/13.x/routing#customizing-missing-model-behavior)
+- [Laravel docs: Implicit model binding scoping](https://laravel.com/framework/docs/13.x/routing#implicit-model-binding-scoping)
+- [Inertia docs: Error handling](https://inertiajs.com/docs/v3/advanced/error-handling)
+- [Laravel docs: Customizing the key](https://laravel.com/framework/docs/13.x/routing#customizing-the-default-key-name)

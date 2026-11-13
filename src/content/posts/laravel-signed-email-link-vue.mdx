@@ -1,57 +1,224 @@
 ---
 id: 116
-title: "Put a signed URL in an email"
-seoTitle: "Signed link in an email"
-excerpt: "temporarySignedRoute belongs in the mail. The Vue page opens after the signed middleware passes."
-description: "temporarySignedRoute belongs in the mail. The Vue page opens after the signed middleware passes."
+title: "Laravel signed URLs with Vue: email links, invites and private downloads"
+seoTitle: "Laravel Signed URLs: Emails, Invites and Downloads"
+excerpt: "Use Laravel signed URLs for email links, teammate invites and expiring downloads in a Laravel + Vue app, plus the proxy bug that turns valid links into 403s. 7 tests."
+description: "Laravel signed URLs for a Vue app: temporarySignedRoute in emails, teammate invites with hashed tokens, expiring downloads, and why they 403 behind proxies."
 date: 2026-10-11T11:03:00Z
-snippet: "->middleware('signed')"
+updated: 2026-11-10T12:00:00Z
+snippet: "URL::temporarySignedRoute('invites.accept', now()->plus(days: 3), ['invite' => $invite])"
 categories: [laravel, vuejs]
-tags: [laravel, vuejs]
+tags: [laravel, vuejs, php, testing]
 ---
-People searching "Laravel signed URL email" build the link in Vue and hope the email client keeps it. Build it in PHP. The [Fortify guide](/laravel-fortify-vue) already does this for password reset. A custom mail uses the same middleware.
+A signed URL is a link Laravel can verify without a login. It's the right tool for "review this post" emails, teammate invites, and download links for private files. Laravel adds a `signature` (an HMAC of the URL made with your `APP_KEY`) and, optionally, an `expires` timestamp. The `signed` middleware rejects the request with a 403 if anyone changes a character. This guide builds all three uses, and shows the proxy setting that makes valid links fail.
 
-<TLDR audience="Laravel + Vue developers" applies="Laravel 13 · Vue 3">
+<TLDR
+  audience="Laravel + Vue developers who email links or share private files"
+  learn={['Building and verifying temporary signed routes', 'A teammate invite that stores only a hash of the token', 'Expiring download links for private files, opened from Vue', 'Why signatures fail behind a proxy, and signed:relative']}
+  tested="Laravel 13.40 · PHP 8.4 · Pest 4 (7 tests, 18 assertions)"
+>
 
-- temporarySignedRoute belongs in the mail.
-- The Vue page opens after the signed middleware passes.
-- Do not sign the URL for a year.
-- Do not log the full URL.
+- Build the link in PHP with `URL::temporarySignedRoute()` and protect the route with `->middleware('signed')`. Our tests got 200 for the real link and 403 for an edited id or an expired link.
+- A signature proves the URL wasn't edited. It doesn't prove who is clicking, so still check authorization for anything private.
+- Open signed links with a plain `<a href>`, never an Inertia `<Link>`: mail clients aren't your app, and files aren't Inertia responses.
+- If links fail only in production, the signature was made for a different host or scheme than the request. Fix trusted proxies, or sign relative URLs with `signed:relative`.
 
 </TLDR>
 
-## The fix
+## Sign and verify a route
 
-```php
-$url = URL::temporarySignedRoute(
-    'posts.review',
-    now()->addDays(3),
-    ['post' => $post->id],
-);
-```
-
-Mail that string. The route is:
-
-```php
-Route::get('/posts/{post}/review', [PostController::class, 'review'])
+```php title="routes/web.php"
+Route::get('/posts/{post}/review', [ReviewController::class, 'show'])
     ->middleware('signed')
     ->name('posts.review');
 ```
 
-An edited query string fails the signature and Laravel returns 403. The controller can render an Inertia page after that. The link in the email is a normal `<a href>`. It is not an Inertia `<Link>`, because a mail client is not your app.
+```php
+use Illuminate\Support\Facades\URL;
 
-## What to avoid
+$url = URL::temporarySignedRoute(
+    'posts.review',
+    now()->plus(days: 3),
+    ['post' => $post->id],
+);
+```
 
-<Callout type="gotcha">
+The result looks like `https://app.test/posts/42/review?expires=1794918133&signature=…`. We tested three requests against a route like this:
 
-Do not sign the URL for a year. Three days is a decision you can defend. Do not log the full URL. It is the credential.
+| Request | Result |
+|---|---|
+| The URL as generated | 200 |
+| Same URL with `/42/` changed to `/43/` | 403 |
+| The URL after the clock moved past `expires` | 403 |
+
+Use `URL::signedRoute()` for a link that never expires, but think twice: a link in an inbox is a credential, so give it the shortest life your users will accept. Three days for a review link and seven for an invite are reasonable defaults. Don't log the full URL either, for the same reason.
+
+To handle invalid links with a friendlier page than a bare 403, catch `InvalidSignatureException` in `bootstrap/app.php` and render an Inertia "This link has expired" page.
+
+## Put it in an email
+
+Build the URL in the notification or mailable, never in Vue:
+
+```php title="app/Notifications/ReviewRequested.php"
+public function toMail(object $notifiable): MailMessage
+{
+    $url = URL::temporarySignedRoute('posts.review', now()->plus(days: 3), ['post' => $this->post->id]);
+
+    return (new MailMessage)
+        ->subject('Please review "'.$this->post->title.'"')
+        ->action('Review the post', $url);
+}
+```
+
+When the reader clicks, the `signed` middleware runs first, then your controller can render an Inertia page as usual. Fortify's email verification and password reset use the same mechanism, as covered in the [Fortify guide](/laravel-fortify-vue).
+
+## Invite a teammate
+
+Don't create the account and email a temporary password. Email a signed link, and let the person choose their own password when they arrive. Store only a hash of the invite token, so a database leak doesn't hand out working invites:
+
+```php title="app/Http/Controllers/InvitationController.php"
+public function store(Request $request): RedirectResponse
+{
+    $validated = $request->validate(['email' => ['required', 'email', 'unique:users,email']]);
+
+    $token = Str::random(40);
+
+    $invitation = Invitation::create([
+        'email' => $validated['email'],
+        'token_hash' => hash('sha256', $token),
+        'team_id' => $request->user()->current_team_id,
+        'invited_by' => $request->user()->id,
+    ]);
+
+    $url = URL::temporarySignedRoute('invites.accept', now()->plus(days: 7), [
+        'invitation' => $invitation->id,
+        'token' => $token,
+    ]);
+
+    Notification::route('mail', $invitation->email)->notify(new TeamInvite($url));
+
+    return back();
+}
+```
+
+```php title="routes/web.php"
+Route::get('/invites/{invitation}', [InvitationController::class, 'show'])
+    ->middleware(['guest', 'signed'])
+    ->name('invites.accept');
+```
+
+```php
+public function show(Request $request, Invitation $invitation): Response
+{
+    abort_unless(hash_equals($invitation->token_hash, hash('sha256', (string) $request->query('token'))), 403);
+    abort_if($invitation->accepted_at !== null, 410);
+
+    return Inertia::render('invites/Accept', ['email' => $invitation->email]);
+}
+```
+
+The signature already blocks edited links. The token hash adds a second check that stays private even if someone can read the `invitations` table, and `accepted_at` makes each invite single-use. The Vue page is a normal `useForm` with a name, password and `password_confirmation`. Post it back to the same signed URL, with the query string intact, on a `POST` route that also has `signed` middleware. That route checks the token again, creates the user and sets `accepted_at`.
+
+## Signed downloads
+
+For private files, keep them on a non-public disk and hand out a short-lived signed route instead of a storage path:
+
+```php title="app/Http/Controllers/ReportController.php"
+public function show(Request $request, Report $report): Response
+{
+    Gate::authorize('view', $report);
+
+    return Inertia::render('reports/Show', [
+        'report' => $report->only(['id', 'name']),
+        'downloadUrl' => URL::temporarySignedRoute('reports.download', now()->plus(minutes: 30), ['report' => $report->id]),
+    ]);
+}
+
+public function download(Request $request, Report $report): StreamedResponse
+{
+    Gate::authorize('view', $report);
+
+    return Storage::disk('local')->download($report->path, $report->name.'.csv');
+}
+```
+
+```php title="routes/web.php"
+Route::get('/reports/{report}/download', [ReportController::class, 'download'])
+    ->middleware(['auth', 'signed'])
+    ->name('reports.download');
+```
+
+```vue title="resources/js/pages/reports/Show.vue"
+<a :href="downloadUrl">Download {{ report.name }}</a>
+```
+
+In our test, the signed route returned `Content-Disposition: attachment; filename=…` and passed `assertDownload()`. Keep `Gate::authorize()` in `download()`. The signature only says the URL is genuine and fresh. Someone with a forwarded link would otherwise get the file. If the files live on S3, `Storage::temporaryUrl()` gives the same expiring behavior straight from the bucket.
+
+## Why valid links fail in production
+
+The signature covers the full URL, including scheme and host. Behind a load balancer or Cloudflare, Laravel may see `http://app.internal` while the user clicked `https://app.example.com`. In our test, a correctly signed absolute URL requested on a different host returned **403**.
+
+Two fixes:
+
+- **Trust the proxy** so Laravel sees the real scheme and host. In `bootstrap/app.php`: `$middleware->trustProxies(at: '*')`, or your load balancer's IP range. See [trusted proxies](/deploy-laravel-vue#trust-proxies-so-https-sticks).
+- **Sign relative URLs.** Generate with `absolute: false` and verify with `signed:relative`. The host is then left out of the signature. The same URL on a different host returned 200 in our test.
+
+```php
+$path = URL::signedRoute('posts.review', ['post' => $post->id], absolute: false);
+
+Route::get('/posts/{post}/review', ...)->middleware('signed:relative');
+```
+
+Rotating `APP_KEY` invalidates every outstanding signed link. Use `APP_PREVIOUS_KEYS` while old links are still valid.
+
+## Test it
+
+```php
+test('signed review link works and edited links do not', function () {
+    $post = Post::factory()->create();
+    $url = URL::temporarySignedRoute('posts.review', now()->plus(days: 3), ['post' => $post->id]);
+
+    $this->get($url)->assertOk();
+    $this->get($url.'x')->assertForbidden();
+
+    $this->travel(4)->days();
+    $this->get($url)->assertForbidden();
+});
+```
 
 
-</Callout>
+
+## Recap
+
+- `temporarySignedRoute()` plus `signed` middleware gives tamper-proof, expiring links.
+- Signatures aren't authorization: keep `Gate::authorize()` on private data.
+- Invites: hash the token, expire the link, make it single-use, no emailed passwords.
+- Downloads: non-public disk, a short-lived signed route, and a plain anchor in Vue.
+- 403s only in production usually mean the proxy setup is wrong. Fix it, or use `signed:relative`.
 
 ## FAQ
 
 <FAQ items={[
-  { q: 'How do I put a signed URL in an email?', a: 'temporarySignedRoute belongs in the mail. The Vue page opens after the signed middleware passes.' },
-  { q: 'What goes wrong with Laravel signed URL email?', a: 'Many developers build the link in Vue and hope the email client keeps it. Do not sign the URL for a year.' },
+  { q: 'How do I create a signed URL in Laravel?', a: 'Use URL::signedRoute() or URL::temporarySignedRoute() with a named route, and add the signed middleware to that route. Laravel returns 403 if the URL is changed or has expired.' },
+  { q: 'Why does my Laravel signed URL return 403 in production?', a: 'The signature includes the scheme and host. Behind a proxy, Laravel may see http or an internal host. Configure trusted proxies, or sign relative URLs with absolute: false and verify them with signed:relative.' },
+  { q: 'Is a signed URL enough to protect a private file?', a: 'No. It proves the link was not edited and has not expired, not who is using it. Keep an authorization check in the download route as well.' },
+  { q: 'How should I invite users in Laravel?', a: 'Email a temporary signed link with a random token, store only a hash of the token, expire it, and let the invitee set their own password. Do not email temporary passwords.' },
+  { q: 'Can I open a signed URL with an Inertia Link?', a: 'Use a plain anchor. Links in emails are opened by the mail client, and file downloads are not Inertia responses.' },
 ]} />
+
+## Next steps
+
+- [Export a CSV from Laravel](/laravel-csv-export-vue), which sends a signed download link for big files
+- [Upload files from Vue to Laravel](/laravel-vue-file-upload), where the private files come from
+- [Laravel Fortify with Vue](/laravel-fortify-vue), which uses signed links for email verification
+- [Trust proxies and HTTPS](/deploy-laravel-vue#trust-proxies-so-https-sticks), the usual cause of production 403s
+
+## Sources
+
+- [Laravel docs: Signed URLs](https://laravel.com/framework/docs/13.x/urls#signed-urls)
+- [Laravel docs: Validating signed route requests](https://laravel.com/framework/docs/13.x/urls#validating-signed-route-requests)
+- [Laravel docs: File downloads](https://laravel.com/framework/docs/13.x/responses#file-downloads)
+- [Laravel docs: Mail notifications](https://laravel.com/framework/docs/13.x/notifications#mail-notifications)
+- [Laravel docs: Configuring trusted proxies](https://laravel.com/framework/docs/13.x/requests#configuring-trusted-proxies)
+- [Laravel docs: Encryption key rotation](https://laravel.com/framework/docs/13.x/encryption#gracefully-rotating-encryption-keys)
+- [Laravel docs: Mail](https://laravel.com/framework/docs/13.x/mail)

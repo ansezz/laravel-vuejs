@@ -36,7 +36,7 @@ Your user renames a post, hits refresh, and sees the **old** title. Nothing is b
 
 ## Stop showing users stale data after a write
 
-The `sticky` option in `config/database.php` only lasts for **the current request**. The next request goes back to the replica, which may not have the row yet. `PreventStaleDatabaseReads` carries that stickiness across requests through the session ([docs](https://laravel.com/docs/13.x/database#preventing-stale-database-reads)).
+The `sticky` option in `config/database.php` only lasts for **the current request**. The next request goes back to the replica, which may not have the row yet. `PreventStaleDatabaseReads` carries that stickiness across requests through the session ([docs](https://laravel.com/framework/docs/13.x/database#preventing-stale-database-reads)).
 
 <CodeCompare before="Laravel 13.37" after="Laravel 13.38">
 
@@ -102,7 +102,7 @@ It must run **after** `StartSession` (the `web` group already does that), so it 
 
 ## usingWritePdo: force the writer for a whole callback
 
-`User::onWriteConnection()` only applies to that one query. Chain `->posts()` after it and the relation query quietly goes back to the replica. `usingWritePdo()` scopes the writer to everything inside the callback ([docs](https://laravel.com/docs/13.x/database#using-the-write-connection-for-reads)).
+`User::onWriteConnection()` only applies to that one query. Chain `->posts()` after it and the relation query quietly goes back to the replica. `usingWritePdo()` scopes the writer to everything inside the callback ([docs](https://laravel.com/framework/docs/13.x/database#using-the-write-connection-for-reads)).
 
 <CodeCompare before="onWriteConnection()" after="usingWritePdo()">
 
@@ -132,7 +132,7 @@ It returns whatever the callback returns, and puts the previous read preference 
 
 ## Count worker crashes on listeners, mailables and notifications
 
-Laravel already lets you mark a job with `#[CountCrashesAsExceptions]` so an out-of-memory kill counts towards `maxExceptions` ([docs](https://laravel.com/docs/13.x/queues#max-exceptions)). On a queued listener, mailable or notification it was silently ignored, so a listener that crashed every time was retried forever. 13.38 copies the flag onto the wrapper jobs.
+Laravel already lets you mark a job with `#[CountCrashesAsExceptions]` so an out-of-memory kill counts towards `maxExceptions` ([docs](https://laravel.com/framework/docs/13.x/queues#max-exceptions)). On a queued listener, mailable or notification it was silently ignored, so a listener that crashed every time was retried forever. 13.38 copies the flag onto the wrapper jobs.
 
 ```php title="app/Listeners/ExportOrders.php"
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -246,13 +246,13 @@ it('scopes the writer to the callback', function () {
 
 - [Laravel 13.37: strict Rule::numeric(), queue filters and JPEG XL](/laravel-13-37-numeric-strict-queue-jxl)
 - [Laravel 13.36: validation builders, OLAP and sticky queues](/laravel-13-36-validation-builders-olap-sticky-queues)
-- [Read and write connections in the Laravel docs](https://laravel.com/docs/13.x/database#read-and-write-connections)
+- [Read and write connections in the Laravel docs](https://laravel.com/framework/docs/13.x/database#read-and-write-connections)
 
 ## Sources
 
 - [laravel/framework v13.38.0 release notes](https://github.com/laravel/framework/releases/tag/v13.38.0)
-- [Docs: Preventing stale database reads](https://laravel.com/docs/13.x/database#preventing-stale-database-reads)
-- [Docs: Using the write connection for reads](https://laravel.com/docs/13.x/database#using-the-write-connection-for-reads)
-- [Docs: Max exceptions and CountCrashesAsExceptions](https://laravel.com/docs/13.x/queues#max-exceptions)
+- [Docs: Preventing stale database reads](https://laravel.com/framework/docs/13.x/database#preventing-stale-database-reads)
+- [Docs: Using the write connection for reads](https://laravel.com/framework/docs/13.x/database#using-the-write-connection-for-reads)
+- [Docs: Max exceptions and CountCrashesAsExceptions](https://laravel.com/framework/docs/13.x/queues#max-exceptions)
 - PRs: [#62078](https://github.com/laravel/framework/pull/62078), [#62099](https://github.com/laravel/framework/pull/62099), [#62048](https://github.com/laravel/framework/pull/62048), [#62077](https://github.com/laravel/framework/pull/62077), [#62059](https://github.com/laravel/framework/pull/62059), [#62049](https://github.com/laravel/framework/pull/62049)
 - [laravel/docs commit documenting the new middleware](https://github.com/laravel/docs/commit/9d2857ad)

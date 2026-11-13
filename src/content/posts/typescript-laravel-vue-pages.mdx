@@ -2,8 +2,9 @@
 id: 32
 title: "TypeScript props on Laravel Vue pages"
 excerpt: "defineProps on the Inertia page is the type of the controller payload. A missing key fails the check on your machine, before a blank v-for in the browser."
-description: "Type an Inertia Vue page with defineProps, including the posts.data shape a Laravel paginator returns."
+description: "Type Inertia page props in Vue with TypeScript: defineProps for a Laravel model, the posts.data shape a paginator returns, and shared props."
 seoTitle: "TypeScript props on Inertia pages"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T07:30:00Z
 categories: [laravel, vuejs]
 tags: [laravel, vuejs, typescript, inertia]
@@ -101,6 +102,27 @@ Keep this interface next to the page that receives it. A global `PageProps` augm
 
 Wayfinder types the URL you visit. It does not type these props. That generator is [Wayfinder](/laravel-wayfinder-vue).
 
+## Optional props and defaults
+
+Use `withDefaults` for a prop the controller may leave out:
+
+```vue
+<script setup lang="ts">
+const props = withDefaults(defineProps<{ search?: string; perPage?: number }>(), {
+  search: "",
+  perPage: 20,
+});
+</script>
+```
+
+The default only applies when the key is missing. If the controller sends `'search' => null`, the page gets `null`, and the type should say `string | null`. The cleaner fix is on the server: always send the value you mean.
+
+```php
+'search' => $request->string('search')->trim()->toString(),   // '' when absent
+```
+
+Then the prop is a required `search: string`, and the default isn't needed. Don't default a record such as `post` to `{}` so a missing row shows an empty editor. A missing record should 404 in the controller, with route model binding.
+
 ## Run the check
 
 Run the kit's TypeScript check. A fresh starter kit calls `vue-tsc`. The script name is whatever `package.json` already has. Do not add a second checker.
@@ -154,4 +176,6 @@ Component tests for a presentational child are [tests](/test-laravel-vue). They 
 
 - [Vue: Typing component props](https://vuejs.org/guide/typescript/composition-api#typing-component-props)
 - [Inertia v3: TypeScript](https://inertiajs.com/docs/v3/advanced/typescript)
-- [Laravel: Pagination, converting results to JSON](https://laravel.com/docs/13.x/pagination#converting-results-to-json)
+- [Laravel: Pagination, converting results to JSON](https://laravel.com/framework/docs/13.x/pagination#converting-results-to-json)
+- [Vue docs: Props default values](https://vuejs.org/guide/components/props.html#prop-validation)
+- [Vue docs: Typing component props](https://vuejs.org/guide/typescript/composition-api.html#typing-component-props)

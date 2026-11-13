@@ -2,8 +2,9 @@
 id: 30
 title: "Typed Laravel routes in Vue with Wayfinder"
 excerpt: "Wayfinder writes a TypeScript function per controller action. The Inertia form takes that function. You do not add a second router."
-description: "Generate typed Laravel controller actions with Wayfinder and pass them to Inertia's Vue Form component."
+description: "Generate typed Laravel routes for Vue with Wayfinder: import controller actions as TypeScript functions and pass them to Inertia's Form component."
 seoTitle: "Typed routes with Wayfinder"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T07:10:00Z
 snippet: "php artisan wayfinder:generate"
 categories: [laravel, vuejs]
@@ -88,6 +89,33 @@ Rename `store` to `save` in `PostController` and its route, then run `php artisa
 
 </TryIt>
 
+## Query strings
+
+Every generated action takes an optional last `options` argument. Its `query` object becomes the query string, so a filter link doesn't need string building:
+
+```vue title="resources/js/pages/posts/Index.vue"
+<script setup lang="ts">
+import { Link } from "@inertiajs/vue3";
+import { index, show } from "@/actions/App/Http/Controllers/PostController";
+
+defineProps<{ post: { id: number } }>();
+</script>
+
+<template>
+  <Link :href="index({ query: { search: 'draft', page: 2 } })">Drafts, page 2</Link>
+  <Link :href="show.url(post.id, { query: { tab: 'comments' } })">Comments</Link>
+</template>
+```
+
+`index({ query })` returns `{ url, method }`, which `<Link>` accepts. `.url()` returns the string. On a route with parameters, the parameters come first and the options second. `mergeQuery` keeps the current URL's parameters and overrides the ones you pass. Set a value to `null` to drop it, which is what a "clear filter" link needs:
+
+```ts
+index.url({ mergeQuery: { page: 2 } });        // keeps ?search=… and sets page=2
+index.url({ mergeQuery: { search: null } });   // removes search, keeps the rest
+```
+
+`mergeQuery` reads `window.location`, so during SSR use `query` with the values from your props. Don't install Ziggy to get `route('posts.index', { search })`. The [Ziggy page](/laravel-ziggy-vue) explains why the kit doesn't need it.
+
 ## Where this stops
 
 Wayfinder does not validate the body. The form request from [Precognition](/laravel-precognition-vue) still does. It does not know which user may call `update`. That is a [policy](/laravel-vue-policies). A tutorial that says `route()` and Ziggy is the [Ziggy map](/laravel-ziggy-vue). Do not install that package beside these generated functions.
@@ -117,3 +145,4 @@ Wayfinder does not validate the body. The form request from [Precognition](/lara
 
 - [Laravel Wayfinder on GitHub](https://github.com/laravel/wayfinder)
 - [Inertia v3: Forms](https://inertiajs.com/docs/v3/the-basics/forms)
+- [Laravel docs: Starter kits](https://laravel.com/framework/docs/13.x/starter-kits)

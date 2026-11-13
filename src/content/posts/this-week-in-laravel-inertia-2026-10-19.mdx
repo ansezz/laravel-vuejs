@@ -157,7 +157,7 @@ The official docs flag the classification API as experimental, so it may change 
 
 | Fix | Version | Who it affects |
 |---|---|---|
-| Structured-output sub-agents run unstreamed when the parent streams | 1.2.2 (#1117) | You stream an agent whose tools include a [structured-output agent](/laravel-ai-structured-output-vue). The tool result was "Agent failed: Streaming structured output is not currently supported." |
+| Structured-output sub-agents run unstreamed when the parent streams | 1.2.2 (#1117) | You stream an agent whose tools include a [structured-output agent](/laravel-ai-sdk-vue#structured-output-instead-of-parsing-text). The tool result was "Agent failed: Streaming structured output is not currently supported." |
 | A failed turn's interrupted tool result keeps its call ID | 1.2.2 (#1133) | Conversations on OpenAI, Azure OpenAI or xAI that got stuck returning HTTP 400 after a failed turn. They continue on the next prompt, no data fix needed. |
 | `Conversation` and `ConversationMessage` are non-incrementing again on Laravel 12 | 1.2.3 (#1137) | Laravel 12 apps that create conversations through Eloquent. The string ID was overwritten with the database row ID. |
 
@@ -273,14 +273,14 @@ php artisan --version   # Laravel Framework 12.70.0
 - [Laravel AI SDK 1.2: Skills, tool approval and Cohere](/laravel-ai-sdk-1-2-skills-approval-cohere), where classification first landed.
 - [Laravel AI SDK 1.2.1: Stop middleware for agent runs](/laravel-ai-sdk-1-2-1-stop-middleware)
 - [Wayfinder + Precognition catch up with Laravel's QUERY routes](/wayfinder-precognition-query-method)
-- [Laravel AI SDK docs: events](https://laravel.com/docs/13.x/ai-sdk#events)
+- [Laravel AI SDK docs: events](https://laravel.com/framework/docs/13.x/ai-sdk#events)
 
 ## Sources
 
 - [Laravel AI v1.2.2 release](https://github.com/laravel/ai/releases/tag/v1.2.2): [PR #1090 (failure events)](https://github.com/laravel/ai/pull/1090), [PR #1128 (openai-compatible classification)](https://github.com/laravel/ai/pull/1128), [PR #1117 (structured sub-agents)](https://github.com/laravel/ai/pull/1117), [PR #1133 (call id)](https://github.com/laravel/ai/pull/1133)
 - [Laravel AI v1.2.3 release](https://github.com/laravel/ai/releases/tag/v1.2.3): [PR #1137 (non-incrementing models)](https://github.com/laravel/ai/pull/1137), [PR #1134 (image classification)](https://github.com/laravel/ai/pull/1134)
-- [Laravel AI SDK docs: classification](https://laravel.com/docs/13.x/ai-sdk#classification), [OpenAI-compatible providers](https://laravel.com/docs/13.x/ai-sdk#openai-compatible-providers) and [events](https://laravel.com/docs/13.x/ai-sdk#events)
-- [Laravel events docs: union-type listeners and discovery](https://laravel.com/docs/13.x/events#event-discovery)
+- [Laravel AI SDK docs: classification](https://laravel.com/framework/docs/13.x/ai-sdk#classification), [OpenAI-compatible providers](https://laravel.com/framework/docs/13.x/ai-sdk#openai-compatible-providers) and [events](https://laravel.com/framework/docs/13.x/ai-sdk#events)
+- [Laravel events docs: union-type listeners and discovery](https://laravel.com/framework/docs/13.x/events#event-discovery)
 - [Wayfinder v0.1.23 release](https://github.com/laravel/wayfinder/releases/tag/v0.1.23), [PR #331](https://github.com/laravel/wayfinder/pull/331), [README](https://github.com/laravel/wayfinder/blob/v0.1.23/README.md)
 - [Vite plugin Wayfinder v0.1.11](https://github.com/laravel/vite-plugin-wayfinder/releases/tag/v0.1.11), [PR #34](https://github.com/laravel/vite-plugin-wayfinder/pull/34)
 - [Laravel v12.70.0 release](https://github.com/laravel/framework/releases/tag/v12.70.0): [PR #61871 (EncodedParameter)](https://github.com/laravel/framework/pull/61871), [PR #61838 (query fixes)](https://github.com/laravel/framework/pull/61838), [PR #61822 (Blade cache)](https://github.com/laravel/framework/pull/61822)

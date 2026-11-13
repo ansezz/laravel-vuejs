@@ -445,9 +445,9 @@ Remove the `Cache::put()` line and the fake answer comes back. That's your Stop 
 ## Next steps
 
 - [Laravel AI SDK 1.1 and 1.2: Agent Skills, tool approval, Cohere](/laravel-ai-sdk-1-2-skills-approval-cohere)
-- [Approve an AI SDK tool before it runs](/laravel-ai-tool-approval-vue)
-- [Fake an AI agent in a Pest test](/pest-fake-ai-agent-vue)
-- [Laravel AI SDK docs: Middleware](https://laravel.com/docs/13.x/ai-sdk#middleware)
+- [Approve an AI SDK tool before it runs](/laravel-ai-sdk-vue#tool-approval-pauses-the-agent)
+- [Fake an AI agent in a Pest test](/laravel-ai-sdk-vue#more-test-assertions)
+- [Laravel AI SDK docs: Middleware](https://laravel.com/framework/docs/13.x/ai-sdk#middleware)
 
 ## Sources
 
@@ -455,5 +455,5 @@ Remove the `Cache::put()` line and the fake answer comes back. That's your Stop 
 - [PR #1072: Add Stop middleware to end agent runs early](https://github.com/laravel/ai/pull/1072) ([`Stop.php`](https://github.com/laravel/ai/blob/v1.2.1/src/Middleware/Stop.php), [`StepResult.php`](https://github.com/laravel/ai/blob/v1.2.1/src/Gateway/StepResult.php))
 - [PR #1116: OpenRouter images endpoint](https://github.com/laravel/ai/pull/1116) and [PR #1115: Ollama native embedding dimensions](https://github.com/laravel/ai/pull/1115)
 - [PR #1112: Retry-After before failover](https://github.com/laravel/ai/pull/1112), [PR #1113: Responses API stream handling](https://github.com/laravel/ai/pull/1113), [PR #1111: structured output decoding](https://github.com/laravel/ai/pull/1111), [PR #1110: OpenRouter reasoning replay](https://github.com/laravel/ai/pull/1110), [PR #1109: CopyFile guard](https://github.com/laravel/ai/pull/1109)
-- Laravel docs: [Agent middleware](https://laravel.com/docs/13.x/ai-sdk#middleware), [Streaming](https://laravel.com/docs/13.x/ai-sdk#streaming)
+- Laravel docs: [Agent middleware](https://laravel.com/framework/docs/13.x/ai-sdk#middleware), [Streaming](https://laravel.com/framework/docs/13.x/ai-sdk#streaming)
 - Inertia docs: [HTTP requests with useHttp](https://inertiajs.com/docs/v3/the-basics/http-requests)

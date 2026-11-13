@@ -4,6 +4,7 @@ title: "Authenticate a Vue SPA with Laravel Sanctum"
 excerpt: "Cookie sessions for a first-party Vue app, CSRF, stateful domains, and the token path that is only for a phone or a third party."
 description: "Laravel Sanctum SPA authentication for Vue 3: CSRF cookie, session login, CORS, and when a bearer token is the wrong tool."
 seoTitle: "Laravel Sanctum Vue SPA authentication"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T04:40:00Z
 snippet: "php artisan install:api"
 categories: [laravel, vuejs]
@@ -90,6 +91,18 @@ Send `Accept: application/json` on API calls. Without it, a failed login can com
 
 </Callout>
 
+## SESSION_DOMAIN in production
+
+| Setup | `SESSION_DOMAIN` | `SANCTUM_STATEFUL_DOMAINS` |
+|---|---|---|
+| One host, Inertia or SPA served by Laravel | empty (`null`) | your host |
+| SPA on `app.example.com`, API on `api.example.com` | `.example.com` | `app.example.com` |
+| Local, both on `localhost` with ports | empty | `localhost:5173,localhost:8000` |
+
+The leading dot sends the session cookie to every subdomain of `example.com`. Both hosts must share that parent domain. `localhost` has no parent you can prefix, and `localhost` and `127.0.0.1` aren't the same host for cookies. Pick one, use it in `APP_URL` and open the app at that address.
+
+The session cookie is `HttpOnly`, so you can't fix any of this from Vue code. If login works but the next request is a 401, the cookie went to a domain the next host doesn't match.
+
 ## The login route is a web route
 
 <Callout type="heads-up" title="not routes/api.php">
@@ -137,7 +150,7 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 ```
 
-[Laravel Fortify](https://laravel.com/docs/13.x/fortify) can own `/login` instead of the closure above. Use it when you also need registration, password reset, and two-factor. The cookie rules do not change.
+[Laravel Fortify](https://laravel.com/framework/docs/13.x/fortify) can own `/login` instead of the closure above. Use it when you also need registration, password reset, and two-factor. The cookie rules do not change.
 
 ## The Vue side
 
@@ -251,6 +264,37 @@ Do not put that token in `localStorage` for the Vue app that shares your domain.
 
 A third party that must use OAuth, with its own client id, is [Sanctum or Passport](/laravel-sanctum-vs-passport). The separate Vue app still needs its own URLs. That router is [Vue Router on a Laravel API](/vue-router-laravel-spa), and it does not belong in an Inertia app.
 
+## Token abilities
+
+A token issued to a phone app or a CI script can carry abilities:
+
+```php
+$token = $request->user()->createToken('phone', ['posts:read'])->plainTextToken;
+```
+
+Register Sanctum's two middleware aliases, then require abilities on the route:
+
+```php title="bootstrap/app.php"
+use Laravel\Sanctum\Http\Middleware\CheckAbilities;
+use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
+
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->alias([
+        'abilities' => CheckAbilities::class,
+        'ability' => CheckForAnyAbility::class,
+    ]);
+})
+```
+
+```php title="routes/api.php"
+Route::middleware(['auth:sanctum', 'abilities:posts:read'])->get('/v1/posts', [PostController::class, 'index']);
+Route::middleware(['auth:sanctum', 'ability:posts:write,posts:admin'])->post('/v1/posts', [PostController::class, 'store']);
+```
+
+`abilities:` needs every listed ability and `ability:` needs any one of them. In the test for this page, a `posts:read` token can read but gets 403 on the post route, while a `posts:admin` token passes. `$request->user()->tokenCan('posts:write')` checks inside an action. A token created without abilities gets `['*']` and can do anything.
+
+There is one trap for the SPA. When the request is authenticated by the session cookie, Sanctum attaches a `TransientToken`, and `tokenCan()` returns **true** for every ability. Abilities therefore limit tokens, not your first-party Vue app. What a user may do to a row is still a [policy](/laravel-vue-policies).
+
 ## A test
 
 <TryIt title="Cover both guards">
@@ -297,6 +341,10 @@ Private broadcast channels from this SPA need a different auth route than a norm
 
 ## Sources
 
-- [Laravel 13: Sanctum](https://laravel.com/docs/13.x/sanctum)
-- [Laravel 13: Sanctum, SPA authentication](https://laravel.com/docs/13.x/sanctum#spa-authentication)
+- [Laravel 13: Sanctum](https://laravel.com/framework/docs/13.x/sanctum)
+- [Laravel 13: Sanctum, SPA authentication](https://laravel.com/framework/docs/13.x/sanctum#spa-authentication)
 - [Axios: Request config](https://axios-http.com/docs/req_config)
+- [Laravel docs: Sanctum API token authentication](https://laravel.com/framework/docs/13.x/sanctum#api-token-authentication)
+- [Laravel docs: Session](https://laravel.com/framework/docs/13.x/session)
+- [MDN: Set-Cookie Domain](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
+- [Laravel docs: Sanctum token abilities](https://laravel.com/framework/docs/13.x/sanctum#token-abilities)

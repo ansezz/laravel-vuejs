@@ -2,8 +2,9 @@
 id: 23
 title: "Laravel and Vue translations"
 excerpt: "Laravel holds the strings. vue-i18n renders them. The instance is created once, so a locale change has to push new messages into it."
-description: "Translate a Laravel and Vue app with lang files, a shared locale prop, and vue-i18n in legacy: false mode."
+description: "Translate a Laravel and Vue app with Laravel lang files, a shared locale prop from Inertia, and vue-i18n in Composition API mode (legacy: false)."
 seoTitle: "Laravel and Vue translations"
+updated: 2026-11-10T12:00:00Z
 date: 2026-10-10T06:00:00Z
 snippet: "npm install vue-i18n"
 categories: [laravel, vuejs]
@@ -167,15 +168,33 @@ Click it: the heading changes to "Articles" with no full reload.
 
 The locale switch is a normal Inertia form posting to `/locale`. `back()` loads the same page again, the middleware shares the other file, and the watcher swaps `t("posts")`.
 
+## Save the locale on the user
+
+The `/locale` route above stores the allow-listed locale in the session, which is enough for a guest. Once someone has an account, save it on the user so mail, queued jobs, and the next device all use the same language:
+
+```php
+$locale = $request->string('locale')->toString();
+
+if (in_array($locale, ['en', 'fr', 'ar'], true)) {
+    $request->user()->update(['locale' => $locale]);
+    App::setLocale($locale);
+}
+```
+
+The [shared prop](#the-php-strings) already exposes the current locale to the layout. Validation messages then use that language on the next response.
+
+Don't store the locale only in `localStorage`. The server renders the flash and the mail, and it cannot see that key. Don't pass a raw query string into `setLocale`: an unknown locale falls through to odd file lookups.
+
 ## Where this stops
 
-Dates and money still use `Intl` in the browser or Carbon on the server. This page does not format them. Client-only drafts stay in [Pinia](/pinia-laravel-inertia). Pinia is the wrong place to copy the language files.
+Dates and money are formatted on the server in the [API resource](/laravel-api-resources-vue#format-money-on-the-server) and [timezone](/laravel-api-resources-vue#format-timestamps-in-the-users-zone) sections, not here. Client-only drafts stay in [Pinia](/pinia-laravel-inertia). Pinia is the wrong place to copy the language files.
 
 ## Recap
 
 - Laravel’s `lang` files stay the source of truth.
 - Share the active locale’s strings as a prop.
 - Allow-list the locale before `setLocale`.
+- Save it on the user (or in the session for a guest), not only in `localStorage`.
 - Create vue-i18n once; merge new messages on each visit.
 
 ## FAQ
@@ -184,16 +203,19 @@ Dates and money still use `Intl` in the browser or Carbon on the server. This pa
   { q: 'How do I use Laravel translations in Vue with Inertia?', a: 'Share `Lang::get(\'messages\')` and the locale from `HandleInertiaRequests`, then load them into vue-i18n.' },
   { q: 'Why does vue-i18n not change language after switching locale?', a: 'The i18n instance is created once. Watch `page.props.i18n` in a persistent layout and call `mergeLocaleMessage` and set `locale`.' },
   { q: 'Do I need a package to sync Laravel lang files to Vue?', a: 'No. Sharing the strings as Inertia props is enough.' },
+  { q: "Can I keep the locale only in localStorage?", a: "No. The server renders flash messages and mail, and it cannot see that key. Allow-list the locale, save it on the user (or in the session for a guest), then call `setLocale`." },
 ]} />
 
 ## Next steps
 
-- [Switch the app locale from Vue](/laravel-app-locale-vue)
+- [Save the locale on the user](#save-the-locale-on-the-user)
 - [Persistent layouts in Inertia + Vue](/inertia-vue-persistent-layout)
 - [Pinia with Laravel and Inertia](/pinia-laravel-inertia)
+- [Format money on the server](/laravel-api-resources-vue#format-money-on-the-server)
 
 ## Sources
 
-- [Laravel 13: Localization](https://laravel.com/docs/13.x/localization)
+- [Laravel 13: Localization](https://laravel.com/framework/docs/13.x/localization)
 - [Vue I18n: Composition API](https://vue-i18n.intlify.dev/guide/advanced/composition)
 - [Inertia v3: Shared data](https://inertiajs.com/docs/v3/data-props/shared-data)
+- [Laravel docs: Configuring the locale](https://laravel.com/framework/docs/13.x/localization#configuring-the-locale)
