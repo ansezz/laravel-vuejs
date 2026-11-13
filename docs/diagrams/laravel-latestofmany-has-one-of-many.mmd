@@ -1,0 +1,13 @@
+flowchart LR
+  A["`**Customer::with('latestOrder')**`"] --> B{"`How is latestOrder
+  defined?`"}
+  B -- "hasOne()->latest('id')" --> C["`Eager query has no limit:
+  **every order** of every customer
+  is hydrated, one is kept`"]
+  B -- "hasOne()->latestOfMany()" --> D["`inner join (select MAX(id)
+  ... group by customer_id):
+  **one order per customer**`"]
+  C --> E["`Right answer,
+  memory grows with history`"]
+  D --> F["`Right answer,
+  2 queries, N rows`"]
