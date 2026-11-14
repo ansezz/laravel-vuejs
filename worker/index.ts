@@ -300,7 +300,7 @@ const API_CATALOG = JSON.stringify({
       { href: `https://${APEX}/api/posts.json`, type: 'application/json', title: 'Search index: every published article (slug, URL, title, excerpt, date, topics, text)' },
       { href: `https://${APEX}/feed.xml`, type: 'application/rss+xml', title: 'RSS feed of the latest articles' },
       { href: `https://${APEX}/sitemap.xml`, type: 'application/xml', title: 'Sitemap index' },
-      { href: `https://${APEX}/llms.txt`, type: 'text/plain', title: 'llms.txt: index of the site for language models, with links to the Markdown copy of every article' },
+      { href: `https://${APEX}/llms.txt`, type: 'text/plain', title: 'llms.txt: index of key pages, tools and recent articles for language models' },
       { href: `https://${APEX}/llms-full.txt`, type: 'text/plain', title: 'Full text of every article as Markdown' },
     ],
   }],
