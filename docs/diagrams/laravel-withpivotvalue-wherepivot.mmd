@@ -1,0 +1,12 @@
+flowchart LR
+  A["`**$project->approvedMembers()->attach()**`"] --> B{"`How is the
+  relation scoped?`"}
+  B -- "wherePivot('approved', 1)" --> C["`Read: only approved members
+  attach(): approved = column default`"]
+  C --> D["`New pivot row is **unapproved**
+  and missing from approvedMembers()`"]
+  B -- "withPivotValue('approved', 1)" --> E["`Read: where project_member.approved = 1
+  attach / create / save / sync:
+  approved = 1`"]
+  E --> F["`New member shows up
+  **in approvedMembers()**`"]
