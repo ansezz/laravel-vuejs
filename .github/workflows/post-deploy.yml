@@ -1,7 +1,8 @@
 name: Post-deploy check
 
 # After Cloudflare Workers Builds deploys a push to master, verify the live site: key pages, headers, feeds, sitemap,
-# the newest post and its Markdown twin, the forms API, and that every post whose date has passed is live.
+# the newest post and its Markdown twin, the forms API, that every post whose date has passed is live, and that
+# the search index lists exactly those published posts.
 # Also runs daily after the "Publish scheduled posts" workflow (07:05 UTC) to confirm scheduled posts went out.
 on:
   push:

@@ -61,18 +61,35 @@ for (const [path, type, needle] of pages) {
   } catch (e) { report(false, `GET ${path}`, e.message) }
 }
 
-// 3. Posts: every post whose date has passed is live; the newest one renders, has its Markdown twin and its OG image.
+// 3. Posts: the search index matches posts in the repo, every post whose date has passed is live, and the newest
+// one renders, has its Markdown twin and its OG image. Production lists only published posts. Any other host
+// (a preview, or a local build that includes future-dated posts) may list those scheduled posts as well.
 try {
   const live = await (await get('/api/posts.json')).json()
-  const slugs = new Set(live.map((p) => p.slug))
-  report(live.length >= 100, 'search index has the posts', `${live.length} posts`)
+  const slugs = live.map((p) => p.slug)
+  const liveSet = new Set(slugs)
   const dir = new URL('../src/content/posts/', import.meta.url)
-  const due = fs.readdirSync(dir).filter((f) => /\.mdx?$/.test(f)).flatMap((f) => {
+  const due = []
+  const scheduled = []
+  for (const f of fs.readdirSync(dir)) {
+    if (!/\.mdx?$/.test(f)) continue
     const fm = fs.readFileSync(new URL(f, dir), 'utf8').match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ''
     const date = Date.parse(fm.match(/^date:\s*["']?([^"'\n]+)["']?\s*$/m)?.[1] ?? '')
-    return !Number.isNaN(date) && date <= Date.now() ? [f.replace(/\.mdx?$/, '')] : []
-  })
-  const missing = due.filter((s) => !slugs.has(s))
+    if (Number.isNaN(date)) continue
+    ;(date <= Date.now() ? due : scheduled).push(f.replace(/\.mdx?$/, ''))
+  }
+  const same = (expected) => slugs.length === expected.length && expected.every((s) => liveSet.has(s))
+  const production = ['laravel-vuejs.space', 'www.laravel-vuejs.space'].includes(new URL(site).hostname)
+  const indexOk = same(due) || (!production && scheduled.length > 0 && same([...due, ...scheduled]))
+  const missing = due.filter((s) => !liveSet.has(s))
+  const unknown = [...liveSet].filter((s) => !due.includes(s) && !scheduled.includes(s))
+  const early = production ? scheduled.filter((s) => liveSet.has(s)) : []
+  const detail = [`${slugs.length} live, ${due.length} published`]
+  if (scheduled.length) detail.push(`${scheduled.length} scheduled`)
+  if (missing.length) detail.push(`missing: ${missing.join(' ')}`)
+  if (unknown.length) detail.push(`unknown: ${unknown.join(' ')}`)
+  if (early.length) detail.push(`scheduled but live: ${early.join(' ')}`)
+  report(indexOk, 'search index matches published posts', detail.join('; '))
   report(missing.length === 0, 'every due post is live', missing.length ? `missing: ${missing.join(' ')}` : `${due.length} due`)
   const newest = live[0]?.slug
   if (newest) {
