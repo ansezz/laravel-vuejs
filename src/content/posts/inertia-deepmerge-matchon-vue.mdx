@@ -1,0 +1,251 @@
+---
+id: 192
+title: "Inertia deepMerge and matchOn in Vue: merge without duplicates"
+seoTitle: "Inertia deepMerge() and matchOn() in Vue"
+excerpt: "Inertia::deepMerge() merges nested props on partial reloads, and matchOn() updates rows by id instead of duplicating them. 23 Pest tests."
+date: 2026-11-15T06:00:00Z
+snippet: "'chat' => Inertia::deepMerge($chat)->matchOn('messages.id')"
+categories: [vuejs, laravel]
+tags: [inertia, vuejs, laravel]
+---
+Your "Load more" button works, until a new post lands between two clicks. Page 2 now starts with a row you already have, and Vue warns about a duplicate `:key`. Merge props append whatever the server sends. `matchOn()` tells the client which field makes a row unique, and `Inertia::deepMerge()` does the same for a whole nested object.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia 3 who load more rows with partial reloads"
+  learn={['What `Inertia::deepMerge()` merges and what it replaces', 'How `matchOn()` updates rows by id instead of appending them twice', 'Why `merge()->append(\'data\', matchOn: \'id\')` beats deepMerge for paginators', 'Reset, defer, and the `prepend()` trap']}
+  tested="Laravel 13.42 · PHP 8.4 · Pest 4 · inertia-laravel 3.5.1 · @inertiajs/core 3.11 merge step (23 tests, 93 assertions)"
+>
+
+- `'chat' => Inertia::deepMerge($chat)->matchOn('messages.id')` merges the whole `chat` object on a partial reload. Arrays are merged, scalars like `online` are replaced, and a message with an `id` the page already has replaces the old one instead of showing up twice.
+- Without `matchOn()`, overlapping rows are kept twice. In the lab, page 1 `[4, 5]` plus page 2 `[5, 6]` became `[4, 5, 5, 6]`.
+- For a Laravel paginator, prefer `Inertia::merge($paginator)->append('data', matchOn: 'id')`. `deepMerge()` also concatenates the paginator's `links` array: 4 links became 8 in our test.
+- Merging only happens on a partial reload of the same page component. A full visit, or `reset: ['chat']`, replaces the prop.
+
+</TLDR>
+
+## What deepMerge and matchOn are, and why people miss them
+
+Merge props let a partial reload add to a prop instead of replacing it. `Inertia::merge()` merges one array, at the root or at a path you name. `Inertia::deepMerge()` walks the whole value: every nested array is merged, and every scalar is replaced. `matchOn()` names the field that identifies a row, so a row that comes back again is updated in place.
+
+`deepMerge()` landed in April 2025 ([inertia-laravel PR #679](https://github.com/inertiajs/inertia-laravel/pull/679), [Inertia PR #2069](https://github.com/inertiajs/inertia/pull/2069)). `matchOn()` replaced an earlier `mergeStrategies` argument in June 2025 ([#747](https://github.com/inertiajs/inertia-laravel/pull/747), [#2384](https://github.com/inertiajs/inertia/pull/2384)). The `append('data', matchOn: 'id')` shortcut came with `Inertia::scroll()` in September 2025 ([#774](https://github.com/inertiajs/inertia-laravel/pull/774)).
+
+People miss them because the plain `Inertia::merge()` from [partial reloads](/inertia-partial-reloads) looks finished. It is, until rows overlap. Offset pagination overlaps as soon as someone inserts a row, and a polled chat sends messages you already have.
+
+<Diagram name="inertia-deepmerge-matchon-vue" alt="On a partial reload for the same page component, the Inertia client checks whether the prop is listed in deepMergeProps. If yes, it walks the object, merging arrays and replacing scalars. If it is listed in mergeProps, it merges only the named array path. For each array, if matchPropsOn has a key for that path, rows with the same key are replaced and new rows are appended; otherwise the arrays are concatenated and duplicates are kept." caption="The server only sends instructions. The Vue client does the merging." />
+
+## The server sends instructions, the client merges
+
+Nothing is merged in PHP. Laravel resolves the prop as usual and adds metadata to the page object. The Vue client reads it on the next partial reload.
+
+```php title="app/Http/Controllers/ChatController.php"
+use Inertia\Inertia;
+
+return Inertia::render('Chat', [
+    'title' => 'Support chat',
+    'chat' => Inertia::deepMerge($chat)->matchOn('messages.id'),
+]);
+```
+
+The response from our lab carried this:
+
+```json
+{
+  "deepMergeProps": ["chat"],
+  "matchPropsOn": ["chat.messages.id"]
+}
+```
+
+`matchOn()` keys are relative to the prop, and Laravel prefixes them with the prop name. The client splits off the last segment (`id`) and applies it to the array at `chat.messages`. `matchOn()` also takes an array: `->matchOn(['threads.id', 'labels.slug'])` produced `inbox.threads.id` and `inbox.labels.slug`.
+
+A plain `Inertia::merge()` goes into `mergeProps` instead. `append('data', matchOn: 'id')` produces `mergeProps: ["posts.data"]` and `matchPropsOn: ["posts.data.id"]`. The array form works as well: `->append(['users.data' => 'id', 'messages' => 'uuid'])`.
+
+## The usual way vs deepMerge with matchOn
+
+We ran Laravel's real responses through the real merge step of `@inertiajs/core` 3.11. Page 1 had messages 4 and 5, and `online: 12`. Page 2 had an edited message 5, a new message 6, and `online: 9`.
+
+<CodeCompare before="deepMerge, no matchOn" after="deepMerge + matchOn('messages.id')">
+
+```php title="app/Http/Controllers/ChatController.php"
+'chat' => Inertia::deepMerge($chat),
+
+// After router.reload({ only: ['chat'], data: { page: 2 } }):
+// messages: [4, 5, 5, 6]   ← message 5 twice, old and edited
+// online:   9
+```
+
+```php title="app/Http/Controllers/ChatController.php"
+'chat' => Inertia::deepMerge($chat)->matchOn('messages.id'),
+
+// After router.reload({ only: ['chat'], data: { page: 2 } }):
+// messages: [4, 5, 6]      ← 5 replaced in place with the edited text
+// online:   9
+```
+
+</CodeCompare>
+
+The order stays stable. A matched row keeps its position and takes the new values, and rows the page has not seen are added at the end. `title`, which the partial reload did not ask for, kept its old value.
+
+The Vue side is a normal partial reload:
+
+```vue title="resources/js/pages/Chat.vue"
+<script setup lang="ts">
+import { router } from "@inertiajs/vue3";
+
+const props = defineProps<{
+  title: string;
+  chat: {
+    messages: { id: number; text: string; user: string }[];
+    online: number;
+  };
+}>();
+
+let page = 1;
+
+function loadOlder() {
+  page++;
+  router.reload({ only: ["chat"], data: { page } });
+}
+</script>
+
+<template>
+  <h1>{{ title }} · {{ chat.online }} online</h1>
+  <p v-for="message in chat.messages" :key="message.id">
+    <strong>{{ message.user }}</strong> {{ message.text }}
+  </p>
+  <button @click="loadOlder">Load older</button>
+</template>
+```
+
+With `matchOn()`, the `:key="message.id"` stays unique. Without it, Vue warns about duplicate keys in development, and a list with repeated keys can patch the wrong row.
+
+## Paginators: append('data') beats deepMerge
+
+`Inertia::defer(fn () => User::paginate())->deepMerge()` appears in the docs, and it works for the rows. It also merges every other array inside the paginator. A `LengthAwarePaginator` has a `links` array for the page buttons, so deepMerge concatenates that too.
+
+| Prop | `data` after page 2 | `links` after page 2 | `current_page` |
+|---|---|---|---|
+| `Inertia::deepMerge($paginator)->matchOn('data.id')` | 1–6, no duplicates | 8 (two sets of 4) | 2 |
+| `Inertia::merge($paginator)->append('data', matchOn: 'id')` | 1–6, no duplicates | 4 (replaced) | 2 |
+
+The docs agree. `deepMerge()` came before `merge()` could target nested paths, so `merge()` with `append()` or `prepend()` is usually enough. Use `deepMerge()` when the prop is a genuinely nested structure with several arrays you all want merged, like `chat` above.
+
+```php title="app/Http/Controllers/PostController.php"
+use Inertia\Inertia;
+
+return Inertia::render('Posts/Index', [
+    'posts' => Inertia::merge(
+        fn () => Post::query()->latest('id')->paginate(20)
+    )->append('data', matchOn: 'id'),
+]);
+```
+
+`matchOn()` works on a root-level list as well. `Inertia::merge($notifications)->matchOn('id')` sends `matchPropsOn: ["notifications.id"]`. In the lab, `[n1, n2]` plus a page with a read `n2` and a new `n3` became `[n1, n2, n3]`, with `n2.read` now `true`.
+
+<Callout type="tip" title="For an infinite feed, use Inertia::scroll()">
+
+If you are building an infinite list, [`Inertia::scroll()` and `<InfiniteScroll>`](/inertia-infinite-scroll-vue) wire the merge, the page counter and the reset for you. Reach for `merge()` and `deepMerge()` when you control the reload yourself: "Load more" buttons, polled chats, dashboards.
+
+</Callout>
+
+## Reset, defer, and partial reloads
+
+A changed search or filter must replace the list, not merge into it. Pass `reset`:
+
+```ts title="resources/js/pages/Posts/Index.vue"
+router.reload({
+  only: ["posts"],
+  data: { search: value, page: 1 },
+  reset: ["posts"],
+});
+```
+
+With the `X-Inertia-Reset: chat` header, Laravel left `chat` out of `deepMergeProps` and `matchPropsOn`. The client then replaced the prop: the list held only `[5, 6]`.
+
+Merge metadata only travels with props the partial reload asked for. A reload with `only: ['title']` returned no `deepMergeProps` for `chat`. A full visit still sends the metadata, but the client ignores it and replaces the prop. It does the same when the response is for a different page component.
+
+`deepMerge()` and `merge()` chain onto deferred props. `Inertia::defer(fn () => ...)->deepMerge()->matchOn('data.id')` was left out of the first response, and the closure ran zero times. The response still listed the prop under `deferredProps`, `deepMergeProps` and `matchPropsOn`. The follow-up partial reload ran it once. See [deferred props](/inertia-deferred-props-vue) for the `<Deferred>` side.
+
+## Gotchas
+
+<Callout type="gotcha" title="deepMerge() ignores prepend()">
+
+`Inertia::deepMerge($chat)->prepend()` still lands in `deepMergeProps`, with no `prependProps`. The client's deep merge always appends. In the lab, new messages went to the end: `[4, 5, 5, 6]`. To add older messages to the top, use `Inertia::merge($chat)->prepend('messages', matchOn: 'id')`.
+
+</Callout>
+
+Other traps we hit:
+
+- With `prepend('messages', matchOn: 'id')`, a matched row moves to the top. Page 1 `[4, 5]` plus page 2 `[5, 6]` gave `[5, 6, 4]`. The new batch goes first, and the old copy of 5 is dropped.
+- Rows without the match key are always added. A message with no `id` was appended even with `matchOn('messages.id')`.
+- The match key is compared with `===` in JavaScript. An `id` of `5` in one response and `"5"` in the next will not match. In the lab, page 2 sending `"5"` gave `[4, 5, "5", 6]`. Keep the cast consistent.
+- `matchOn()` without `merge()` does nothing. `Inertia::defer(...)->matchOn('id')` sent no merge metadata at all, so chain it onto `Inertia::merge()`, `Inertia::deepMerge()`, or `defer()->merge()`.
+
+## Try it yourself
+
+<TryIt title="Watch matchOn de-duplicate a reload">
+
+```php title="routes/web.php"
+use Inertia\Inertia;
+
+Route::get('/lab/chat', function () {
+    $messages = request('page', 1) == 1
+        ? [['id' => 4, 'text' => 'Hello'], ['id' => 5, 'text' => 'How are you?']]
+        : [['id' => 5, 'text' => 'How are you? (edited)'], ['id' => 6, 'text' => 'Great']];
+
+    return Inertia::render('Chat', [
+        'chat' => Inertia::deepMerge(['messages' => $messages, 'online' => rand(1, 20)])
+            ->matchOn('messages.id'),
+    ]);
+});
+```
+
+Render `chat.messages` in a page, then call `router.reload({ only: ['chat'], data: { page: 2 } })`. You should see three messages, with 5 edited in place. Remove `->matchOn('messages.id')` and reload the page: you get four.
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ One chained call replaces a hand-written de-duplication on every reload |
+| How often you'll reach for it | ★★★☆☆ Load-more lists, polled chats and nested dashboards; `Inertia::scroll()` covers plain feeds |
+| Risk if misused | ★★★☆☆ `deepMerge()` on a paginator doubles `links`; `prepend()` is silently ignored |
+| **Overall** | **4 / 5**: `matchOn()` belongs on every merge prop that has ids |
+
+## Recap
+
+- `Inertia::deepMerge()` merges every nested array and replaces every scalar on a partial reload. `Inertia::merge()` merges one array, at the root or at the path you name.
+- `matchOn('messages.id')` updates rows with the same key in place and appends new ones. Without it, overlapping rows appear twice.
+- For paginators, use `merge($paginator)->append('data', matchOn: 'id')`. `deepMerge()` also doubles the `links` array.
+- Merging only happens on partial reloads of the same component. Full visits and `reset` replace the prop.
+- `deepMerge()` ignores `prepend()`. Use `merge()->prepend('path', matchOn: 'id')` instead.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'What is the difference between Inertia::merge() and Inertia::deepMerge()?', a: 'merge() merges one array, at the root or at the paths you pass to append() or prepend(), and replaces the rest. deepMerge() walks the whole value, merging every nested array and replacing every scalar.' },
+  { q: 'How do I stop duplicate rows when I load more?', a: 'Add a match key: ->matchOn(\'messages.id\') on deepMerge(), or ->append(\'data\', matchOn: \'id\') on merge(). Rows with an id the page already has are replaced instead of appended.' },
+  { q: 'Should I use deepMerge() on a Laravel paginator?', a: 'Usually not. It concatenates the paginator\'s links array as well as data. Inertia::merge($paginator)->append(\'data\', matchOn: \'id\') merges the rows and replaces the rest. For infinite lists, use Inertia::scroll().' },
+  { q: 'Why does my merge prop get replaced instead of merged?', a: 'Merging only happens on a partial reload (only or except) of the same page component. A full visit, a reset, or a response for another component replaces the prop.' },
+  { q: 'Which versions support matchOn()?', a: 'matchOn() replaced the mergeStrategies argument in June 2025 (inertia-laravel PR #747, Inertia PR #2384), and is in Inertia 3. We tested on inertia-laravel 3.5.1 and the @inertiajs/core 3.11 client.' },
+]} />
+
+## Next steps
+
+- [Inertia partial reloads in Vue](/inertia-partial-reloads), the reload that triggers every merge
+- [Inertia infinite scroll in Vue](/inertia-infinite-scroll-vue), merge props with the page logic built in
+- [Inertia deferred props in Vue](/inertia-deferred-props-vue), including `defer()->deepMerge()`
+- [Inertia docs: Merging props](https://inertiajs.com/docs/v3/data-props/merging-props)
+
+## Sources
+
+- [Inertia docs: Merging props](https://inertiajs.com/docs/v3/data-props/merging-props)
+- [Inertia docs: Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads)
+- [inertia-laravel PR #679: Inertia::deepMerge](https://github.com/inertiajs/inertia-laravel/pull/679)
+- [Inertia PR #2069: deepMerge support in the client](https://github.com/inertiajs/inertia/pull/2069)
+- [inertia-laravel PR #747: mergeStrategies becomes matchOn()](https://github.com/inertiajs/inertia-laravel/pull/747)
+- [Inertia PR #2384: mergeStrategies becomes matchOn](https://github.com/inertiajs/inertia/pull/2384)
+- [inertia-laravel PR #774: finer merge control and Inertia::scroll()](https://github.com/inertiajs/inertia-laravel/pull/774)
+- [Source: `Inertia\MergesProps` (deepMerge, matchOn, append, prepend)](https://github.com/inertiajs/inertia-laravel/blob/v3.5.1/src/MergesProps.php)
+- [Source: `Inertia\PropsResolver` (merge metadata, reset)](https://github.com/inertiajs/inertia-laravel/blob/v3.5.1/src/PropsResolver.php)
+- [Source: client merge step in `@inertiajs/core` response.ts](https://github.com/inertiajs/inertia/blob/v3.11.0/packages/core/src/response.ts)
