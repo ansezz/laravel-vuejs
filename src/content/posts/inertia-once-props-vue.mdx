@@ -1,0 +1,290 @@
+---
+id: 191
+title: "Inertia once props in Vue: send expensive props once"
+excerpt: "Inertia::once() sends a prop the first time and the Vue client reuses it. Cover fresh(), until(), as(), shareOnce() and the auth gotcha. 19 Pest tests."
+date: 2026-11-15T01:00:00Z
+snippet: "'plans' => Inertia::once(fn () => Plan::all())"
+categories: [vuejs, laravel]
+tags: [inertia, vuejs, laravel]
+---
+Your billing page loads the same 40 plans on every Inertia visit. The list barely changes. Laravel still runs the query, and the JSON still carries the rows. `Inertia::once()` sends the list the first time, and the client keeps it for every later page that still includes that prop.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia 3 who share large or expensive props across pages"
+  learn={['How `Inertia::once()` skips the callback on later visits', 'fresh(), `router.reload({ only })`, until() and as()', 'shareOnce() and the signed-in / signed-out auth pattern', 'The gotcha: expiry is a client decision, not a server check']}
+  tested="Laravel 13.42 · PHP 8.4 · Pest 4 · inertia-laravel 3.5.1 (19 tests, 128 assertions)"
+>
+
+- Wrap a stable prop: `'plans' => Inertia::once(fn () => Plan::all())`. The first Inertia response includes `plans` and lists it under `onceProps`. Later visits send `X-Inertia-Except-Once-Props: plans`, Laravel skips the closure, and the prop is left out of the JSON.
+- Force a new value with `->fresh()` on the server, or `router.reload({ only: ['plans'] })` from Vue. A partial reload with `only` always resolves the callback, even when the client still remembers the prop.
+- Share it on every page with `Inertia::shareOnce('countries', fn () => Country::all())`, or a `shareOnce()` method on `HandleInertiaRequests`.
+- `until()` and `as()` are metadata for the client. The server trusts the except-once header: if the client still sends it after the previous `expiresAt`, the closure does not run.
+
+</TLDR>
+
+## What Inertia::once() is and why people miss it
+
+Once props are for data that is expensive, large, or almost static: billing plans, a country list, roles, exchange rates. The client remembers the value and reuses it on later pages that still include that prop. Laravel does not run the closure again, and the payload does not carry the rows again.
+
+The feature landed in December 2025 ([inertia-laravel PR #793](https://github.com/inertiajs/inertia-laravel/pull/793), [Inertia PR #2732](https://github.com/inertiajs/inertia/pull/2732)), in inertia-laravel 2.0.12 and the matching client. It is in Inertia 3 as well. We tested the server side on inertia-laravel 3.5.1 with Laravel 13.42.
+
+People miss it because a shared prop already *looks* like the right tool, and because `once()` is an overloaded name. [Laravel's `once()` helper](/laravel-once-helper-memoization) memoizes a closure in PHP for the rest of the request (or the worker). `Inertia::once()` is a conversation between the client and the server across visits. [Partial reloads](/inertia-partial-reloads) also mention `->once()` on a deferred prop; that is the same remember-and-skip behaviour, chained onto `Inertia::defer()`. This post is the standalone form, `Inertia::once()`.
+
+<Diagram name="inertia-once-props-vue" alt="A visit that includes plans as Inertia::once() is checked for the X-Inertia-Except-Once-Props header. If the header is missing, Laravel resolves the callback and sends plans plus onceProps metadata. If the header lists plans, and the prop is not marked fresh() and this is not a partial reload that asked for it, Laravel skips the callback, omits plans from the JSON, and still sends onceProps metadata so the Vue client can reuse the remembered value." caption="The client remembers the prop. The header is how the server knows not to send it again." />
+
+## The usual way vs Inertia::once()
+
+Both pages can show the same plans. Only one of them skips the query on the second visit.
+
+<CodeCompare before="Shared, but resolved every visit" after="Sent once, then reused">
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+public function share(Request $request): array
+{
+    return [
+        ...parent::share($request),
+        'plans' => fn () => Plan::query()->orderBy('price')->get(),
+    ];
+}
+```
+
+```php title="app/Http/Controllers/BillingController.php"
+use Inertia\Inertia;
+
+return Inertia::render('Billing', [
+    'invoice' => $invoice->only('id', 'total'),
+    'plans' => Inertia::once(fn () => Plan::query()->orderBy('price')->get()),
+]);
+```
+
+</CodeCompare>
+
+On the first Inertia visit in our lab, the page object included `props.plans` and this metadata:
+
+```json
+{
+  "onceProps": {
+    "plans": { "prop": "plans", "expiresAt": null }
+  }
+}
+```
+
+The second visit sent `X-Inertia-Except-Once-Props: plans`. The JSON still had `invoice` and the same `onceProps` entry, and it did not have `plans`. The closure ran zero times.
+
+The first full document request (no `X-Inertia` header) always resolves the prop, because there is no remembered client state yet. After that, the client only keeps the value while you stay on pages that still include it. A visit to a page without `plans` forgets it, and the next page that includes it runs the closure again.
+
+## Refresh when the data actually changes
+
+Two official ways to get a new value.
+
+`fresh()` forces the server to resolve and send the prop, even when the client still lists it in the except-once header. It also takes a boolean, so you can refresh after an admin edit:
+
+```php title="app/Http/Controllers/BillingController.php"
+return Inertia::render('Billing', [
+    'plans' => Inertia::once(fn () => Plan::query()->orderBy('price')->get())
+        ->fresh($request->user()->hasRole('admin') && $request->boolean('refresh_plans')),
+]);
+```
+
+From Vue, a partial reload that names the prop always resolves it. In the lab, a request with `X-Inertia-Partial-Component: Billing`, `X-Inertia-Partial-Data: plans` and `X-Inertia-Except-Once-Props: plans` still ran the closure and returned `plans`. That is the same mechanism as:
+
+```vue title="resources/js/pages/Billing.vue"
+<script setup lang="ts">
+import { router } from "@inertiajs/vue3";
+
+function refreshPlans() {
+  router.reload({ only: ["plans"] });
+}
+</script>
+```
+
+<Callout type="tip" title="Prefetch works with once props">
+
+The client includes remembered once props in prefetched responses, so a prefetched page already has them. If a remembered prop has expired, that prefetched page is dropped from the cache.
+
+</Callout>
+
+## Expiration, custom keys, and sharing
+
+`until()` stamps an `expiresAt` time (milliseconds since epoch) on the metadata. It accepts a `DateTimeInterface`, a `DateInterval`, or an integer number of seconds. In the lab, `->until(now()->addDay())` and `->until(new DateInterval('P1D'))` both produced `expiresAt` equal to `now()->addDay()->timestamp * 1000`.
+
+```php
+'rates' => Inertia::once(fn () => ExchangeRate::all())->until(now()->addDay()),
+```
+
+The client is supposed to drop the header after that time, so the next visit resolves a fresh value. The server does not enforce it. We sent the except-once header two minutes after a 60-second `until()`: the closure still did not run. `until()` is a hint to the client, recomputed on every response, not a server-side TTL check.
+
+`as()` gives two pages a shared memory slot when their prop names differ:
+
+```php title="app/Http/Controllers/TeamController.php"
+// Team/Index
+'memberRoles' => Inertia::once(fn () => Role::all())->as('roles'),
+
+// Team/Invite
+'availableRoles' => Inertia::once(fn () => Role::all())->as('roles'),
+```
+
+The first page we visited resolved the list and advertised `onceProps.roles.prop = "memberRoles"`. The invite page, with `X-Inertia-Except-Once-Props: roles`, skipped its closure and advertised `onceProps.roles.prop = "availableRoles"`. The key in the header is `roles`, not the prop name.
+
+To share a once prop on every page, use any of these:
+
+```php
+Inertia::share('countries', Inertia::once(fn () => Country::all()));
+
+Inertia::shareOnce('countries', fn () => Country::all())->until(now()->addDay());
+```
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+public function shareOnce(Request $request): array
+{
+    return array_merge(parent::shareOnce($request), [
+        'countries' => fn () => Country::all(),
+    ]);
+}
+```
+
+The middleware wraps those closures as once props and merges them with `share()`. In the lab, the second visit with the except-once header skipped the `shareOnce()` closure too.
+
+## Real-world example: plans on a Vue billing page
+
+A billing page needs the current invoice every time, and the plan catalogue almost never. The Vue page just reads `plans` from props. There is no extra store, and no second endpoint.
+
+```php title="app/Http/Controllers/BillingController.php"
+use Inertia\Inertia;
+
+public function __invoke(Request $request)
+{
+    return Inertia::render('Billing', [
+        'invoice' => $request->user()->currentInvoice()->only('id', 'total', 'status'),
+        'plans' => Inertia::once(
+            fn () => Plan::query()->orderBy('price')->get(['id', 'name', 'price', 'interval'])
+        ),
+    ]);
+}
+```
+
+```vue title="resources/js/pages/Billing.vue"
+<script setup lang="ts">
+import { Link } from "@inertiajs/vue3";
+
+defineProps<{
+  invoice: { id: number; total: number; status: string };
+  plans: { id: number; name: string; price: number; interval: string }[];
+}>();
+</script>
+
+<template>
+  <h1>Invoice #{{ invoice.id }}</h1>
+  <p>{{ invoice.total }} · {{ invoice.status }}</p>
+
+  <ul>
+    <li v-for="plan in plans" :key="plan.id">
+      {{ plan.name }} · {{ plan.price }} / {{ plan.interval }}
+    </li>
+  </ul>
+
+  <Link href="/invoices">All invoices</Link>
+</template>
+```
+
+The first visit to `/billing` runs `Plan::query()`. A later visit to `/invoices`, if that page also includes the same once prop (or you put it in `shareOnce()`), does not. If `/invoices` does not include `plans`, the client forgets the list, and the next trip back to billing runs the query again. That is why once props are a natural fit for data you share, or for a cluster of pages that all need the same list.
+
+## Gotchas
+
+<Callout type="gotcha" title="A signed-out response must clear a remembered user">
+
+Shared `auth` data is the classic case: it is stable while someone is signed in, and wrong the moment they sign out. Sign-in and sign-out usually redirect to a page that does not ask for `auth` with `only`, so a remembered once value would stick. The official pattern is: return a once prop when a user is present, and `null` when they are not. The `null` overwrites the remembered value on every signed-out response.
+
+</Callout>
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+public function share(Request $request): array
+{
+    return [
+        ...parent::share($request),
+        'auth' => $request->user()
+            ? Inertia::once(fn () => $request->user()->only('id', 'name', 'email'))
+            : null,
+    ];
+}
+```
+
+In the lab, a signed-in visit sent `auth` and listed it in `onceProps`. The next signed-in visit with the except-once header skipped the closure. A signed-out visit returned `props.auth: null` and no `onceProps.auth` entry, which is how the client is told to forget the user.
+
+Other traps we hit:
+
+- `until()` is not a server-side lock. The server believes the except-once header. After the previous `expiresAt`, the client must stop sending that key or you will keep seeing the old value.
+- A visit to a page that does not include the once prop forgets it. Put rarely changing data in `shareOnce()` when several unrelated pages need it.
+- `Inertia::defer(fn () => ...)->once()` is listed under both `deferredProps` and `onceProps` on the first visit, and the closure does not run then. The follow-up partial reload resolves it, even if the except-once header is already present, because a named partial reload always resolves. After that, later pages can skip it like any other once prop. See [deferred props](/inertia-deferred-props-vue).
+- `Inertia::optional(...)->once()` and `Inertia::merge(...)->once()` work the same way: `once()` is a modifier you can chain.
+
+## Try it yourself
+
+<TryIt title="Log how often a once prop actually runs">
+
+```php title="routes/web.php"
+use Inertia\Inertia;
+
+Route::get('/lab/billing', function () {
+    return Inertia::render('Billing', [
+        'invoice' => ['id' => 42, 'total' => 1900],
+        'plans' => Inertia::once(function () {
+            logger('plans resolved');
+
+            return [
+                ['id' => 1, 'name' => 'Hobby'],
+                ['id' => 2, 'name' => 'Pro'],
+            ];
+        }),
+    ]);
+});
+```
+
+Visit `/lab/billing` twice as an Inertia client (or from a test with `X-Inertia: true`, then again with `X-Inertia-Except-Once-Props: plans`). The log line should appear once.
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ One wrapper drops a stable query and its JSON from every later visit |
+| How often you'll reach for it | ★★★★☆ Plans, countries, roles, feature catalogues, any shared list that rarely changes |
+| Risk if misused | ★★★☆☆ Stale auth if you once-wrap the user without a signed-out `null`; stale lists if the client keeps the header after `until()` |
+| **Overall** | **4 / 5**: the right default for shared, almost-static props, with a sharp auth footgun |
+
+## Recap
+
+- `Inertia::once(fn () => ...)` sends the prop once. Later visits send `X-Inertia-Except-Once-Props`, and Laravel skips the closure.
+- `fresh()` or `router.reload({ only: ['plans'] })` forces a new value. A partial reload that names the prop always resolves it.
+- `until()` and `as()` are client metadata. The server trusts the header, including after the previous `expiresAt`.
+- `shareOnce()` (or `shareOnce()` on the Inertia middleware) is how you share a once prop on every page.
+- For `auth`, return a once prop when signed in and `null` when signed out, so the remembered user cannot survive a logout.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Inertia version has once props?', a: 'inertia-laravel 2.0.12 and the matching Inertia client, shipped in December 2025 (PR #793 / PR #2732). They are in Inertia 3 as well. We tested the server on inertia-laravel 3.5.1 and Laravel 13.42.' },
+  { q: 'Is this the same as Laravel once()?', a: 'No. Laravel once() memoizes a closure in PHP for the rest of the request (and can leak across queue jobs if you forget to flush it). Inertia::once() skips a prop across Inertia visits because the client still has it.' },
+  { q: 'How do I refresh a once prop from Vue?', a: 'Call router.reload({ only: [\'plans\'] }). The server always resolves a once prop that a partial reload asked for, even when the except-once header is present. On the server, chain ->fresh() or ->fresh($condition).' },
+  { q: 'What happens if I visit a page that does not include the once prop?', a: 'The client forgets the remembered value. The next page that includes the prop resolves the callback again. Share the prop with shareOnce() when many unrelated pages need it.' },
+  { q: 'Can I expire a once prop after a day?', a: 'Yes: ->until(now()->addDay()). The response includes expiresAt in milliseconds. The client should drop the header after that time. The server does not re-check the clock; it only looks at the header it received.' },
+  { q: 'Should I wrap the authenticated user in Inertia::once()?', a: 'Only if signed-out responses return null for that prop. A remembered once user will go stale on logout if the redirect target does not explicitly request auth. The official pattern is once when $request->user() is present, and null otherwise.' },
+]} />
+
+## Next steps
+
+- [Inertia deferred props in Vue](/inertia-deferred-props-vue), including `defer()->once()`
+- [Inertia partial reloads in Vue](/inertia-partial-reloads), the visit type `router.reload({ only })` uses
+- [Laravel once() memoization](/laravel-once-helper-memoization), the PHP helper with the same name
+- [Inertia docs: Once props](https://inertiajs.com/docs/v3/data-props/once-props)
+
+## Sources
+
+- [Inertia docs: Once props](https://inertiajs.com/docs/v3/data-props/once-props)
+- [Inertia docs: Shared data](https://inertiajs.com/docs/v3/data-props/shared-data)
+- [Inertia docs: Partial reloads](https://inertiajs.com/docs/v3/data-props/partial-reloads)
+- [inertia-laravel PR #793: Support for once() props](https://github.com/inertiajs/inertia-laravel/pull/793)
+- [Inertia PR #2732: Support for once() props (client)](https://github.com/inertiajs/inertia/pull/2732)
+- [Source: `Inertia\OnceProp` and `ResolvesOnce`](https://github.com/inertiajs/inertia-laravel/blob/v3.5.1/src/OnceProp.php)
+- [Source: `Inertia\PropsResolver` (except-once header, fresh(), metadata)](https://github.com/inertiajs/inertia-laravel/blob/v3.5.1/src/PropsResolver.php)

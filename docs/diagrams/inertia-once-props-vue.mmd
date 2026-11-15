@@ -1,0 +1,12 @@
+flowchart LR
+  A["`Visit includes
+  **plans** as Inertia::once()`"] --> B{"`Is plans listed in
+  the except-once header?`"}
+  B -- "No" --> C["`Resolve the callback
+  Send plans plus onceProps metadata`"]
+  B -- "Yes, and not fresh()
+  or a named partial reload" --> D["`Skip the callback
+  Omit plans from the JSON
+  Still send onceProps metadata`"]
+  D --> E["`The Vue client reuses
+  the remembered plans`"]
