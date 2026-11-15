@@ -1,0 +1,16 @@
+flowchart LR
+  A["`Partial reload
+  for the same page`"] --> B{"`Prop listed in
+  deepMergeProps?`"}
+  B -- "Yes" --> C["`Walk the object
+  Arrays: merge
+  Scalars: replace`"]
+  B -- "No, mergeProps" --> D["`Merge only the
+  named array path`"]
+  C --> E{"`matchPropsOn has
+  a key for this array?`"}
+  D --> E
+  E -- "No" --> F["`Concatenate
+  duplicates kept`"]
+  E -- "Yes" --> G["`Replace rows with the same key
+  Append the new ones`"]
