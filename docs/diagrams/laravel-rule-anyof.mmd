@@ -1,0 +1,11 @@
+flowchart LR
+  A["`username
+  value`"] --> B{"`Ruleset 1
+  string + email?`"}
+  B -- "Yes" --> C["`Valid`"]
+  B -- "No" --> D{"`Ruleset 2
+  string + alpha_dash
+  + min:6?`"}
+  D -- "Yes" --> C
+  D -- "No" --> E["`The username
+  field is invalid.`"]
