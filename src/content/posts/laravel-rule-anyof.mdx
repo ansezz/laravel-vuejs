@@ -1,0 +1,262 @@
+---
+id: 195
+title: "Laravel Rule::anyOf(): one field, several shapes"
+excerpt: "A username can be an email or a handle. Rule::anyOf() passes if any one ruleset fully matches, and rejects everything else. 22 Pest tests."
+date: 2026-11-16T14:00:00Z
+snippet: "Rule::anyOf([['string', 'email'], ['alpha_dash', 'min:6']])"
+categories: [laravel]
+tags: [laravel, php, inertia, vuejs]
+---
+You want a signup field that accepts an email or a handle. So you write a regex, or a closure that runs two validators, and a typo in either one lets `ab` through. Laravel already has a rule for this: `Rule::anyOf()`.
+
+<TLDR
+  audience="Laravel + Vue developers validating a field that can be one of several shapes: email or handle, card or bank, an id or a slug"
+  learn={['How `Rule::anyOf()` passes when any one ruleset fully matches', 'How nested rule arrays validate tagged-union objects such as card vs bank', 'Wiring a Vue + Inertia signup form with a useful `any_of` message', 'The gotchas: `required` belongs outside, errors sit on the parent field, and a pre-13.39 bug']}
+  tested="Laravel 13.42 · PHP 8.4 · Pest 4 · inertia-laravel 3.5.1 (22 tests, 70 assertions)"
+>
+
+- `Rule::anyOf([['string', 'email'], ['string', 'alpha_dash', 'min:6']])` passes if the value is a valid email, or a handle of at least 6 letters, numbers, dashes or underscores. Every rule inside a set must pass; one matching set is enough.
+- Put `required` next to `anyOf`, not inside the sets. An empty string skips `anyOf` because the rule is not implicit, so `''` would otherwise pass.
+- Failures report a single message, `The :attribute field is invalid.`, on the field itself. Nested object shapes do not put errors on `payment.last4`. Customize it with `username.any_of`.
+- It shipped in Laravel 12.8 (April 2025, [PR #55191](https://github.com/laravel/framework/pull/55191)) and is in every 13.x release. Use 13.39 or later so an associative array such as `username[x]=1` cannot sneak past a plain ruleset list.
+
+</TLDR>
+
+## What Rule::anyOf() is, and why people miss it
+
+`Rule::anyOf()` takes an array of rulesets and asks: does this value fully satisfy any one of them? The first set that passes wins. If none do, the field is invalid.
+
+The official docs use a username that may be an email or a handle:
+
+```php title="app/Http/Requests/RegisterRequest.php"
+use Illuminate\Validation\Rule;
+
+'username' => [
+    'required',
+    Rule::anyOf([
+        ['string', 'email'],
+        ['string', 'alpha_dash', 'min:6'],
+    ]),
+],
+```
+
+It arrived in Laravel 12.8.0 on 8 April 2025 ([PR #55191](https://github.com/laravel/framework/pull/55191)), so every 13.x app already has it. People miss it because the need shows up as "email or phone" and the habit is a regex or a custom closure, and because the docs file it under the long list of available rules, after `after_or_equal` and before `alpha`.
+
+The same rule also accepts associative rulesets. Those treat the value as an object and validate its keys, which is how you describe a payment that is either a card or a bank transfer.
+
+<Diagram name="laravel-rule-anyof" alt="A username value is checked against the first ruleset, string and email. If that set passes, the field is valid. If not, it is checked against the second ruleset, string, alpha_dash and min:6. If that set passes, the field is valid. If neither set passes, the error is The username field is invalid." caption="OR across rulesets, AND inside each one. The first full match wins." />
+
+## The usual way vs Rule::anyOf()
+
+The closure below is what we had in the lab before switching. It is correct, and it is also two extra validators and a message you have to write yourself:
+
+<CodeCompare before="A custom closure running two validators" after="Rule::anyOf()">
+
+```php title="app/Http/Requests/RegisterRequest.php"
+'username' => [
+    'required',
+    function (string $attribute, mixed $value, Closure $fail) {
+        $email = Validator::make(['v' => $value], ['v' => 'email'])->passes();
+        $handle = Validator::make(['v' => $value], ['v' => 'alpha_dash|min:6'])->passes();
+
+        if (! $email && ! $handle) {
+            $fail('The '.$attribute.' field is invalid.');
+        }
+    },
+],
+```
+
+```php title="app/Http/Requests/RegisterRequest.php"
+use Illuminate\Validation\Rule;
+
+'username' => [
+    'required',
+    Rule::anyOf([
+        ['string', 'email'],
+        ['string', 'alpha_dash', 'min:6'],
+    ]),
+],
+```
+
+</CodeCompare>
+
+In the lab, `taylor@laravel.com` and `my_user` passed both versions and `validated()` returned the same array. `ab` failed: it is `alpha_dash`, but it is not 6 characters and it is not an email. `not an email` failed both sets. The `@` in an email would fail `alpha_dash` on its own; that does not matter, because the email set already passed.
+
+You can write a ruleset as a pipe string as well: `Rule::anyOf(['email', 'uuid'])` accepted `ana@example.com` and a v4 UUID, and rejected `abc`.
+
+## Nested rule arrays: card or bank
+
+When a ruleset is an associative array, `anyOf` validates the value as an object against those keys. That is the tagged-union case: one field, two shapes, a `type` that picks which other keys are required.
+
+```php title="app/Http/Requests/CheckoutRequest.php"
+use Illuminate\Validation\Rule;
+
+'payment' => [
+    'required',
+    'array',
+    Rule::anyOf([
+        [
+            'type' => ['required', 'in:card'],
+            'last4' => ['required', 'digits:4'],
+        ],
+        [
+            'type' => ['required', 'in:bank'],
+            'iban' => ['required', 'string', 'min:15'],
+        ],
+    ]),
+],
+```
+
+`['type' => 'card', 'last4' => '4242']` passed, and so did a bank payload with a long IBAN. `['type' => 'card', 'last4' => '42']` failed, and so did a card that only sent an IBAN. The error sat on `payment`, not on `payment.last4`.
+
+You can nest `Rule::anyOf()` inside those keys. In the lab, a `user` object whose `id` was either an email or an integer passed with `id` set to `ana@example.com` or `7`, and failed with `id` set to `nope`. The message was still `The user field is invalid.`
+
+## Real-world example: a Vue + Inertia signup form
+
+The rules above belong in a form request. The message is the part the Vue page will show, so write one a person can act on:
+
+```php title="app/Http/Requests/RegisterRequest.php"
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class RegisterRequest extends FormRequest
+{
+    public function rules(): array
+    {
+        return [
+            'username' => [
+                'required',
+                Rule::anyOf([
+                    ['string', 'email'],
+                    ['string', 'alpha_dash', 'min:6'],
+                ]),
+            ],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'username.any_of' => 'Use an email address or a handle of at least 6 letters, numbers, dashes or underscores.',
+        ];
+    }
+}
+```
+
+The Vue page stays ordinary. `useForm` already puts the 422 message on `form.errors.username`:
+
+```vue title="resources/js/pages/Auth/Register.vue"
+<script setup lang="ts">
+import { useForm } from "@inertiajs/vue3";
+
+const form = useForm({
+  username: "",
+});
+
+function submit() {
+  form.post("/register", { preserveScroll: true });
+}
+</script>
+
+<template>
+  <form @submit.prevent="submit">
+    <label for="username">Email or handle</label>
+    <input
+      id="username"
+      v-model="form.username"
+      :class="{ 'is-invalid': form.errors.username }"
+    />
+    <p v-if="form.errors.username">{{ form.errors.username }}</p>
+    <button type="submit" :disabled="form.processing">Create account</button>
+  </form>
+</template>
+```
+
+We posted JSON to a lab route that used the same rules and messages. `ab` came back 422 with the custom `any_of` text. An empty string came back 422 with `The username field is required.` `ana@example.com` and `ana_dev` both returned 200 and `validated()` was just `['username' => ...]`. A checkout route for the payment shape put the error on `errors.payment`, and there was no `errors.payment.last4`.
+
+## Gotchas
+
+<Callout type="gotcha" title="Put required next to anyOf, not inside the sets">
+
+`Rule::anyOf()` is not an implicit rule. Laravel skips non-implicit rules when the value is an empty string, so `Rule::anyOf(['required|email', 'required|alpha_dash|min:6'])` accepted `''` in the lab. A field that is missing altogether also passed. Put `'required'` in the same array as `Rule::anyOf(...)`, like the docs do. Then `''`, `null` and a missing field all fail with `The username field is required.`
+
+</Callout>
+
+Other traps we hit:
+
+- A present `null` is different from `''`. Without `required`, `anyOf` ran against `null` and failed with `The username field is invalid.` Add `nullable` if `null` should be allowed: `['nullable', Rule::anyOf([...])]`.
+- The failure message is always `The :attribute field is invalid.` (from `validation.any_of`). You do not get "must be a valid email" or "must be at least 6 characters". Set `username.any_of` in `messages()` or in `lang/en/validation.php`.
+- For object shapes, that message sits on the parent attribute. A Vue form should read `form.errors.payment`, not `form.errors['payment.last4']`.
+- `Rule::anyOf('email')` throws `InvalidArgumentException`: the argument must be an array of rulesets, even when you only have one.
+- Before Laravel 13.39, a plain ruleset list could pass an associative array. Sending `username[x]=1` at the docs example succeeded, and `validated()` returned `['username' => ['x' => 1]]` ([PR #62171](https://github.com/laravel/framework/pull/62171), 24 October 2026). In 13.42 the same payload failed. Upgrade to 13.39 or later if you validate scalar fields with `anyOf`.
+
+## Try it yourself
+
+<TryIt title="Pass an email, pass a handle, fail a short one">
+
+```bash
+php artisan tinker
+```
+
+```php
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
+
+$rules = ['username' => [
+    'required',
+    Rule::anyOf([
+        ['string', 'email'],
+        ['string', 'alpha_dash', 'min:6'],
+    ]),
+]];
+
+Validator::make(['username' => 'taylor@laravel.com'], $rules)->passes(); // true
+Validator::make(['username' => 'taylor'], $rules)->passes();              // true
+Validator::make(['username' => 'ab'], $rules)->fails();                   // true
+Validator::make(['username' => 'ab'], $rules)->errors()->first();
+// "The username field is invalid."
+```
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ One rule replaces a regex or a closure that runs two validators |
+| How often you'll reach for it | ★★★★☆ Signups, logins, identifiers, payments, webhooks, any field with two legal shapes |
+| Risk if misused | ★★☆☆☆ Forget `required` as a sibling and an empty string passes; the default error is vague |
+| **Overall** | **4 / 5**: the clean way to say "this or that" in Laravel validation |
+
+## Recap
+
+- `Rule::anyOf([$setA, $setB])` passes when any one set fully matches. Inside a set, every rule must pass.
+- Associative sets validate the value as an object, so a payment can be a card or a bank transfer.
+- Keep `required` (and `nullable`, if you need it) next to `anyOf`, not tucked inside the sets.
+- Customize `username.any_of`; object-shape errors stay on the parent field.
+- Use Laravel 13.39 or later so an associative array cannot sneak past a plain ruleset list.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version added Rule::anyOf()?', a: 'Laravel 12.8.0, released 8 April 2025 (PR #55191). It is in every 13.x release. Upgrade to 13.39 or later for the fix that stops an associative array passing a plain ruleset list (PR #62171).' },
+  { q: 'How is anyOf different from Rule::in()?', a: 'Rule::in() checks that the value is one of a list of values. Rule::anyOf() checks that the value satisfies at least one full ruleset, such as "email" or "alpha_dash plus min:6", or one of two object shapes.' },
+  { q: 'Why is the error only "The username field is invalid."?', a: 'anyOf does not bubble the inner rule messages. If no ruleset passes, you get validation.any_of, which defaults to "The :attribute field is invalid." Set username.any_of in messages() or in your language file.' },
+  { q: 'Should I put required inside the anyOf rulesets?', a: 'No. Put required next to Rule::anyOf() in the field\'s rule array, the way the docs do. anyOf is not implicit, so an empty string skips it and would pass if required only lives inside the sets.' },
+  { q: 'Can anyOf validate nested objects?', a: 'Yes. An associative ruleset is matched against the value as an object, and you can nest Rule::anyOf() on a key. Failed object shapes still report the error on the parent field, not on payment.last4.' },
+]} />
+
+## Next steps
+
+- [Laravel validation for Inertia forms](/laravel-form-request-inertia), for form requests, `unique`, `confirmed` and custom rules
+- [Live validation with Precognition and Vue](/laravel-precognition-vue), to show the `any_of` message as the user types
+- [Laravel docs: Rule::anyOf](https://laravel.com/docs/13.x/validation#rule-anyof)
+
+## Sources
+
+- [Laravel docs: Rule::anyOf](https://laravel.com/docs/13.x/validation#rule-anyof)
+- [PR #55191: Introduce Rule::anyOf() for validating against multiple rule sets](https://github.com/laravel/framework/pull/55191) (Laravel 12.8.0, 8 April 2025)
+- [PR #62171: Fix Rule::anyOf() passing associative arrays against plain rule lists](https://github.com/laravel/framework/pull/62171) (Laravel 13.39.0, 24 October 2026)
+- [Source: `Illuminate\Validation\Rules\AnyOf`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Validation/Rules/AnyOf.php)
+- [Source: `Illuminate\Validation\Rule::anyOf()`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Validation/Rule.php)
+- [Language line: `validation.any_of`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Translation/lang/en/validation.php)
