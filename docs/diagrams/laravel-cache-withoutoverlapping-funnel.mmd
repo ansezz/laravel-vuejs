@@ -1,0 +1,13 @@
+flowchart LR
+  A["`Caller asks
+  for a slot`"] --> B{"`Slot key1..keyN
+  free?`"}
+  B -- "Yes" --> C["`Run the closure
+  Release the slot
+  (even on exception)`"]
+  B -- "No" --> D["`Sleep 250 ms`"]
+  D --> E{"`Block timeout
+  passed?`"}
+  E -- "No" --> B
+  E -- "Yes" --> F["`Failure closure
+  or LimiterTimeoutException`"]

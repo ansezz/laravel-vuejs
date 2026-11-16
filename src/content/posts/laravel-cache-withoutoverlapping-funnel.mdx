@@ -1,0 +1,334 @@
+---
+id: 194
+title: "Laravel Cache::withoutOverlapping() and Cache::funnel()"
+seoTitle: "Laravel Cache::withoutOverlapping() and funnel()"
+excerpt: "One call runs a closure once at a time across workers, another allows at most N, on any lock store. 25 Pest tests and 6 real processes."
+date: 2026-11-16T02:30:00Z
+snippet: "Cache::funnel('pdf')->limit(3)->block(5)->then(fn () => ...)"
+categories: [laravel]
+tags: [laravel, php, testing]
+---
+Someone double-clicks "Rebuild report", and two rebuilds fight over the same table. Or twenty queue workers hit a PDF renderer that falls over at four. You know the fix is a lock, and you know it means a `try`/`catch`/`finally` you'll copy wrong at least once. Laravel now wraps both cases in one call each.
+
+<TLDR
+  audience="Laravel + Vue developers with more than one request, worker or server touching the same work"
+  learn={['How `Cache::withoutOverlapping()` replaces the lock/block/release dance', 'How `Cache::funnel()` allows N at a time on database, file or Redis', 'Wiring a busy state to a Vue button and a queued job', 'The `lockFor: 0` default that can lock you out for a day']}
+  tested="Laravel 13.42 · PHP 8.4 · Pest 4 · inertia-laravel 3.5.1 (25 tests, 70 assertions, plus 6 real PHP processes)"
+>
+
+- `Cache::withoutOverlapping('reports:rebuild', fn () => ..., lockFor: 120, waitFor: 5)` runs the closure under a lock, returns its value and always releases the lock. If it can't get the lock in time, it throws `LockTimeoutException`.
+- `Cache::funnel('pdf')->limit(3)->releaseAfter(120)->block(5)->then($run, $busy)` lets at most 3 callers in at once. It works on any store with locks, not only Redis. With 6 real processes: no guard ran 6 at once, `withoutOverlapping` ran 1, `funnel(3)` ran 3.
+- Always pass `lockFor`. The default is `0`: Redis then never expires the lock, and the database store keeps it for 86,400 seconds. One killed worker blocks the job for a day.
+
+</TLDR>
+
+## What withoutOverlapping and funnel are, and why people miss them
+
+Both are thin wrappers over Laravel's atomic locks. `Cache::withoutOverlapping()` is `Cache::lock()->block()` with a closure, so only one caller runs at a time. `Cache::funnel()` is a counting lock: it tries slots `1..N` and runs your closure in the first free one.
+
+They are recent. `withoutOverlapping()` shipped in Laravel 12.47 in January 2026 ([PR #58303](https://github.com/laravel/framework/pull/58303)), and enum keys followed in 12.49 ([#58444](https://github.com/laravel/framework/pull/58444)). `funnel()` shipped in 12.53 in February 2026 ([#58439](https://github.com/laravel/framework/pull/58439)). Both are in every 13.x release.
+
+People miss them because the name sounds familiar. `->withoutOverlapping()` on a scheduled task and the `WithoutOverlapping` job middleware have existed for years, and `Redis::funnel()` only works on a Redis connection. These two live on the cache facade, work in a controller, a job or a command, and run on the database store your app already has.
+
+<Diagram name="laravel-cache-withoutoverlapping-funnel" alt="A caller asks Cache::funnel for a slot. The funnel tries slot locks key1 to keyN in order. If one is free, it takes it, runs the closure, and releases the slot even if the closure throws. If all slots are busy, it sleeps 250 ms and checks whether the block timeout has passed. If not, it tries the slots again. If it has, it calls the failure closure, or throws LimiterTimeoutException when there is none. withoutOverlapping is the same loop with exactly one slot, and it throws LockTimeoutException." caption="withoutOverlapping() is a funnel with one slot. Both release the slot in a finally." />
+
+## The usual way vs withoutOverlapping
+
+The classic lock code has three jobs: wait for the lock, run the work, release the lock even when the work throws. Here it is next to the gem, both from our lab:
+
+<CodeCompare before="Cache::lock() by hand" after="Cache::withoutOverlapping()">
+
+```php title="app/Actions/RebuildSalesReport.php"
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+
+$lock = Cache::lock('reports:rebuild', 120);
+
+try {
+    $lock->block(5);
+    $result = SalesReport::rebuild();
+} catch (LockTimeoutException) {
+    $result = 'busy';
+} finally {
+    $lock->release();
+}
+```
+
+```php title="app/Actions/RebuildSalesReport.php"
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+
+try {
+    $result = Cache::withoutOverlapping(
+        'reports:rebuild',
+        fn () => SalesReport::rebuild(),
+        lockFor: 120,
+        waitFor: 5,
+    );
+} catch (LockTimeoutException) {
+    $result = 'busy';
+}
+```
+
+</CodeCompare>
+
+The gem returns whatever the closure returns. In the lab, the lock was held inside the closure and free right after. When the closure threw `RuntimeException('boom')`, the exception reached us and the lock was released anyway.
+
+The arguments are `lockFor` (seconds the lock lives) and `waitFor` (seconds to wait for it, default 10). While waiting it retries every 250 ms. `waitFor: 0` tries once: in our lab it gave up after 0.1 ms. The key can be a backed enum, so `LockKey::ReportRebuild` works where you'd pass `'reports:rebuild'`.
+
+## Cache::funnel(): at most N at a time
+
+Sometimes one at a time is too strict. Your PDF renderer is happy with 3 parallel jobs, the partner API allows 5 concurrent connections, and the 4th caller should wait or back off.
+
+```php title="app/Services/InvoicePdf.php"
+use Illuminate\Support\Facades\Cache;
+
+return Cache::funnel('pdf-renderer')
+    ->limit(3)            // at most 3 at once
+    ->releaseAfter(120)   // a slot expires after 120 s if a process dies
+    ->block(5)            // wait up to 5 s for a free slot
+    ->then(
+        fn () => $this->render($invoice),
+        fn ($e) => null,  // all slots busy: $e is a LimiterTimeoutException
+    );
+```
+
+`then()` returns the first closure's value, or the failure closure's value when no slot frees up. Leave the second closure out and you get an `Illuminate\Cache\Limiters\LimiterTimeoutException` instead. A slot is freed when the closure throws, too.
+
+Under the hood each slot is a normal cache lock named after the key plus a number. With two funnel calls nested, `pdf-renderer1` and `pdf-renderer2` were locked and `pdf-renderer3` was free. The defaults are `releaseAfter(60)`, `block(3)` and a 250 ms poll, which you can change with `->sleep(1000)`.
+
+| | `Redis::funnel()` | `Cache::funnel()` |
+|---|---|---|
+| Stores | Redis connection only | Any store with locks: database, file, Redis, Memcached, DynamoDB, array |
+| Since | Laravel 5.5 | Laravel 12.53 |
+| Typical use | Queue job middleware on Redis | Anywhere, including apps on the database store |
+
+## Real processes, real numbers
+
+Unit tests with the array store prove the logic, not the concurrency. So we started 6 real PHP processes at once with `Process::pool()`. Each one booted the app, took the guard on the `file` store, and did 300 ms of fake work.
+
+| Guard | Ran | Most at the same time | Wall time |
+|---|---|---|---|
+| None | 6 | 6 | ~0.55 s |
+| `withoutOverlapping(lockFor: 30, waitFor: 10)` | 6 | 1 | ~2.8–3.0 s |
+| `funnel()->limit(3)->block(10)` | 6 | 3 | ~1.0 s |
+| `withoutOverlapping(waitFor: 0)` | 1 | 1 | 5 of 6 got "busy" |
+
+The last row is the "don't queue up, just say no" mode. Five processes got a `LockTimeoutException` right away and printed "busy". That's the behaviour you want behind a button.
+
+## Real-world example: a "Rebuild report" button in Vue
+
+Disabling the button while the request runs stops one double-click. It does nothing about a second tab, a colleague, or the nightly command doing the same rebuild. The lock does.
+
+```php title="app/Http/Controllers/ReportRebuildController.php"
+use App\Actions\SalesReport;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+use Inertia\Inertia;
+
+class ReportRebuildController
+{
+    public function __invoke()
+    {
+        try {
+            Cache::withoutOverlapping(
+                'reports:rebuild',
+                fn () => SalesReport::rebuild(),
+                lockFor: 120,
+                waitFor: 0, // [!code highlight]
+            );
+        } catch (LockTimeoutException) {
+            Inertia::flash('toast', [
+                'type' => 'error',
+                'message' => 'A rebuild is already running. Try again in a minute.',
+            ]);
+
+            return back();
+        }
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => 'Report rebuilt.']);
+
+        return back();
+    }
+}
+```
+
+The Vue page stays boring, which is the point. On the starter kit, the `toast` flash shows up without extra code (see [flash messages](/laravel-vue-flash)):
+
+```vue title="resources/js/pages/Reports/Index.vue"
+<script setup lang="ts">
+import { useForm } from "@inertiajs/vue3";
+
+const form = useForm({});
+
+function rebuild() {
+  form.post("/reports/rebuild", { preserveScroll: true });
+}
+</script>
+
+<template>
+  <button :disabled="form.processing" @click="rebuild">
+    {{ form.processing ? "Rebuilding…" : "Rebuild report" }}
+  </button>
+</template>
+```
+
+In the lab, the first POST flashed `toast.type = success`. With the lock held by "someone else", the second POST flashed `error`, and `SalesReport::rebuild()` ran exactly once.
+
+<Callout type="tip" title="Long rebuild? Lock in the controller, release in the job">
+
+If the rebuild is queued, take the lock with `Cache::lock('reports:rebuild', 600)->get()`, pass `$lock->owner()` to the job, and release it there with `Cache::restoreLock('reports:rebuild', $owner)->release()`. `withoutOverlapping()` is for work that finishes inside the closure.
+
+</Callout>
+
+## Real-world example: a queued job that backs off
+
+For queued work, a busy funnel should not fail the job. Put it back on the queue instead:
+
+```php title="app/Jobs/RenderInvoicePdf.php"
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
+
+class RenderInvoicePdf implements ShouldQueue
+{
+    use Queueable;
+
+    public function __construct(public int $invoiceId) {}
+
+    public function handle(): void
+    {
+        Cache::funnel('pdf-renderer')
+            ->limit(3)
+            ->releaseAfter(120)
+            ->block(5)
+            ->then(
+                fn () => $this->render(),
+                fn () => $this->release(10), // [!code highlight]
+            );
+    }
+}
+```
+
+We tested it with `withFakeQueueInteractions()`. With all 3 slots held, `handle()` called `release(10)` and rendered nothing. After one slot was force-released, the next job rendered and was not released.
+
+## Which "without overlapping" do you need?
+
+Laravel has several tools with similar names. They solve different problems:
+
+| You want | Use |
+|---|---|
+| A scheduled command never runs twice at once | `Schedule::command(...)->withoutOverlapping()` |
+| Two jobs for the same model never run at once | `WithoutOverlapping` job middleware |
+| Only one copy of a job sits in the queue | `ShouldBeUnique` |
+| One block of code runs once at a time, anywhere | `Cache::withoutOverlapping()` |
+| At most N copies of a block run at once | `Cache::funnel()` |
+
+## Gotchas
+
+<Callout type="gotcha" title="lockFor: 0 means 'until released', and a dead process never releases">
+
+`withoutOverlapping()` defaults to `lockFor: 0`. `RedisLock` then sets the key with no expiry at all. The database store falls back to its default timeout: in the lab, `cache_locks.expiration` was exactly now + 86,400 s. We simulated a worker killed mid-run: the lock still blocked callers at 86,399 s and only freed at 86,400 s. Always pass `lockFor`, a bit longer than the slowest run. A stuck lock can be cleared with `Cache::lock('reports:rebuild')->forceRelease()`.
+
+</Callout>
+
+Other traps we hit:
+
+- Too short is wrong as well. When the work ran 121 s with `lockFor: 120`, a second caller got in. Same for a funnel slot after `releaseAfter(60)`. For long loops, take `Cache::lock()` yourself and call `$lock->refresh()`.
+- The `null` cache store hands out locks that never block. Nested `withoutOverlapping()` calls on it both ran. If a test or staging env sets `CACHE_STORE=null`, your guard is gone.
+- The `array` and `file` stores only lock within one process or one server. Across servers you need a shared store: database, Redis, Memcached or DynamoDB.
+- Funnel slots are plain locks named key + number, so `funnel('pdf')` uses `pdf1`, `pdf2`, … An unrelated `Cache::lock('pdf1')` blocked a `funnel('pdf')->limit(1)` in the lab. Use a distinct key like `funnel:pdf:`.
+- `funnel()->block()` counts whole seconds, `withoutOverlapping()` counts milliseconds. `block(3)` gave up after 3 s when it started on a round second, and after 2.25 s when it started at `.900`.
+- The exceptions differ: `withoutOverlapping()` throws `Illuminate\Contracts\Cache\LockTimeoutException`, `funnel()` throws `Illuminate\Cache\Limiters\LimiterTimeoutException`.
+
+## Testing it without waiting
+
+Both helpers wait through Laravel's `Sleep` class, so [`Sleep::fake()`](/laravel-sleep-fake-test-retries) skips the waits. Use `syncWithCarbon: true`, because the timeouts read the clock:
+
+```php title="tests/Feature/ReportRebuildTest.php"
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Sleep;
+
+it('gives up after 5 seconds when a rebuild is running', function () {
+    Cache::lock('reports:rebuild', 60)->get();
+    Sleep::fake(syncWithCarbon: true);
+
+    expect(fn () => Cache::withoutOverlapping('reports:rebuild', fn () => 1, waitFor: 5))
+        ->toThrow(LockTimeoutException::class);
+
+    Sleep::assertSleptTimes(19); // 19 x 250 ms, recorded in under 2 ms
+});
+```
+
+For `funnel()`, this needs Laravel 13.37 or later. [PR #62017](https://github.com/laravel/framework/pull/62017) made the limiter's timeout read Carbon instead of `time()`, so a faked sleep can end it.
+
+## Try it yourself
+
+<TryIt title="Watch the second caller bounce">
+
+```bash
+php artisan tinker
+```
+
+```php
+Cache::lock('demo', 60)->get();   // pretend someone is busy
+
+Cache::withoutOverlapping('demo', fn () => 'ran', lockFor: 10, waitFor: 0);
+// LockTimeoutException
+
+Cache::funnel('funnel:demo:')->limit(2)->block(0)->then(fn () => 'ran', fn () => 'busy');
+// "ran": the funnel has its own slots
+
+Cache::lock('demo')->forceRelease();
+Cache::withoutOverlapping('demo', fn () => 'ran', lockFor: 10, waitFor: 0);
+// "ran"
+```
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ One call replaces lock/try/catch/finally, and funnel replaces a hand-built semaphore |
+| How often you'll reach for it | ★★★★☆ Buttons that start heavy work, imports, syncs, rate-limited partners, any app with 2+ workers |
+| Risk if misused | ★★★☆☆ Forget `lockFor` and one crash locks the job for a day |
+| **Overall** | **4.5 / 5**: the cheapest race-condition fix in Laravel |
+
+## Recap
+
+- `Cache::withoutOverlapping($key, $closure, lockFor:, waitFor:)` runs once at a time, returns the closure's value, and always releases the lock.
+- `Cache::funnel($key)->limit(N)->releaseAfter()->block()->then($run, $busy)` runs at most N at a time on any lock store.
+- With 6 real processes: no guard ran 6 at once, `withoutOverlapping` 1, `funnel(3)` 3.
+- Always set `lockFor` and `releaseAfter`, longer than the slowest run and shorter than "forever".
+- Test with `Sleep::fake(syncWithCarbon: true)`; funnel needs 13.37+ for that.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'What is the difference between Cache::withoutOverlapping() and Cache::lock()?', a: 'withoutOverlapping() is Cache::lock($key, $lockFor)->block($waitFor, $closure). It waits for the lock, runs the closure, returns its value and releases the lock in a finally block. Use Cache::lock() directly when you need refresh(), owner() or to release the lock in another process.' },
+  { q: 'Does Cache::funnel() need Redis?', a: 'No. It works on any cache store that supports locks: database, file, Redis, Memcached, DynamoDB and array. Calling it on a store without locks throws a BadMethodCallException. For several servers, use a shared store such as database or Redis.' },
+  { q: 'What happens if the process dies while holding the lock?', a: 'The lock stays until it expires. With the default lockFor of 0, Redis never expires it and the database store keeps it for 86,400 seconds. Always pass lockFor, or clear a stuck lock with Cache::lock($key)->forceRelease().' },
+  { q: 'Which Laravel version do I need?', a: 'withoutOverlapping() arrived in Laravel 12.47 and funnel() in 12.53, both in early 2026, and both are in Laravel 13. For tests that fake Sleep with a blocked funnel, use 13.37 or later.' },
+  { q: 'Should I use this or the WithoutOverlapping job middleware?', a: 'Use the job middleware when the whole job must not overlap with another job for the same key. Use Cache::withoutOverlapping() or Cache::funnel() for a block of code inside a controller, command or job, or when you need N at a time instead of one.' },
+]} />
+
+## Next steps
+
+- [Laravel Sleep::fake()](/laravel-sleep-fake-test-retries), to test the waits in milliseconds
+- [Queue jobs and HTTP 429](/laravel-queue-429-rate-limited-api), for `release()` and backoff on rate-limited APIs
+- [Flash messages in Laravel and Vue](/laravel-vue-flash), the toast behind the busy message
+- [Laravel docs: Atomic locks](https://laravel.com/docs/13.x/cache#atomic-locks)
+
+## Sources
+
+- [Laravel docs: Atomic locks and concurrency limiting](https://laravel.com/docs/13.x/cache#concurrency-limiting)
+- [Laravel docs: Preventing job overlaps](https://laravel.com/docs/13.x/queues#preventing-job-overlaps)
+- [PR #58303: Add `Cache::withoutOverlapping()`](https://github.com/laravel/framework/pull/58303) (Laravel 12.47)
+- [PR #58444: Enum keys in `Cache::flexible()` and `withoutOverlapping()`](https://github.com/laravel/framework/pull/58444) (Laravel 12.49)
+- [PR #58439: Add `Cache::funnel()`](https://github.com/laravel/framework/pull/58439) (Laravel 12.53)
+- [PR #62017: Respect faked Sleep in limiter `block()` timeout](https://github.com/laravel/framework/pull/62017) (Laravel 13.37)
+- [Source: `Illuminate\Cache\Repository::withoutOverlapping()` and `funnel()`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Cache/Repository.php)
+- [Source: `Illuminate\Cache\Limiters\ConcurrencyLimiter`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Cache/Limiters/ConcurrencyLimiter.php)
+- [Source: `Illuminate\Cache\Lock::block()`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Cache/Lock.php)
