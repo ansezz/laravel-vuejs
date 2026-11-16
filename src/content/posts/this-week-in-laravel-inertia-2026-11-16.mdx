@@ -1,0 +1,315 @@
+---
+id: 193
+title: "This week in Laravel & Inertia: Laravel 12.72, AI SDK 1.4 and Reverb 1.13, Nov 16, 2026"
+seoTitle: "This week in Laravel & Inertia: 12.72, AI SDK 1.4 (Nov 16)"
+excerpt: "Laravel 12.72 brings the signed URL and validation fixes to 12.x, AI SDK 1.4 agents survive a failing tool, and Reverb 1.13 fixes multi-app whispers."
+date: 2026-11-16T00:30:00Z
+snippet: "composer update laravel/framework laravel/ai"
+categories: [laravel]
+tags: [laravel, release, upgrade, vuejs]
+---
+Still on Laravel 12 and sending signed links? A link that was supposed to expire in five minutes could stay valid forever. Laravel **12.72.0** closes that hole, so start this week with `composer update`.
+
+The rest of the week is friendlier. AI SDK **1.4** stops a throwing tool from killing your agent's reply, Reverb **1.13** fixes whispers on servers that host more than one app, and the Vue starter kit picked up two small fixes worth copying.
+
+<TLDR
+  audience="Laravel 12 and 13 developers using signed URLs, the Laravel AI SDK, Reverb or the Vue starter kit"
+  learn={['Why Laravel 12 apps should update to 12.72.0 now', 'How AI SDK 1.4 handles a tool that throws, and the one catch block you may need to change', 'Who the Reverb 1.13 whisper fix is for', 'The two starter kit changes to copy into an existing app']}
+  tested="Laravel 12.71.0 → 12.72.0 · PHP 8.4 · Pest (5 tests: signed URL expiry, nested sometimes, 254-char email, schedule:list --json, old smuggled link + middleware) · laravel/ai 1.3.0 → 1.4.0 on Laravel 13.42 (4 tests: throwing tool, OpenAI quota 429, real rate limit 429, batch embeddings order + raw). Reverb and starter kit changes checked against the PRs and commits, not run."
+>
+
+- **Laravel 12.72.0** backports last week's 13.41 security fixes: a positional `'expires='` parameter can no longer make a signed URL that never expires, and nested `sometimes` rules no longer skip a value that is literally `"__missing__"`. Links already sent stay valid, so add the small middleware below.
+- **Laravel AI SDK 1.4.0**: a tool that throws becomes a failed tool result the model can answer, instead of ending the run. OpenAI billing and quota 429s now throw `InsufficientCreditsException`, not `RateLimitedException`.
+- **Reverb 1.13.0** fixes client events (whispers) being rejected with error 4009 on a server that hosts several apps.
+- **Vue starter kit**: the profile form now lowercases the email like Fortify does at login, and the palette moved to OKLCH with one focus ring colour.
+
+</TLDR>
+
+## The week at a glance
+
+| Package | Version | Released (UTC) | Should you hurry? |
+|---|---|---|---|
+| `laravel/framework` (12.x line) | 12.72.0 | Nov 10 | **Yes**, if you use signed URLs or nested `sometimes` rules |
+| `laravel/ai` | 1.4.0 | Nov 10 | Soon, and check your `RateLimitedException` catch blocks |
+| `laravel/reverb` | 1.13.0 | Nov 10 | Yes, if one Reverb server hosts several apps |
+| `laravel/vue-starter-kit` | commits, no tag | Nov 10 | Copy by hand if you started from the kit |
+
+Laravel 13 users got the same security fixes in 13.41 last week, covered in [Laravel 13.41: a signed URL fix, $request->uuid() and MigrationFailed](/laravel-13-41-signed-url-fix-request-uuid). Inertia, Wayfinder, Boost and Precognition had no new releases.
+
+## Laravel 12.72.0: update your 12.x apps
+
+This is a backport release with six PRs. Two of them are security fixes, so treat it like one.
+
+### Signed links that never expired
+
+`URL::temporarySignedRoute()` appended values with **integer keys** to the query string without encoding them. Pass `'expires='` as one of those values and the URL ends in `&expires=`. PHP keeps the last `expires`, which is empty, and Laravel reads an empty `expires` as "no expiry" ([#62401](https://github.com/laravel/framework/pull/62401)).
+
+<CodeCompare before="Laravel 12.71" after="Laravel 12.72">
+
+```php title="routes/web.php"
+$url = URL::temporarySignedRoute(
+    'exports.download',
+    now()->addMinutes(5),
+    [42, 'expires='],
+);
+
+// /exports/42?expires=1794816300&signature=a375fb...&expires=
+// One year later: URL::hasValidSignature($request) === true
+```
+
+```php title="routes/web.php"
+$url = URL::temporarySignedRoute(
+    'exports.download',
+    now()->addMinutes(5),
+    [42, 'expires='],
+);
+
+// /exports/42?expires=1794816300&signature=967dd7...&expires%3D
+// One year later: URL::hasValidSignature($request) === false
+```
+
+</CodeCompare>
+
+Both URLs above came out of our lab with the same `APP_KEY`, one on each version. You're exposed if any integer-keyed value in that array can come from a user, like a reference or a "return to" value. Named keys were always encoded.
+
+<Diagram name="laravel-signed-url-expires-smuggling" alt="The same temporarySignedRoute call with params 42 and 'expires='. On the old version the numeric parameter is appended raw, the URL ends in '&expires=', PHP keeps the last empty expires and the link never expires. On the fixed version the parameter is URL-encoded to 'expires%3D', expires keeps the real timestamp and the link expires on time." caption="Same bug, same fix as 13.41: one unencoded query fragment cancelled the expiry." />
+
+12.72 also reads `expires` from the raw `QUERY_STRING` (or Vapor's `VAPOR_RAW_QUERY_STRING`) when the parsed query has none ([#62349](https://github.com/laravel/framework/pull/62349), [#62391](https://github.com/laravel/framework/pull/62391)).
+
+<Callout type="heads-up" title="The update does not kill links you already sent">
+
+We generated a smuggled link on 12.71.0, upgraded the lab to 12.72.0 and moved the clock a year ahead. The `signed` middleware still returned 200, because the empty `expires` is in the URL itself. If you could have sent such links, reject an empty `expires` before `signed` runs. A real signed link never has one.
+
+</Callout>
+
+```php title="app/Http/Middleware/RejectEmptySignedExpiry.php"
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+class RejectEmptySignedExpiry
+{
+    public function handle(Request $request, Closure $next): Response
+    {
+        if ($request->query->has('signature') && $request->query('expires') === '') {
+            abort(403, 'Invalid signature.');
+        }
+
+        return $next($request);
+    }
+}
+```
+
+```php title="routes/web.php"
+Route::get('/exports/{export}', DownloadExportController::class)
+    ->middleware([RejectEmptySignedExpiry::class, 'signed'])
+    ->name('exports.download');
+```
+
+With the middleware in front, the same old link got a 403 in our test, and fresh links from 12.72 still returned 200.
+
+### The `__missing__` validation bypass
+
+The validator used the string `"__missing__"` internally to mean "this nested key isn't there". A client that sent that exact string as a nested value made `sometimes` skip every rule on the field ([#62402](https://github.com/laravel/framework/pull/62402)). Top-level fields were never affected.
+
+```php title="tests/Feature/NestedSometimesTest.php"
+$v = Validator::make(
+    ['profile' => ['age' => '__missing__'], 'items' => [['qty' => '__missing__']]],
+    ['profile.age' => 'sometimes|integer', 'items.*.qty' => 'sometimes|integer'],
+);
+
+// 12.71: passes
+// 12.72: fails on profile.age and items.0.qty
+```
+
+### The rest of 12.72
+
+- **Emails longer than 254 characters now fail the `email` rule** ([#62347](https://github.com/laravel/framework/pull/62347)), the limit from RFC 5321. In our lab a 254-character address passed and a 255-character one failed. It isn't in a 13.x release yet, but it's already merged into the 13.x branch, so expect it in the next one.
+- **`schedule:list --json` keeps each task's own expression and timezone** ([#62358](https://github.com/laravel/framework/pull/62358), a backport of #62352). A task set to `0 9 * * *` in `Europe/Zurich` came back as `0 8 * * *` on 12.71 (converted to the app's UTC). On 12.72 you get `0 9 * * *` and `Europe/Zurich`.
+
+<TryIt title="Try it yourself">
+
+Drop this into a Laravel 12 app, run it, update, run it again:
+
+```php title="tests/Feature/SignedUrlExpiryTest.php"
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\URL;
+
+it('expires a signed URL even with a positional expires= param', function () {
+    Route::get('/exports/{export}', fn () => 'ok')->name('exports.download');
+    Route::getRoutes()->refreshNameLookups();
+
+    $url = URL::temporarySignedRoute('exports.download', now()->addMinutes(5), [42, 'expires=']);
+
+    $this->travel(1)->years();
+
+    expect(URL::hasValidSignature(Request::create($url)))->toBeFalse();
+});
+```
+
+It fails on 12.71.x and passes on 12.72.0.
+
+</TryIt>
+
+## Laravel AI SDK 1.4: agents survive a failing tool
+
+1.4.0 is a big list of fixes. Three of them change what your app sees.
+
+### A throwing tool no longer ends the run
+
+Before 1.4, an exception inside a tool's `handle()` bubbled up and the whole `prompt()` call failed. Your user got an error page instead of an answer. Now the model receives the failure as a tool result and can reply to it ([#1191](https://github.com/laravel/ai/pull/1191)).
+
+```php title="app/Ai/Tools/RefundOrder.php"
+public function handle(Request $request): Stringable|string
+{
+    throw new RuntimeException("Order {$request['order']} can no longer be refunded.");
+}
+```
+
+<CodeCompare before="laravel/ai 1.3" after="laravel/ai 1.4">
+
+```php title="app/Http/Controllers/RefundChatController.php"
+$response = (new RefundAgent)->prompt('Refund order 1234');
+
+// RuntimeException: Order 1234 can no longer be refunded.
+// The run stops here; there is no reply to show.
+```
+
+```php title="app/Http/Controllers/RefundChatController.php"
+$response = (new RefundAgent)->prompt('Refund order 1234');
+
+$response->toolResults[0]->successful(); // false
+$response->toolResults[0]->error();
+// "The tool call failed: Order 1234 can no longer be refunded."
+
+$response->text; // the model's answer to that failure
+```
+
+</CodeCompare>
+
+The exception still goes to your exception handler, so it shows up in your logs and error tracker. Only the tool's own exception is recovered: an exception thrown by an event listener still fails the run.
+
+<Callout type="gotcha" title="The model sees your exception message">
+
+The failure text the model gets is your exception message, and the model may repeat it to the user. Keep tool exception messages safe to show: no SQL, no internal IDs you wouldn't print on screen.
+
+</Callout>
+
+### OpenAI quota errors are no longer rate limits
+
+OpenAI sends billing and quota errors with HTTP 429, the same status as a rate limit. Up to 1.3, the SDK threw `RateLimitedException` for both, and even retried after a short `Retry-After`. From 1.4, a 429 with `insufficient_quota`, `credit_balance_exhausted` or one of the spend-limit codes throws `InsufficientCreditsException` and isn't retried ([#1174](https://github.com/laravel/ai/pull/1174)).
+
+```php title="app/Http/Controllers/SupportChatController.php"
+use Laravel\Ai\Exceptions\InsufficientCreditsException;
+use Laravel\Ai\Exceptions\RateLimitedException;
+
+try {
+    $response = (new SupportAgent)->prompt($message);
+} catch (InsufficientCreditsException $e) {
+    report($e); // top up the account; retrying won't help
+} catch (RateLimitedException $e) {
+    return back()->with('status', 'Busy right now, try again in a minute.');
+}
+```
+
+In our lab, the same faked `insufficient_quota` response threw `RateLimitedException` on 1.3.0 and `InsufficientCreditsException` on 1.4.0. A real rate-limit 429 still threw `RateLimitedException` on both. Failover is unchanged, and code that catches `FailoverableException` or `AiException` needs nothing.
+
+### Smaller changes in 1.4
+
+- **Raw HTTP response** on classification, embeddings, transcription, image and reranking responses ([#1178](https://github.com/laravel/ai/pull/1178) to [#1182](https://github.com/laravel/ai/pull/1182)). Read provider fields the SDK doesn't map, for example `$response->raw->json('usage.cost')` from OpenRouter. It's `null` after serialization.
+- **Batch embeddings from OpenAI and Azure keep input order** ([#1172](https://github.com/laravel/ai/pull/1172)). The API can return vectors out of order; the SDK now sorts by `index`. In our lab, a shuffled response mapped the vectors to the wrong inputs on 1.3.0 and to the right ones on 1.4.0. If you store embeddings, this one matters.
+- **Agent fakes resume tool approvals** ([#1190](https://github.com/laravel/ai/pull/1190)). Under `Agent::fake()`, an approved tool now runs and a rejected one gets a denied result. A rejection without a reason now ends the turn, so pass `Decision::reject('Not now.')` if your test expects an answer after it.
+- **Stream errors broadcast as `error`** ([#1208](https://github.com/laravel/ai/pull/1208)) instead of under the provider's code, so a Vue page listening for `.error` actually hears them.
+- **Provider fixes:** Anthropic tool calls run when a message ends with `end_turn` ([#1188](https://github.com/laravel/ai/pull/1188)) and streamed text joins across `pause_turn` ([#1186](https://github.com/laravel/ai/pull/1186)); OpenAI-compatible servers that omit the tool call `index` or finish with `stop` work now ([#1192](https://github.com/laravel/ai/pull/1192)).
+
+```bash
+composer update laravel/ai
+composer show laravel/ai | grep versions   # * v1.4.0
+```
+
+## Reverb 1.13: whispers on multi-app servers
+
+Reverb can serve several apps from one process (more than one entry in `reverb.apps.apps`). With `accept_client_events_from` set to `members`, which is the default, Reverb checks that the sender is subscribed to the channel before passing a whisper on.
+
+That check used whichever app the shared `ChannelManager` had looked at last, not the sender's app. So a valid member could be rejected with `{"code":4009,"message":"The client is not a member of the specified channel."}`, and "typing..." indicators just stopped working in one of your apps. 1.13 scopes the lookup to the connection's own app ([#418](https://github.com/laravel/reverb/pull/418)).
+
+```ts title="resources/js/composables/useTyping.ts"
+import { useEcho } from '@laravel/echo-vue'
+
+// Unchanged code: on a multi-app Reverb server before 1.13,
+// this whisper could be rejected with error 4009.
+export function useTyping(roomId: number) {
+    const { channel } = useEcho(`chat.${roomId}`)
+
+    const sendTyping = (name: string) => channel().whisper('typing', { name })
+
+    return { sendTyping }
+}
+```
+
+The rest of 1.13 is maintenance: Guzzle 8 and `guzzlehttp/psr7` 3 support ([#410](https://github.com/laravel/reverb/pull/410)), PHPStan 2 ([#412](https://github.com/laravel/reverb/pull/412)) and `react/promise` ^3.2 declared as a dependency ([#411](https://github.com/laravel/reverb/pull/411)). One app per server? Update when convenient.
+
+## Vue starter kit: two fixes to copy
+
+The kit has no new tag, but two commits landed on November 10. If your app started from it, you own that code now, so copy these by hand.
+
+**Lowercase the email on profile update** ([commit 1959e1a](https://github.com/laravel/vue-starter-kit/commit/1959e1a)). The kit's `config/fortify.php` sets `lowercase_usernames` to `true`, so Fortify lowercases the email at login and registration. The profile form didn't. A user who changed their email to `Test@Example.com` was stored with capitals, and could no longer log in on a case-sensitive database such as PostgreSQL or SQLite.
+
+```php title="app/Http/Requests/Settings/ProfileUpdateRequest.php"
+use Illuminate\Support\Str; // [!code ++]
+
+class ProfileUpdateRequest extends FormRequest
+{
+    protected function prepareForValidation(): void // [!code ++]
+    { // [!code ++]
+        if (config('fortify.lowercase_usernames') && is_string($this->input('email'))) { // [!code ++]
+            $this->merge(['email' => Str::lower($this->input('email'))]); // [!code ++]
+        } // [!code ++]
+    } // [!code ++]
+}
+```
+
+It runs before validation, so the `unique` rule also catches `Taken@Example.com` when `taken@example.com` exists.
+
+**OKLCH palette and one focus colour** ([commit 820a273](https://github.com/laravel/vue-starter-kit/commit/820a273)). The theme variables in `resources/css/app.css` moved from `hsl()` to `oklch()`, `--sidebar-ring` is now the same neutral as `--ring` instead of blue, and the old Tailwind 3 border-colour compatibility block is gone. Copy the whole `:root` and `.dark` blocks rather than single values, since every token changed.
+
+## Upgrade notes
+
+- **Laravel 12:** update to 12.72.0. No code changes needed. Add `RejectEmptySignedExpiry` if you could have sent links with an integer-keyed `expires=` value. Integer-keyed route parameters are now URL-encoded: `route('search', ['q' => 'a', 'raw&x=1'])` gave `?q=a&raw&x=1` on 12.71 and gives `?q=a&raw%26x%3D1` on 12.72. Check any code that built query strings that way on purpose.
+- **Laravel 13:** you got these fixes in 13.41. The 254-character email limit is coming in the next 13.x release.
+- **Laravel AI SDK:** if you catch `RateLimitedException` to handle OpenAI billing errors, catch `InsufficientCreditsException` instead. Tests that reject a tool approval without a reason and expect an answer need a reason now.
+- **Reverb:** update to 1.13.0 if one server hosts several apps. Nothing to change in your code.
+
+## Recap
+
+- Laravel 12.72.0 backports the signed URL expiry and nested `sometimes` fixes. Update now, and reject an empty `expires` for links already sent.
+- AI SDK 1.4.0 turns a throwing tool into a failed tool result the model can answer, and reports OpenAI quota errors as `InsufficientCreditsException`.
+- Reverb 1.13.0 stops rejecting whispers from valid members on multi-app servers.
+- The Vue starter kit lowercases the email on profile updates and moved to an OKLCH palette.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'I am on Laravel 12 and never pass integer keys to temporarySignedRoute(). Do I still need 12.72?', a: 'Update anyway. The nested `sometimes` fix in the same release affects any app that validates nested or wildcard input with `sometimes` and then trusts `validated()`.' },
+  { q: 'Does updating to 12.72 make old smuggled links expire?', a: 'No. The empty `expires` is part of the URL that was signed, so it still checks out. Add a middleware that rejects a request with a signature and an empty `expires`, before the `signed` middleware.' },
+  { q: 'Will my agent now hide tool errors from me?', a: 'No. In AI SDK 1.4 the tool exception is still reported to your exception handler. The only difference is that the run continues and the model gets the failure message as the tool result.' },
+  { q: 'Does the Reverb fix matter if I run one app per server?', a: 'Not really. The bug needed a second app on the same Reverb server. 1.13 is still a safe update for the Guzzle 8 support.' },
+  { q: 'Do I need a new starter kit version?', a: 'There is no new tag. The kit is copied into your app when you create it, so apply the two changes by hand if you want them.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.41: a signed URL fix, $request->uuid() and MigrationFailed](/laravel-13-41-signed-url-fix-request-uuid)
+- [Laravel AI SDK 1.3: typed structured output and file limits](/laravel-ai-sdk-1-3-typed-structured-output-file-limits)
+- [Listen for Laravel events in Vue with Reverb](/laravel-reverb-vue)
+- [Laravel docs: Signed URLs](https://laravel.com/docs/12.x/urls#signed-urls)
+
+## Sources
+
+- [laravel/framework v12.72.0 release notes](https://github.com/laravel/framework/releases/tag/v12.72.0): [#62401](https://github.com/laravel/framework/pull/62401), [#62402](https://github.com/laravel/framework/pull/62402), [#62349](https://github.com/laravel/framework/pull/62349), [#62391](https://github.com/laravel/framework/pull/62391), [#62347](https://github.com/laravel/framework/pull/62347), [#62358](https://github.com/laravel/framework/pull/62358)
+- [laravel/ai v1.4.0 release notes](https://github.com/laravel/ai/releases/tag/v1.4.0) and [UPGRADE.md](https://github.com/laravel/ai/blob/v1.4.0/UPGRADE.md): [#1191](https://github.com/laravel/ai/pull/1191), [#1174](https://github.com/laravel/ai/pull/1174), [#1172](https://github.com/laravel/ai/pull/1172), [#1190](https://github.com/laravel/ai/pull/1190), [#1208](https://github.com/laravel/ai/pull/1208)
+- [laravel/reverb v1.13.0 release notes](https://github.com/laravel/reverb/releases/tag/v1.13.0) and [#418](https://github.com/laravel/reverb/pull/418)
+- laravel/vue-starter-kit commits [1959e1a](https://github.com/laravel/vue-starter-kit/commit/1959e1a) and [820a273](https://github.com/laravel/vue-starter-kit/commit/820a273)
