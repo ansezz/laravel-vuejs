@@ -1,0 +1,12 @@
+flowchart LR
+  A["`**One JsonSchema object**
+  name: string, max 50, required
+  age: integer, min 18`"] --> B["`**AI SDK / MCP tool**
+  schema sent to the model`"]
+  A --> C["`**JsonSchema::rules()**
+  Laravel 13.43`"]
+  C --> D["`**Validation rules**
+  name: required|string|max:50
+  age: sometimes|integer|min:18`"]
+  D --> E["`Validator::make()
+  or a FormRequest`"]

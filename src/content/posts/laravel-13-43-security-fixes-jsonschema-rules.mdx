@@ -1,0 +1,449 @@
+---
+id: 197
+title: "Laravel 13.43: security fixes, JsonSchema::rules() and Reverb 1.14"
+seoTitle: "Laravel 13.43: Security Fixes and JsonSchema::rules()"
+excerpt: "Laravel 13.43 patches mass assignment, XSS and file validation bypasses, and adds JsonSchema::rules(), #[RetryFor] and RawTemplate. Plus Reverb 1.14 limits."
+date: 2026-11-18T00:30:00Z
+snippet: "JsonSchema::rules($schema) // one schema, real validation rules"
+categories: [laravel]
+tags: [laravel, release, upgrade, testing]
+---
+Your `$guarded` list says `is_admin` can't be mass assigned. On Laravel 13.42, a request that sent `is-admin` instead walked right past it. Laravel **13.43** closes that hole and a handful of XSS and validation bypasses, and adds `JsonSchema::rules()`, `#[RetryFor]`, `releaseUsingBackoff()` and `RawTemplate`. Reverb **1.14** ships the same day with new limits you should know before you deploy.
+
+<TLDR
+  audience="Laravel 13 (and 12) developers who use $guarded, Blade components, file uploads or Reverb, and anyone building AI or MCP tools with JSON Schema"
+  learn={['Which security fixes are in 13.43 / 12.73 and whether your app is exposed', '`JsonSchema::rules()`: derive validation rules from one schema', '`#[RetryFor]`, `releaseUsingBackoff()`, `RawTemplate`, `withoutAffectingStickiness()` and `Str::isBlank()`', 'Reverb 1.14: the 1,000-channel limit and the new client-events default']}
+  tested="Laravel 13.43.0 · Reverb 1.14.0 · PHP 8.4 · Pest 4 · SQLite (20 tests / 51 assertions: isBlank, releaseUsingBackoff on the database queue, #[RetryFor] payload, RawTemplate, withoutAffectingStickiness, JsonSchema::rules + exclusive bounds, mass-assignment alias, Stringable attribute XSS, empty-field file bypass, dynamic component names, debug-page URL, $ref depth, not_regex, 254-char email, literal exists where(), Reverb channel limit, name length and client-event default). 16 of the 17 framework tests fail on 13.42.0."
+>
+
+- **13.43.0** and **12.73.0** were released on **November 17, 2026** (15:00 and 14:56 UTC). Both carry the same security fixes. Run `composer update laravel/framework` today.
+- **Security:** a guarded attribute with a mutator could be mass assigned through a different spelling (`is-admin`), `Stringable` values in component attributes weren't escaped, an empty text field could hide an uploaded file from validation, and the debug page could run script from the URL. All fixed.
+- **New:** `JsonSchema::rules()` turns the schema you give an AI or MCP tool into Laravel validation rules. `#[RetryFor(hours: 1)]` replaces `retryUntil()`, and `releaseUsingBackoff()` reuses your job's backoff.
+- **Reverb 1.14:** at most 1,000 channels per connection, channel names up to 164 characters, and old configs now only accept whispers from channel members.
+
+</TLDR>
+
+## What's new at a glance
+
+| Change | PR | What it replaces |
+|---|---|---|
+| Mass-assignment guard checks normalised names (security) | [#62499](https://github.com/laravel/framework/pull/62499) | `is-admin` filling a guarded `is_admin` |
+| `Stringable` attribute values escaped (security) | [#62503](https://github.com/laravel/framework/pull/62503) | Raw `"` breaking out of an HTML attribute |
+| File wins over an empty input of the same name (security) | [#62521](https://github.com/laravel/framework/pull/62521) | An unvalidated upload behind `avatar=` |
+| Debug page "copy URL" JSON-encoded (security) | [#62418](https://github.com/laravel/framework/pull/62418) | A URL that ran script on the error page |
+| Dynamic component, slot and attribute names validated | [#62453](https://github.com/laravel/framework/pull/62453) | Runtime templates built from any string |
+| `$ref` chains capped at 64 levels | [#62498](https://github.com/laravel/framework/pull/62498) | Unbounded schema resolution (DoS) |
+| `JsonSchema::rules()` | [#62355](https://github.com/laravel/framework/pull/62355), [#62496](https://github.com/laravel/framework/pull/62496) | The same constraints written twice |
+| `#[RetryFor]` queue attribute | [#62434](https://github.com/laravel/framework/pull/62434) | A `retryUntil()` method |
+| `releaseUsingBackoff()` | [#62435](https://github.com/laravel/framework/pull/62435) | `$this->release($this->backoff()[...])` |
+| `RawTemplate` for inline components | [#62419](https://github.com/laravel/framework/pull/62419) | Returning a Blade string from `render()` |
+| `DB::withoutAffectingStickiness()` | [#62465](https://github.com/laravel/framework/pull/62465) | Saving and restoring sticky state by hand |
+| `Str::of()->isBlank()` / `isNotBlank()` | [#62415](https://github.com/laravel/framework/pull/62415) | `blank(str(...)->stripTags())` |
+
+## Security fixes: upgrade now
+
+Most of the security work landed on both branches, so the advice is the same everywhere: **13.x apps go to 13.43.0, 12.x apps go to 12.73.0**. Here is what each fix closes and how to tell if you were exposed.
+
+### Mass assignment through a different spelling
+
+Eloquent resolves `setIsAdminAttribute()` (and `Attribute` mutators) with `Str::studly()`, so `is_admin`, `is-admin` and `IsAdmin` all hit the same mutator. The `$guarded` check compared names literally. A request with `is-admin` was "not guarded", found the mutator, and set `is_admin`.
+
+<CodeCompare before="Laravel 13.42" after="Laravel 13.43">
+
+```php title="app/Models/Member.php"
+class Member extends Model
+{
+    protected $guarded = ['is_admin'];
+
+    public function setIsAdminAttribute($value): void
+    {
+        $this->attributes['is_admin'] = (bool) $value;
+    }
+}
+
+// POST /members  { "name": "Eve", "is-admin": true }
+Member::create($request->all());
+// is_admin === true  😬
+```
+
+```php title="app/Models/Member.php"
+class Member extends Model
+{
+    protected $guarded = ['is_admin'];
+
+    public function setIsAdminAttribute($value): void
+    {
+        $this->attributes['is_admin'] = (bool) $value;
+    }
+}
+
+// POST /members  { "name": "Eve", "is-admin": true }
+Member::create($request->all());
+// is_admin === false, name === 'Eve'
+```
+
+</CodeCompare>
+
+You were exposed if a model uses `$guarded` (not `$fillable`), the guarded column has a set mutator or an `Attribute` with `set:`, and you pass raw input such as `$request->all()` to `create()`, `fill()` or `update()`. Passing `$request->validated()` was already safe, because only keys you listed get through.
+
+### XSS in component attributes and the debug page
+
+Two escaping gaps in Blade:
+
+- **Component attributes** ([#62503](https://github.com/laravel/framework/pull/62503)): `$attributes->merge()` escaped strings but skipped every object, including `Stringable`. A `str($request->title)` passed as an attribute could close the quote and add `onmouseover=...`. Now only `Htmlable` values (like `HtmlString`) skip escaping, and `prepends()` values are escaped too.
+- **Debug page** ([#62418](https://github.com/laravel/framework/pull/62418)): the "copy request URL" button put the raw URL inside a JavaScript string. A crafted link to a page that throws could run script on the error page. It only matters with `APP_DEBUG=true`, which should never be the case in production, but staging servers often have it on.
+
+```php title="tests/Feature/AttributeEscapingTest.php"
+use Illuminate\Support\Stringable;
+use Illuminate\View\ComponentAttributeBag;
+
+$bag = (new ComponentAttributeBag)->merge(['title' => new Stringable('x" onmouseover=alert(1) data-x="')]);
+
+(string) $bag;
+// 13.42: title="x" onmouseover=alert(1) data-x=""
+// 13.43: title="x&quot; onmouseover=alert(1) data-x=&quot;"
+```
+
+### File validation bypass with an empty field
+
+`$request->all()` merged files into input, but **input always won**. Send a multipart request with `avatar=` (empty) **and** an `avatar` file, and the validator saw an empty string. `nullable|image` passed, then `$request->file('avatar')` handed you the file nobody checked.
+
+```php title="tests/Feature/UploadBypassTest.php"
+$file = UploadedFile::fake()->create('shell.php', 1, 'application/x-php');
+$request = Request::create('/', 'POST', ['avatar' => ''], [], ['avatar' => $file]);
+
+Validator::make($request->all(), ['avatar' => ['nullable', 'image']])->fails();
+// 13.42: false (validated an empty string)
+// 13.43: true  (the file wins over the blank field and fails "image")
+```
+
+A normal Inertia `useForm()` upload never sends both, so your users won't notice. The fix matters against crafted requests, especially if you store `$request->file()` somewhere public.
+
+### Hardening in the same release
+
+- **Dynamic components** ([#62453](https://github.com/laravel/framework/pull/62453), [#62455](https://github.com/laravel/framework/pull/62455)): `<x-dynamic-component>` builds a Blade template at runtime. Component, slot and attribute names with characters outside the tag syntax (quotes, braces, `<?`) now throw `InvalidArgumentException` instead of being pasted into that template. Bound attributes are sanitised like on a normal component tag.
+- **JSON Schema `$ref` depth** ([#62498](https://github.com/laravel/framework/pull/62498)): `JsonSchema::fromArray()` stops at 64 nested `$ref` hops. Relevant if you deserialise schemas you didn't write.
+- **`not_regex`** ([#62427](https://github.com/laravel/framework/pull/62427)): when `preg_match()` errors (for example invalid UTF-8 with the `u` flag), `not_regex` used to **pass**. It now fails, like `regex` already did.
+- **`decimal` rule** ([#62420](https://github.com/laravel/framework/pull/62420)): possessive quantifiers stop slow backtracking on long digit strings.
+- **Fluent `exists`/`unique` `where()`** ([#62425](https://github.com/laravel/framework/pull/62425)): `->where('status', 'NULL')` used to run `whereNull()` and `'!abc'` meant "not abc". Values are now compared literally.
+- **Presence verifier** ([#62447](https://github.com/laravel/framework/pull/62447)): JSON integers and booleans are compared as strings. On MySQL, `exists:invites,code` with `7` no longer matches the row `007`, and `false` no longer matches `alpha`.
+- **TrustProxies on Forge and Vapor** ([#62484](https://github.com/laravel/framework/pull/62484)): the automatic "trust all proxies" for `*.on-forge.com` and `*.on-vapor.com` hosts now also requires the platform's own server variable, so a spoofed `Host` header isn't enough.
+- **Broadcasting stub** ([#62500](https://github.com/laravel/framework/pull/62500)): see the upgrade notes. If your users have UUID or ULID keys, this one needs a manual edit.
+
+## JsonSchema::rules(): one schema, real validation
+
+The AI SDK and Laravel MCP describe tool input with `Illuminate\JsonSchema`. Until now you wrote those constraints twice: once as a schema for the model and once as validation rules, and the two copies drifted. `JsonSchema::rules()` derives the rules from the schema.
+
+<CodeCompare before="Laravel 13.42" after="Laravel 13.43">
+
+```php title="app/Http/Requests/StoreMemberRequest.php"
+public function rules(): array
+{
+    // Copied by hand from the tool's schema...
+    return [
+        'name' => ['required', 'string', 'max:50'],
+        'age' => ['sometimes', 'integer', 'min:18'],
+        'role' => ['required', 'string', Rule::in(['admin', 'user'])],
+        'tags' => ['sometimes', 'list', 'max:3'],
+        'tags.*' => ['string'],
+    ];
+}
+```
+
+```php title="app/Http/Requests/StoreMemberRequest.php"
+use App\Ai\Schemas\MemberSchema;
+use Illuminate\JsonSchema\JsonSchema;
+
+public function rules(): array
+{
+    return JsonSchema::rules(MemberSchema::make()); // [!code highlight]
+}
+```
+
+</CodeCompare>
+
+```php title="app/Ai/Schemas/MemberSchema.php"
+namespace App\Ai\Schemas;
+
+use Illuminate\JsonSchema\JsonSchema;
+use Illuminate\JsonSchema\Types\ObjectType;
+
+class MemberSchema
+{
+    public static function make(): ObjectType
+    {
+        return JsonSchema::object(fn ($s) => [
+            'name' => $s->string()->max(50)->required(),
+            'age' => $s->integer()->min(18),
+            'role' => $s->string()->enum(['admin', 'user'])->required(),
+            'tags' => $s->array()->items($s->string())->max(3),
+        ]);
+    }
+}
+```
+
+<Diagram name="laravel-jsonschema-rules-flow" alt="One JsonSchema object (name: string, max 50, required; age: integer, min 18) feeds two places: the AI SDK or MCP tool, which sends the schema to the model, and JsonSchema::rules() in Laravel 13.43, which turns it into validation rules (name: required|string|max:50, age: sometimes|integer|min:18) used by Validator::make() or a FormRequest." caption="Write the schema once; the model and the validator read the same thing." />
+
+In our lab the schema above produced `required|string|max:50` for `name` and `sometimes` plus `integer|min:18` for `age`, with dot keys like `tags.*` for nested items. It also takes a raw array, such as an MCP tool's `inputSchema`:
+
+```php title="routes/console.php"
+JsonSchema::rules([
+    'type' => 'object',
+    'properties' => ['email' => ['type' => 'string', 'format' => 'email']],
+    'required' => ['email'],
+]);
+// ['email' => ['required', 'string', 'email']]
+```
+
+`exclusiveMinimum` and `exclusiveMaximum` map to `gt:` and `lt:`, `pattern` to `regex` with the `u` flag, and `format` covers `email`, `uri`/`url`, `uuid`, `date` and `date-time`. Other formats add no rule.
+
+<Callout type="gotcha" title="These are Laravel rules, not a JSON Schema validator">
+
+Laravel's usual coercion applies, so the string `"19"` passes `integer` (we checked). If a tool must reject strings where the schema says integer, add `'integer:strict'` (or `Rule::numeric(strict: true)`) yourself; in our lab `integer:strict` rejected `"19"` and accepted `19`. Nested `required` keys are enforced by the parent's `required_array_keys`, so an absent parent object still passes.
+
+</Callout>
+
+On the Vue side nothing changes: the 422 errors land in `form.errors` like any FormRequest.
+
+```vue title="resources/js/pages/members/Create.vue"
+<script setup lang="ts">
+import { useForm } from '@inertiajs/vue3'
+import { store } from '@/routes/members'
+
+const form = useForm({ name: '', age: null as number | null, role: 'user', tags: [] as string[] })
+</script>
+
+<template>
+  <form @submit.prevent="form.submit(store())">
+    <input v-model="form.name" />
+    <p v-if="form.errors.name">{{ form.errors.name }}</p>
+    <button :disabled="form.processing">Save</button>
+  </form>
+</template>
+```
+
+## #[RetryFor] instead of retryUntil()
+
+`#[Tries]`, `#[Backoff]` and `#[Timeout]` were already attributes. The retry window still needed a method, because it's relative to when the job is queued. Now it's an attribute too.
+
+<CodeCompare before="Laravel 13.42" after="Laravel 13.43">
+
+```php title="app/Jobs/ImportProducts.php"
+class ImportProducts implements ShouldQueue
+{
+    use Queueable;
+
+    public function retryUntil(): DateTime
+    {
+        return now()->plus(hours: 1, minutes: 30);
+    }
+}
+```
+
+```php title="app/Jobs/ImportProducts.php"
+use Illuminate\Queue\Attributes\Backoff;
+use Illuminate\Queue\Attributes\RetryFor;
+
+#[Backoff(60, 300, 600)]
+#[RetryFor(hours: 1, minutes: 30)] // [!code highlight]
+class ImportProducts implements ShouldQueue
+{
+    use Queueable;
+}
+```
+
+</CodeCompare>
+
+The first argument is seconds; `minutes` and `hours` are named. In our lab the queued payload's `retryUntil` was exactly 90 minutes after dispatch. It works on jobs, queued mailables, notifications and listeners, and a `retryUntil()` method or property still wins if both exist.
+
+## releaseUsingBackoff() for polling jobs
+
+Backoff only kicked in when a job **threw**. A job that releases itself ("payment still pending, check again later") had to index into its own backoff array, and crashed once attempts outran the list.
+
+<CodeCompare before="Laravel 13.42" after="Laravel 13.43">
+
+```php title="app/Jobs/CheckPaymentStatus.php"
+public function handle(): void
+{
+    if ($this->payment->isPending()) {
+        $this->release($this->backoff()[$this->attempts() - 1]); // undefined index on attempt 4
+    }
+}
+
+public function backoff(): array
+{
+    return [10, 30, 60];
+}
+```
+
+```php title="app/Jobs/CheckPaymentStatus.php"
+public function handle(): void
+{
+    if ($this->payment->isPending()) {
+        $this->releaseUsingBackoff(); // [!code highlight]
+    }
+}
+
+public function backoff(): array
+{
+    return [10, 30, 60];
+}
+```
+
+</CodeCompare>
+
+On the database queue our job was released after 10, 30, 60 and 60 seconds over four attempts, with no exception events. With no backoff defined it releases immediately, because the worker's `--backoff` option isn't visible inside the job.
+
+## RawTemplate: inline components that admit they're Blade
+
+When `render()` returns a string that isn't a view name, Blade **compiles it**. So this innocent-looking component executes whatever the user typed as their name:
+
+```php title="app/View/Components/UserBadge.php"
+public function render(): string
+{
+    return '<span>'.$this->user->name.'</span>'; // name "{{ 6 * 7 }}" renders "42"
+}
+```
+
+We confirmed that on 13.43: it still renders `42`. 13.43 doesn't change that behaviour yet; it adds `RawTemplate` so intent is explicit, and the PR author plans to make plain strings resolve only to view names in Laravel 14.
+
+```php title="app/View/Components/Alert.php"
+use Illuminate\View\Component;
+use Illuminate\View\RawTemplate;
+
+class Alert extends Component
+{
+    public function __construct(public string $type = 'info') {}
+
+    public function render(): RawTemplate
+    {
+        return new RawTemplate(<<<'blade'
+            <div {{ $attributes->class(['alert', "alert-{$type}"]) }}>{{ $slot }}</div>
+        blade);
+    }
+}
+```
+
+Data goes in through properties and `{{ }}`, never into the template string. Our lab rendered `<x-alert type="success">` with a slot of `{{ 6 * 7 }}` as literal text. The constructor is typed `literal-string`, so PHPStan and Psalm flag concatenated input.
+
+## Smaller additions you'll use
+
+**Stop one write from pinning a job to the primary.** With `sticky` read/write connections, any write sends every later read to the write PDO. Wrap bookkeeping writes:
+
+```php title="app/Jobs/RunReport.php"
+DB::withoutAffectingStickiness(fn () => $this->report->update(['started_at' => now()]));
+
+$this->report->run(); // reads still go to the replica
+```
+
+A write that happened **before** the call keeps the connection sticky. Our lab checked both cases with `hasModifiedRecords()`.
+
+**`isBlank()` in a string chain.** `str($bio)->stripTags()->isBlank()` is `true` for `<p> </p>`, and `str('0')->isBlank()` is `false`, same as `blank()`.
+
+**Also in 13.43:** Predis retries idempotent commands (now including `DEL`) after a dropped connection, like PhpRedis already did ([#62406](https://github.com/laravel/framework/pull/62406), [#62502](https://github.com/laravel/framework/pull/62502)). Tagged cache reads on Redis are pipelined ([#62451](https://github.com/laravel/framework/pull/62451)). `autocomplete()` prompts get a fallback, so they work on Windows and in `$this->artisan()` tests ([#62522](https://github.com/laravel/framework/pull/62522)). `db:wipe` on PostgreSQL skips extension-owned tables ([#62460](https://github.com/laravel/framework/pull/62460)), `queue:work` reports jobs you fail manually with `$this->fail()` as failed ([#62377](https://github.com/laravel/framework/pull/62377)), and `withCasts()` on a relation now applies to `create()` ([#62517](https://github.com/laravel/framework/pull/62517)).
+
+## Reverb 1.14: limits and a new default
+
+**Reverb 1.14.0** (November 17, 15:19 UTC) is a hardening release. Three changes reach your app:
+
+| Change | PR | What you'll see |
+|---|---|---|
+| Max channels per connection, default **1,000** | [#423](https://github.com/laravel/reverb/pull/423) | `pusher:subscription_error` with type `LimitReached` |
+| Channel names capped at **164** characters | [#423](https://github.com/laravel/reverb/pull/423) | `pusher:subscription_error` with type `InvalidChannelName` |
+| `accept_client_events_from` defaults to `members` | [#424](https://github.com/laravel/reverb/pull/424) | Whispers from non-members get error `4009` |
+| Rejected connections are closed | [#419](https://github.com/laravel/reverb/pull/419) | Over-limit or bad-origin sockets drop after the error |
+| Connection registry | [#422](https://github.com/laravel/reverb/pull/422) | Ping, prune and shutdown see connections with no channels |
+
+The connection stays open on a subscription error, and Echo routes it to that channel's `.error()` callback. Raise the limit per app with `REVERB_APP_MAX_CHANNELS_PER_CONNECTION` (or `max_channels_per_connection` in `config/reverb.php`). Configs published without the key use 1,000, which we confirmed: with a limit of 2, the third subscribe got `LimitReached`, and a 165-character name got `InvalidChannelName`.
+
+<Callout type="heads-up" title="Whispers can stop working on old configs">
+
+If your `config/reverb.php` was published **before Reverb 1.8** it has no `accept_client_events_from` key, and until now that meant `all`. From 1.14 it means `members`: a client must be subscribed to the channel to whisper on it. Echo only whispers on channels it joined, so most apps are fine. If you relied on the old behaviour, add `'accept_client_events_from' => env('REVERB_APP_ACCEPT_CLIENT_EVENTS_FROM', 'all')` to each app.
+
+</Callout>
+
+A typing indicator from Vue keeps working, because `useEcho` subscribes before it whispers:
+
+```ts title="resources/js/composables/useTyping.ts"
+import { useEcho } from '@laravel/echo-vue'
+
+export function useTyping(roomId: number) {
+  const { channel } = useEcho(`rooms.${roomId}`)
+
+  return () => channel().whisper('typing', { at: Date.now() })
+}
+```
+
+Reverb 1.14 also requires **Laravel 12 or 13**: Laravel 10 and 11 stay on 1.13. Restart `reverb:start` after `composer update laravel/reverb`.
+
+## Upgrade notes
+
+- `composer update laravel/framework` puts you on **13.43.0**. On 12.x you get **12.73.0** with the security fixes (including `JsonSchema::rules()`, backported in [#62501](https://github.com/laravel/framework/pull/62501)). `#[RetryFor]`, `releaseUsingBackoff()`, `RawTemplate`, `withoutAffectingStickiness()` and `isBlank()` are 13.x only.
+- **Horizon below 5.47.0 now conflicts** ([#62449](https://github.com/laravel/framework/pull/62449)). If Composer refuses the update, run `composer update laravel/framework laravel/horizon`.
+- **UUID/ULID users and private channels:** the `install:broadcasting` stub compared `(int) $user->id === (int) $id`. With UUIDs, `(int) '1a2b...'` and `(int) '1f9e...'` are both `1`, so different users could pass. The stub now compares strings, but **your published `routes/channels.php` is not updated for you**. Fix it by hand:
+
+```diff title="routes/channels.php"
+ Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
+-    return (int) $user->id === (int) $id;
++    return (string) $user->id === (string) $id;
+ });
+```
+
+- **Dynamic components** now throw on names with characters the tag syntax rejects. Check anything that feeds user input into `<x-dynamic-component :component="...">`; you should be mapping to an allow-list anyway.
+- **`Rule::exists()`/`unique()` with `->where('col', 'NULL')`** now matches the string `NULL`. Use `->whereNull('col')` if that's what you meant.
+- **`exists`/`unique` with JSON numbers on MySQL** compare as strings now, so `7` stops matching `007`.
+- The `email` rule now rejects addresses longer than 254 characters on 13.x too ([#62347](https://github.com/laravel/framework/pull/62347), merged up from 12.x).
+
+<TryIt title="Check your models for the guarded-mutator pattern">
+
+```php title="tests/Feature/GuardedAliasTest.php"
+use App\Models\User;
+
+it('does not mass assign guarded mutators through aliases', function () {
+    $user = (new User)->fill(['name' => 'Eve', 'is-admin' => true, 'IsAdmin' => true]);
+
+    expect($user->is_admin ?? false)->toBeFalse();
+});
+```
+
+Swap in your own model and guarded column. On 13.42 this fails whenever the column has a set mutator; on 13.43 it passes.
+
+</TryIt>
+
+## Also out this week
+
+**Laravel AI SDK 1.4.1** (November 17) is a patch with a few real additions: Gemini Decisions API support, Anthropic web search results as citations, a clearer error on 401s, and a pile of streaming and tool fixes. We'll cover it in Monday's roundup.
+
+## Recap
+
+- Upgrade to **13.43.0** (or **12.73.0**) now: mass assignment via alias spellings, `Stringable` attribute XSS, the empty-field file bypass and the debug-page XSS are fixed.
+- Fix `routes/channels.php` by hand if your user IDs are UUIDs or ULIDs.
+- `JsonSchema::rules()` lets one schema drive both your AI/MCP tool and your validation.
+- `#[RetryFor]`, `releaseUsingBackoff()` and `RawTemplate` remove boilerplate and one footgun.
+- Reverb 1.14 caps channels per connection at 1,000 and makes old configs whisper to members only.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Is Laravel 13.43 a security release?', a: 'Yes. It is a normal minor with features, but it carries several security fixes (mass assignment, XSS, file validation). 12.73.0 ships the same fixes for Laravel 12. Update this week.' },
+  { q: 'Was my app exposed to the mass-assignment bypass?', a: 'Only if a model uses `$guarded`, the guarded column has a set mutator or `Attribute` setter, and you pass raw input like `$request->all()` to `fill()`, `create()` or `update()`. `$fillable` models and `$request->validated()` were safe.' },
+  { q: 'Does JsonSchema::rules() validate strictly like a JSON Schema validator?', a: 'No. It returns normal Laravel rules, so the string "19" passes an integer field. Add strict rules yourself where types must be exact.' },
+  { q: 'Will Reverb 1.14 break my whispers?', a: 'Only if your `config/reverb.php` predates Reverb 1.8 and you relied on clients whispering to channels they had not joined. Set `accept_client_events_from` to `all` to keep the old behaviour.' },
+  { q: 'Do I need to change inline components to RawTemplate now?', a: 'Not yet: strings still work in 13.43. Switch when you touch them, and never build the template from user input. The PR author plans to propose that Laravel 14 stops compiling plain strings.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.41: a signed URL fix, $request->uuid() and MigrationFailed](/laravel-13-41-signed-url-fix-request-uuid)
+- [Laravel Reverb and Vue: broadcast an event and listen with Echo](/laravel-reverb-vue)
+- [Build an MCP server in Laravel for your Vue app](/laravel-mcp-server-vue)
+- [Form requests with Inertia and Vue](/laravel-form-request-inertia)
+
+## Sources
+
+- [laravel/framework v13.43.0 release](https://github.com/laravel/framework/releases/tag/v13.43.0) and [v12.73.0 release](https://github.com/laravel/framework/releases/tag/v12.73.0)
+- Security PRs: [#62499](https://github.com/laravel/framework/pull/62499), [#62503](https://github.com/laravel/framework/pull/62503), [#62521](https://github.com/laravel/framework/pull/62521), [#62418](https://github.com/laravel/framework/pull/62418), [#62453](https://github.com/laravel/framework/pull/62453), [#62455](https://github.com/laravel/framework/pull/62455), [#62498](https://github.com/laravel/framework/pull/62498), [#62427](https://github.com/laravel/framework/pull/62427), [#62420](https://github.com/laravel/framework/pull/62420), [#62425](https://github.com/laravel/framework/pull/62425), [#62447](https://github.com/laravel/framework/pull/62447), [#62484](https://github.com/laravel/framework/pull/62484), [#62500](https://github.com/laravel/framework/pull/62500)
+- Feature PRs: [#62355](https://github.com/laravel/framework/pull/62355), [#62496](https://github.com/laravel/framework/pull/62496), [#62434](https://github.com/laravel/framework/pull/62434), [#62435](https://github.com/laravel/framework/pull/62435), [#62419](https://github.com/laravel/framework/pull/62419), [#62465](https://github.com/laravel/framework/pull/62465), [#62415](https://github.com/laravel/framework/pull/62415), [#62449](https://github.com/laravel/framework/pull/62449)
+- Docs: [Deriving rules from JSON schemas](https://laravel.com/framework/docs/13.x/validation#deriving-rules-from-json-schemas), [Inline component views](https://laravel.com/framework/docs/13.x/blade#inline-component-views), [Queues](https://laravel.com/framework/docs/13.x/queues), [Strings: isBlank](https://laravel.com/framework/docs/13.x/strings#method-fluent-str-is-blank)
+- [laravel/reverb v1.14.0 release](https://github.com/laravel/reverb/releases/tag/v1.14.0) and [UPGRADE.md](https://github.com/laravel/reverb/blob/v1.14.0/UPGRADE.md)
+- [laravel/ai v1.4.1 release](https://github.com/laravel/ai/releases/tag/v1.4.1)
