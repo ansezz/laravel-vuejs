@@ -1,0 +1,318 @@
+---
+id: 198
+title: "Inertia WhenVisible buffer: load props before they scroll in"
+excerpt: "Load below-the-fold Inertia props as the user scrolls, 600px early, with WhenVisible and Inertia::optional(). The server wiring the docs skip. 15 Pest tests."
+date: 2026-11-19T02:30:00Z
+snippet: '<WhenVisible data="reviews" :buffer="600">'
+categories: [vuejs, laravel]
+tags: [inertia, vuejs, laravel]
+---
+Your product page runs the reviews query on every visit, and most people never scroll down far enough to read one. So you lazy-load the block. Now the user does scroll, and gets a spinner. Inertia's `<WhenVisible>` fixes both, if you give it a `buffer` and wire the prop correctly on the Laravel side.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia v3 with heavy blocks below the fold: reviews, comments, related items, activity feeds"
+  learn={['How `<WhenVisible>` plus `Inertia::optional()` skips a query until the block is about to scroll into view', 'What `buffer` really does: a margin on all four sides, measured in pixels', 'Why a plain closure or `Inertia::defer()` quietly defeats it', 'The form gotcha: `except` saves the loaded block but runs every other optional prop']}
+  tested="Laravel 13.43 · inertia-laravel 3.7 · @inertiajs/vue3 3.11 · Vue 3.5 · Chromium via Playwright (15 Pest tests, 76 assertions)"
+>
+
+- `<WhenVisible data="reviews" :buffer="600">` sends `router.reload({ only: ['reviews'] })` when its marker gets within 600px of the viewport. In our Chromium run it fired at exactly 600px.
+- The prop must be `Inertia::optional(fn () => ...)`. A plain closure runs on the first load, and `Inertia::defer()` loads right after the first paint. Either way, nothing waits for the scroll.
+- `buffer` becomes the IntersectionObserver `rootMargin`, so it applies above the viewport too. If the user jumps straight past the block, nothing loads until they scroll back.
+- On a form that redirects back, pass `except` with **every** optional prop on the page. With only some of them listed, Laravel runs the rest on the redirect.
+
+</TLDR>
+
+## What WhenVisible is, and why people miss it
+
+`<WhenVisible>` is a Vue component from `@inertiajs/vue3`. It shows a fallback, watches a marker element with an IntersectionObserver, and does a partial reload for the props you name when the marker comes into view. It has shipped since Inertia 2.0.0 (13 December 2024).
+
+```vue title="resources/js/pages/Products/Show.vue"
+<script setup lang="ts">
+import { WhenVisible } from '@inertiajs/vue3'
+
+defineProps<{ reviews?: { id: number; body: string }[] }>()
+</script>
+
+<template>
+  <WhenVisible data="reviews" :buffer="600">
+    <template #fallback>
+      <ReviewsSkeleton />
+    </template>
+
+    <ReviewCard v-for="review in reviews" :key="review.id" :review="review" />
+  </WhenVisible>
+</template>
+```
+
+People miss two things. The `buffer` prop is one short section near the bottom of the docs page. And the page shows only the Vue side, so it is easy to wire the controller the way you wire every other prop, and then the component has nothing left to load.
+
+<Diagram name="inertia-whenvisible-buffer-vue" alt="On the first visit the reviews prop is optional, so Vue renders the fallback and an empty marker div. When the div gets within the buffer distance of the viewport, WhenVisible calls router.reload with only reviews. Laravel runs the reviews closure, and the default slot renders the reviews." caption="Nothing runs on the server until the marker is close to the screen." />
+
+## The usual way vs WhenVisible
+
+The hand-rolled version needs a JSON route, an observer, a fetch, a loading flag and cleanup. The gem is one component and one prop type:
+
+<CodeCompare before="A hand-rolled observer + JSON route" after="WhenVisible + Inertia::optional()">
+
+```vue title="resources/js/pages/Products/Show.vue"
+<script setup lang="ts">
+import { onMounted, onUnmounted, ref } from 'vue'
+
+const props = defineProps<{ product: { id: number } }>()
+const reviews = ref<{ id: number; body: string }[] | null>(null)
+const marker = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | undefined
+
+onMounted(() => {
+  observer = new IntersectionObserver(async ([entry]) => {
+    if (!entry.isIntersecting || reviews.value) return
+    observer?.disconnect()
+    const res = await fetch(`/api/products/${props.product.id}/reviews`)
+    reviews.value = await res.json()
+  }, { rootMargin: '600px' })
+  if (marker.value) observer.observe(marker.value)
+})
+
+onUnmounted(() => observer?.disconnect())
+</script>
+
+<template>
+  <div ref="marker" />
+  <ReviewsSkeleton v-if="!reviews" />
+  <ReviewCard v-else v-for="review in reviews" :key="review.id" :review="review" />
+</template>
+```
+
+```vue title="resources/js/pages/Products/Show.vue"
+<script setup lang="ts">
+import { WhenVisible } from '@inertiajs/vue3'
+
+defineProps<{ reviews?: { id: number; body: string }[] }>()
+</script>
+
+<template>
+  <WhenVisible data="reviews" :buffer="600">
+    <template #fallback>
+      <ReviewsSkeleton />
+    </template>
+
+    <ReviewCard v-for="review in reviews" :key="review.id" :review="review" />
+  </WhenVisible>
+</template>
+```
+
+</CodeCompare>
+
+The server side is a single prop type:
+
+```php title="app/Http/Controllers/ProductController.php"
+use Inertia\Inertia;
+
+return Inertia::render('Products/Show', [
+    'product' => $product->only('id', 'name', 'price'),
+    'reviews' => Inertia::optional(fn () => $product->reviews()->latest()->limit(20)->get()), // [!code highlight]
+]);
+```
+
+No extra API route, no auth or CORS question, and the reviews still arrive as a typed page prop. The partial reload goes to the same URL with `X-Inertia-Partial-Data: reviews`. In the lab, that response carried `reviews` and nothing else, and the closures for the other optional props did not run.
+
+## Pick the right prop type
+
+This is the part that decides whether `<WhenVisible>` does anything. We wired the same page three ways and loaded it in Chromium without scrolling:
+
+| Controller prop | First load | What `<WhenVisible>` does |
+|---|---|---|
+| `fn () => ...` | The closure runs and the data is in the page | Nothing. The prop is already there, so it never fetches. |
+| `Inertia::defer(fn () => ...)` | Left out, listed in `deferredProps` | Nothing useful. The client fetches it right after the first paint, scroll or no scroll. |
+| `Inertia::optional(fn () => ...)` | Left out, closure never runs | Fetches it when the marker gets within `buffer` px of the viewport. |
+
+The first row is the trap. Inertia's partial reloads docs call wrapping a prop in a closure "lazy data evaluation", and it is lazy: on a partial reload that asks for other props, the closure is skipped. On a normal visit it runs. `<WhenVisible>` checks whether the prop already exists and, since it does, marks itself as loaded.
+
+<Callout type="gotcha" title="Inertia::defer() is not 'load on scroll'">
+
+A deferred prop is loaded by the Inertia client right after the page renders, with or without `<WhenVisible>` around it. Use `defer()` for "not in the first response". Use `optional()` for "not until the user gets close".
+
+</Callout>
+
+## What buffer actually measures
+
+`buffer` is a number of pixels, and it defaults to `0`. In `@inertiajs/vue3` 3.11 it goes straight into the observer as `rootMargin: '600px'`. We scrolled a test page 5px at a time in Chromium with an 800px-tall viewport:
+
+- `buffer` 0 fired when the marker reached the bottom edge of the viewport, at a gap of 0px.
+- `buffer` 600 fired when the marker was exactly 600px below the viewport.
+
+A CSS margin of `600px` applies to all four sides. So the block also loads when the marker is up to 600px **above** the viewport. In the lab, landing with the marker 400px above the top loaded it, and 700px above did not.
+
+The marker is not the fallback. `<WhenVisible>` renders an empty element (`<div></div>`, or whatever you pass to `as`) right before the fallback, with zero height. Once the data loads, it removes that element. With `always`, it keeps it.
+
+How much buffer? Use the height of the fallback, or about one screen. 300–800px is a good range. A buffer of 5,000 on a short page is just eager loading with extra steps.
+
+## Real-world example: a product page with three lazy blocks
+
+Reviews load when they are near, "related products" load early, and a stock ticker refreshes every time it comes back into view:
+
+```php title="app/Http/Controllers/ProductController.php"
+use App\Models\Product;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class ProductController
+{
+    public function show(Product $product): Response
+    {
+        return Inertia::render('Products/Show', [
+            'product' => $product->only('id', 'name', 'price'),
+            'reviews' => Inertia::optional(fn () => $product->reviews()->latest()->limit(20)->get()),
+            'related' => Inertia::optional(fn () => $product->related()->limit(8)->get()),
+            'stock' => Inertia::optional(fn () => $product->stockLevel()),
+        ]);
+    }
+}
+```
+
+```vue title="resources/js/pages/Products/Show.vue"
+<script setup lang="ts">
+import { useForm, WhenVisible } from '@inertiajs/vue3'
+
+defineProps<{
+  product: { id: number; name: string; price: string }
+  reviews?: { id: number; body: string }[]
+  related?: { id: number; name: string }[]
+  stock?: number
+}>()
+
+const form = useForm({ question: '' })
+
+function ask() {
+  form.post('/questions', { except: ['reviews', 'related', 'stock'] })
+}
+</script>
+
+<template>
+  <ProductHero :product="product" />
+
+  <WhenVisible data="stock" always>
+    <template #default="{ fetching }">
+      <p>{{ stock }} left <small v-if="fetching">updating…</small></p>
+    </template>
+    <template #fallback><p>Checking stock…</p></template>
+  </WhenVisible>
+
+  <form @submit.prevent="ask">…</form>
+
+  <WhenVisible data="reviews" :buffer="400">
+    <template #fallback><ReviewsSkeleton /></template>
+    <ReviewCard v-for="review in reviews" :key="review.id" :review="review" />
+  </WhenVisible>
+
+  <WhenVisible data="related" :buffer="800">
+    <template #fallback><ProductGridSkeleton /></template>
+    <ProductCard v-for="item in related" :key="item.id" :product="item" />
+  </WhenVisible>
+</template>
+```
+
+What the lab showed for each block:
+
+- `reviews` and `related` loaded once. Scrolling up and back down sent no second request.
+- `stock` with `always` sent a new request each time it came back into view: 3 visits, 3 requests, 3 closure runs. The `fetching` slot prop is `true` while a refresh is in flight. It shipped in Inertia 2.3.2 (16 December 2025).
+- `data` can be an array. `:data="['reviews', 'related']"` sends one request for both, and the server ran both closures and nothing else.
+- Nested props work with a dotted key. `data="stats.revenue"` against `'stats' => ['revenue' => Inertia::optional(...), 'visits' => Inertia::optional(...)]` returned `stats.revenue` and skipped `visits`.
+
+## Gotchas
+
+<Callout type="heads-up" title="A failed form post can wipe the block you already loaded">
+
+We posted an invalid question from the product page, after reviews had loaded. Without `except`, the redirect back is a normal visit, optional props are left out, and the reviews disappeared: the fallback came back, and scrolling down fetched them again. With `except: ['reviews', 'related']`, the reviews stayed.
+
+</Callout>
+
+The catch is in the server, not the client. A partial request with only an `except` list resolves **every** prop not in that list, and that includes optional props. In our run, `except: ['reviews', 'related']` made Laravel run the `stock` closure on the redirect, even though nobody had scrolled to it. Put every optional prop of the page in `except`. With all three listed, no closure ran.
+
+More traps we hit:
+
+- **Jumping past the block loads nothing.** With the End key, an anchor link or a restored scroll position more than `buffer` px past the marker, the observer never sees it cross. The block loads when the user scrolls back up near it.
+- **Validation errors survive the reload.** In v3, `<WhenVisible>` passes `preserveErrors: true` by default ([PR #2819](https://github.com/inertiajs/inertia/pull/2819), Inertia 3.0.0). After the failed post, the error message stayed on screen while the reviews reloaded. Pass `:params="{ preserveErrors: false }"` if you want the reload to clear it.
+- **`params.only` is ignored.** The component sets `only` from `data` after merging `params`, so `data` wins. Use `params` for things like `headers`, `data` or `onFinish`.
+- **Leave out `data` and it reloads everything.** Without `data`, the observer calls `router.reload()` with no `only`, which runs every prop on the page, including the optional ones.
+- **One request at a time.** If a request is still in flight when the marker is visible again, `<WhenVisible>` waits for it instead of sending a second.
+
+## Try it yourself
+
+<TryIt title="Watch the request fire 600px early">
+
+```php title="routes/web.php"
+use Inertia\Inertia;
+
+Route::get('/lazy', fn () => Inertia::render('Lazy', [
+    'reviews' => Inertia::optional(function () {
+        logger('reviews ran');
+
+        return [['id' => 1, 'body' => 'Great switches']];
+    }),
+]));
+```
+
+```vue title="resources/js/pages/Lazy.vue"
+<script setup lang="ts">
+import { WhenVisible } from '@inertiajs/vue3'
+
+defineProps<{ reviews?: { id: number; body: string }[] }>()
+</script>
+
+<template>
+  <div style="height: 2000px">Scroll down slowly, with the Network tab open</div>
+  <WhenVisible data="reviews" :buffer="600">
+    <template #fallback><p>Loading…</p></template>
+    <p v-for="r in reviews" :key="r.id">{{ r.body }}</p>
+  </WhenVisible>
+</template>
+```
+
+Change `Inertia::optional(...)` to a plain `function () { ... }` and reload: `reviews ran` shows up in the log before you scroll at all.
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ One component and one prop type replace an observer, a JSON route and loading state |
+| How often you'll reach for it | ★★★★☆ Any page with heavy blocks below the fold: reviews, comments, feeds, related items |
+| Risk if misused | ★★★☆☆ The wrong prop type silently loads everything up front; `except` must list every optional prop |
+| **Overall** | **4 / 5**: the cheapest way to skip work the user never scrolls to |
+
+## Recap
+
+- `<WhenVisible data="x" :buffer="600">` reloads only `x` when its marker gets within 600px of the viewport, on any side.
+- Pair it with `Inertia::optional()`. A plain closure loads on the first visit, and `defer()` loads right after it.
+- Use `always` with the `fetching` slot prop for blocks that should refresh when they come back into view.
+- On forms that redirect back, list every optional prop in `except`.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Inertia version has WhenVisible and buffer?', a: 'WhenVisible and its buffer prop shipped in Inertia 2.0.0 on 13 December 2024. The fetching slot prop arrived in 2.3.2, and the preserveErrors default in 3.0.0. We tested with @inertiajs/vue3 3.11 and inertia-laravel 3.7.' },
+  { q: 'Should the prop be Inertia::optional() or Inertia::defer()?', a: 'Use Inertia::optional() for load-on-scroll. A deferred prop is fetched by the client right after the first render, whether or not the block is visible. A plain closure is even earlier: it runs on the first visit.' },
+  { q: 'What unit is buffer, and does it work above the viewport?', a: 'Pixels. The value becomes the IntersectionObserver rootMargin, so it extends the viewport on all four sides. A marker 400px above the screen with buffer 600 still triggers the load.' },
+  { q: 'Why did my loaded block disappear after a form error?', a: 'The redirect back is a normal visit, and optional props are not part of it. Post with except listing every optional prop on the page, so the redirect becomes a partial reload that keeps them and runs none of their closures.' },
+  { q: 'When should I use InfiniteScroll instead of WhenVisible with always?', a: 'For paginated lists that grow as you scroll. InfiniteScroll handles pages, merging and the scroll position. WhenVisible with always is for one block that should refresh each time it comes back into view.' },
+]} />
+
+## Next steps
+
+- [Inertia deferred props in Vue](/inertia-deferred-props-vue), for data that should load right after the first paint
+- [Inertia partial reloads](/inertia-partial-reloads), for how `only` and `except` filter props
+- [Inertia infinite scroll in Vue](/inertia-infinite-scroll-vue), for lists that keep growing
+- [Inertia once props](/inertia-once-props-vue), to combine with `Inertia::optional(...)->once()`
+
+## Sources
+
+- [Inertia v3 docs: Load when visible](https://inertiajs.com/docs/v3/data-props/load-when-visible)
+- [Inertia v3 docs: Partial reloads and Inertia::optional()](https://inertiajs.com/docs/v3/data-props/partial-reloads)
+- [Inertia v2.0.0 release](https://github.com/inertiajs/inertia/releases/tag/v2.0.0) (13 December 2024)
+- [PR #2766: Expose fetching in the default WhenVisible slot](https://github.com/inertiajs/inertia/pull/2766) (Inertia 2.3.2, 16 December 2025)
+- [PR #2819: Add the preserveErrors option](https://github.com/inertiajs/inertia/pull/2819) (Inertia 3.0.0, 25 March 2026)
+- [Source: WhenVisible in @inertiajs/vue3](https://github.com/inertiajs/inertia/blob/master/packages/vue3/src/whenVisible.ts)
+- [Source: OptionalProp in inertia-laravel](https://github.com/inertiajs/inertia-laravel/blob/3.x/src/OptionalProp.php)
+- [MDN: IntersectionObserver rootMargin](https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver/rootMargin)

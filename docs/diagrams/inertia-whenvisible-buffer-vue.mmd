@@ -1,0 +1,12 @@
+flowchart LR
+  A["`First visit
+  reviews is optional`"] --> B["`Vue renders
+  fallback + empty div`"]
+  B --> C["`div gets within
+  buffer px of the viewport`"]
+  C --> D["`router.reload
+  only: reviews`"]
+  D --> E["`Laravel runs
+  the closure`"]
+  E --> F["`Slot renders
+  the reviews`"]
