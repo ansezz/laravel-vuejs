@@ -1,0 +1,245 @@
+---
+id: 199
+title: "Cache::memo(): one Redis hit per request, not per call"
+excerpt: "Cache::memo() reads a key once and serves it from memory for the rest of the request or job. Tags work since Laravel 13.33. 15 Pest tests."
+date: 2026-11-20T03:00:00Z
+snippet: "Cache::memo()->get('settings')"
+categories: [laravel, vuejs]
+tags: [laravel, php, inertia, vuejs]
+---
+Your Inertia dashboard shares team settings, a policy reads them, and the controller reads them again. That's three Redis round trips for the same array, on every page load. `Cache::memo()->get('settings')` hits the store once and answers the rest from memory.
+
+<TLDR
+  audience="Laravel + Vue developers whose Inertia pages, policies and shared props keep reading the same cache keys in one request"
+  learn={['How `Cache::memo()` decorates any cache store and keeps hits in memory for the rest of the request or job', 'Why a mid-request write through `Cache::put()` does not update the memoized snapshot', 'How `Cache::memo()->tags()` works since Laravel 13.33, and what still hits the store', 'How this differs from `once()`, and how queue workers start with a fresh memo']}
+  tested="Laravel 13.43 · PHP 8.4 · Pest 4 · array cache store (15 tests, 89 assertions)"
+>
+
+- `Cache::memo()->get('settings')` hits Redis (or whatever store you wrap) once. The next `get` in the same request returns the in-memory copy. In the lab, three callers needed the same key and the store was hit once.
+- That in-memory copy is a snapshot. `Cache::put('settings', $new)` does not change what `Cache::memo()->get('settings')` returns. Write through `Cache::memo()` if you want the memo to forget and reread.
+- A miss is memoized too. If the first `get` returns `null`, a later `Cache::put()` in the same request stays invisible to `Cache::memo()`.
+- `Cache::memo()->tags(['permissions'])->get(...)` has shipped since Laravel 13.33. The tagged value is memoized; resolving the tag id still hits the store on every get.
+
+</TLDR>
+
+## What Cache::memo() is, and why people miss it
+
+`Cache::memo()` is a decorator around any cache store. The first `get` for a key goes to Redis, the database, the file store, or whatever you passed in. Every later `get` for that key, in the same request or job, is served from a PHP array.
+
+It arrived in Laravel 12.9.0 on 15 April 2025 ([PR #55304](https://github.com/laravel/framework/pull/55304), by Tim MacDonald). Every later 12.x and 13.x app already has it. People miss it because "the cache is fast" sounds like enough, and because it lives one heading below `remember()` in the [cache docs](https://laravel.com/docs/13.x/cache#cache-memoization). Hitting Redis is cheap. It is not free, and a single Inertia page can do it more times than you think.
+
+The same `memo()` call optionally takes a store name, so you can decorate Redis even when the default store is something else. Each store gets its own memo. In the lab, `Cache::memo('array')->get('name')` and `Cache::memo('file')->get('name')` returned different values for the same key.
+
+```php title="app/Http/Controllers/DashboardController.php"
+use Illuminate\Support\Facades\Cache;
+
+Cache::memo()->get('settings');
+Cache::memo('redis')->get('settings');
+```
+
+<Diagram name="laravel-cache-memo" alt="Shared Inertia props, a policy and a controller all call Cache::memo()->get('settings'). The first call hits the cache store. The later calls are served from memory." caption="Three callers, one trip to the store." />
+
+## The usual way vs Cache::memo()
+
+This is the pattern we started with in the lab: three `Cache::get` calls, three trips to the store.
+
+<CodeCompare before="Cache::get() every time" after="Cache::memo()->get()">
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+$settings = Cache::get("team:{$teamId}:settings");
+
+// later, in a policy and in the controller:
+$settings = Cache::get("team:{$teamId}:settings");
+$settings = Cache::get("team:{$teamId}:settings");
+// 3 store hits
+```
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+$settings = Cache::memo()->get("team:{$teamId}:settings");
+
+// later, in a policy and in the controller:
+$settings = Cache::memo()->get("team:{$teamId}:settings");
+$settings = Cache::memo()->get("team:{$teamId}:settings");
+// 1 store hit, then memory
+```
+
+</CodeCompare>
+
+`many()` is equally careful. After `Cache::memo()->get('a')`, a follow-up `Cache::memo()->many(['a', 'b', 'c'])` only fetched `b` and `c` from the store. The second `many()` fetched nothing.
+
+## A consistent snapshot for the request
+
+The performance win is the obvious part. The quieter win is consistency. If another process updates the key, or the TTL expires mid-request, two plain `Cache::get()` calls can disagree. `Cache::memo()` will not.
+
+In the lab we stored `Taylor`, read it through `memo()`, then wrote `Tim` with `Cache::store(...)->put()`:
+
+- `Cache::memo()->get('name')` stayed `Taylor`
+- `Cache::get('name')` was already `Tim`
+
+That is the intended behaviour, not a bug. The first read wins for the rest of the request. If you need the new value, write (or `forget`) through `Cache::memo()` so the snapshot is dropped, then `get` again. A `put` through memo does not pre-load the new value: the next `get` hits the store once and memoizes that result. The original PR called this out. We saw the same thing with `remember()` on a miss: the closure ran, the value was stored, and the following `get` still paid for one store hit.
+
+<Callout type="gotcha" title="Misses are memoized too">
+
+`Cache::memo()->get('missing')` returns `null` and remembers that miss. A later `Cache::put('missing', 'now-there')` in the same request does not change what `memo()->get('missing')` returns. Forget or write through `Cache::memo()` if the key might appear later in the same request.
+
+</Callout>
+
+## Real-world example: a Vue + Inertia dashboard
+
+Format is not the issue this time. The issue is that three layers of one page all need the same cached array.
+
+```php title="app/Http/Middleware/HandleInertiaRequests.php"
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Inertia\Middleware;
+
+class HandleInertiaRequests extends Middleware
+{
+    public function share(Request $request): array
+    {
+        $teamId = $request->user()?->team_id;
+
+        return [
+            ...parent::share($request),
+            'teamSettings' => $teamId
+                ? Cache::memo()->get("team:{$teamId}:settings")
+                : null,
+        ];
+    }
+}
+```
+
+```php title="app/Policies/InvoicePolicy.php"
+use App\Models\User;
+use Illuminate\Support\Facades\Cache;
+
+public function viewAny(User $user): bool
+{
+    $settings = Cache::memo()->get("team:{$user->team_id}:settings");
+
+    return (bool) ($settings['invoices.enabled'] ?? false);
+}
+```
+
+```php title="app/Http/Controllers/DashboardController.php"
+use Illuminate\Support\Facades\Cache;
+use Inertia\Inertia;
+use Inertia\Response;
+
+public function __invoke(): Response
+{
+    $teamId = auth()->user()->team_id;
+    $settings = Cache::memo()->get("team:{$teamId}:settings");
+
+    return Inertia::render('Dashboard', [
+        'locale' => $settings['locale'] ?? 'en',
+    ]);
+}
+```
+
+In the lab, those three `memo()->get()` calls produced one store hit and the same array each time. Vue just receives `teamSettings` and `locale`. It does not need to know a memo exists.
+
+## Tags since Laravel 13.33
+
+Until Laravel 13.33.0 (22 September 2026, [PR #61593](https://github.com/laravel/framework/pull/61593)), `Cache::memo()` had no `tags()` method. If you cached permissions or tenant config with tags, you were stuck wrapping a second `array` store by hand. That now works:
+
+```php title="app/Policies/PostPolicy.php"
+use Illuminate\Support\Facades\Cache;
+
+$permissions = Cache::memo()
+    ->tags(['permissions'])
+    ->get("permissions:{$user->id}");
+```
+
+The tagged *value* is memoized. In the lab, a second `memo()->tags(['permissions'])->get(...)` did not fetch the payload again. It did still read the tag id (`tag:permissions:key`) from the store, because `itemKey()` needs the current tag namespace to look the memo up. Flushing the tag dropped both the stored value and the in-memory copy.
+
+Treat that extra tag-id read as cheap. The win is not fetching the payload twice.
+
+## once() vs Cache::memo()
+
+[`once()`](/laravel-once-helper-memoization) memoizes the result of a closure in process memory. It never talks to Redis. `Cache::memo()` sits in front of a cache store: the value still lives in Redis (with a TTL, tags, and invalidation), and the memo only removes the repeated network hop inside one request or job.
+
+Use `once()` for a calculation you do not want to cache across requests. Use `Cache::memo()` when the value is already in the cache and several callers in the same request keep asking for it.
+
+[`Cache::flexible()`](/laravel-cache-flexible-swr) is a different layer again: stale-while-revalidate *across* requests. You can use both. `flexible()` on a memoized store has been supported since shortly after `memo()` shipped ([PR #55709](https://github.com/laravel/framework/pull/55709)).
+
+## The request and job boundary
+
+`Cache::memo()` is registered as a scoped container binding (`cache.__memoized:{driver}`). A PHP-FPM request already dies at the end, so the memo dies with it. Long-running workers are the interesting case.
+
+Laravel's queue worker calls `forgetScopedInstances()` between jobs. In the lab, after we changed the stored value and called `app()->forgetScopedInstances()`, the next `Cache::memo()->get()` hit the store and returned the new value. You do not have to flush the memo yourself between jobs.
+
+<Callout type="tip">
+
+If you stash the memo repository on a singleton and reuse it across jobs or Octane requests, you are opting out of that reset. Prefer `Cache::memo()->get(...)` at the call site.
+
+</Callout>
+
+Cache events follow the same rule as the store hits. The memo repository itself does not fire events. The underlying store does, and only when it is actually called. In the lab, three `memo()->get()` calls produced one `RetrievingKey` event.
+
+## Try it yourself
+
+<TryIt title="See the snapshot in tinker">
+
+```php
+use Illuminate\Support\Facades\Cache;
+
+Cache::put('settings', ['theme' => 'dark'], 60);
+
+Cache::get('settings');
+Cache::get('settings'); // hits the store again
+
+Cache::memo()->get('settings'); // hits the store
+Cache::memo()->get('settings'); // memory
+
+Cache::put('settings', ['theme' => 'light'], 60);
+Cache::memo()->get('settings'); // still dark
+Cache::get('settings');         // light
+
+Cache::memo()->put('settings', ['theme' => 'light'], 60);
+Cache::memo()->get('settings'); // light, and this get hits the store
+```
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ One decorator removes the repeated store trips on a busy Inertia page |
+| How often you'll reach for it | ★★★★☆ Settings, permissions, feature flags, anything several layers of one request already cache |
+| Risk if misused | ★★☆☆☆ A `Cache::put()` that skips memo leaves a stale snapshot until the request ends |
+| **Overall** | **4.5 / 5**: the cheapest way to stop paying for the same cache key twice |
+
+## Recap
+
+- `Cache::memo()->get($key)` hits the store once per request or job. Later gets come from memory.
+- The memo is a snapshot. Writes must go through `Cache::memo()` if later reads should see them. Misses are snapshotted too.
+- `Cache::memo()->tags()` works from Laravel 13.33. The value is memoized; the tag id is still resolved on each get.
+- `once()` memoizes a closure. `memo()` decorates a cache store. Queue workers already reset the scoped memo between jobs.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version added Cache::memo()?', a: 'Laravel 12.9.0, on 15 April 2025 (PR #55304). It is in every later 12.x and 13.x release. Tagged memo, Cache::memo()->tags(), shipped in Laravel 13.33.0 on 22 September 2026 (PR #61593).' },
+  { q: 'Is Cache::memo() the same as once()?', a: 'No. once() remembers the result of a closure in process memory and never talks to a cache store. Cache::memo() wraps a store so repeated gets in one request skip the network hop but still use that store for TTL, tags and invalidation.' },
+  { q: 'Does Cache::put() update what memo() returns?', a: 'Not by itself. Cache::put() writes the store and leaves the memo snapshot alone. Call Cache::memo()->put(), memo()->forget(), or memo()->flush() if later memo() reads in the same request should see the change. The next get after a memo write hits the store once and then memoizes again.' },
+  { q: 'Will the memo leak between queued jobs?', a: 'Not if you use Cache::memo() normally. It is a scoped container binding, and the queue worker calls forgetScopedInstances() between jobs. We confirmed that a fresh memo() after that call hits the store again. Do not hold the memo repository on a singleton of your own.' },
+  { q: 'Does memo() work with cache tags?', a: 'Yes, from Laravel 13.33. Cache::memo()->tags([\'permissions\'])->get($key) memoizes the tagged value. Each get still reads the tag id from the store so the memo key can be computed. Flushing the tag drops the in-memory copy as well.' },
+]} />
+
+## Next steps
+
+- [Cache::flexible: serve stale cache while it refreshes](/laravel-cache-flexible-swr), when the problem is a stampede across requests, not repeated reads in one request
+- [once() memoization](/laravel-once-helper-memoization), when the value should never hit a cache store
+- [Cache::withoutOverlapping() and Cache::funnel()](/laravel-cache-withoutoverlapping-funnel), when the work itself must not run twice
+- [Laravel docs: cache memoization](https://laravel.com/docs/13.x/cache#cache-memoization)
+
+## Sources
+
+- [Laravel docs: cache memoization](https://laravel.com/docs/13.x/cache#cache-memoization)
+- [PR #55304: Introduce memoized cache driver](https://github.com/laravel/framework/pull/55304) (Laravel 12.9.0, 15 April 2025)
+- [PR #61593: Tagged memoized cache](https://github.com/laravel/framework/pull/61593) (Laravel 13.33.0, 22 September 2026)
+- [PR #55709: Add flexible support to memoized cache store](https://github.com/laravel/framework/pull/55709)
+- [Source: `Illuminate\Cache\MemoizedStore`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Cache/MemoizedStore.php)
+- [Source: `Illuminate\Cache\CacheManager::memo()`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Cache/CacheManager.php)

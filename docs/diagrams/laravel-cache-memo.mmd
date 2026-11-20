@@ -1,0 +1,10 @@
+flowchart LR
+  A["`Shared Inertia
+  props`"] --> M["`Cache::memo
+  get settings`"]
+  B["Policy"] --> M
+  C["Controller"] --> M
+  M --> D["`First call:
+  the cache store`"]
+  M --> E["`Later calls:
+  memory`"]
