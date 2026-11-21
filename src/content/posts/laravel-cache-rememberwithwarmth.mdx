@@ -17,7 +17,7 @@ Your monthly report page is slow for some users and fast for others, and the tra
 
 - `[$value, $warm] = Cache::rememberWithWarmth($key, $ttl, $callback)` works like `remember()`. `$warm` is `true` when the value came from the cache and `false` when the closure ran.
 - It shipped in Laravel 13.15.0 on 9 June 2026 ([PR #60385](https://github.com/laravel/framework/pull/60385)). `remember()` now calls it and returns the first item.
-- A closure that returns `null` is never cached. Every call stays cold and runs the closure again. `false`, `0`, `''` and `[]` are cached and come back warm.
+- A closure that returns `null` never produces a usable cache hit. Every call stays cold and runs the closure again. `false`, `0`, `''` and `[]` are cached and come back warm.
 - It is not on the `Illuminate\Contracts\Cache\Repository` interface, and there is no warmth version of `rememberForever()` or `flexible()`.
 
 </TLDR>
@@ -118,7 +118,7 @@ The flag also makes metrics cheap: `Log::withContext(['report_cache' => $warm ? 
 
 <Callout type="gotcha" title="A null result is never warm">
 
-If the closure returns `null`, nothing is stored. In the lab, two calls for a missing user both returned `[null, false]`, and the closure ran twice. If "not found" is a real answer you want to cache, return a sentinel such as `false` or `[]` instead.
+If the closure returns `null`, the next `get()` still returns `null`, which counts as a miss. In the lab, two calls for a missing user both returned `[null, false]`, and the closure ran twice. If "not found" is a real answer you want to cache, return a sentinel such as `false` or `[]` instead.
 
 </Callout>
 
@@ -158,7 +158,7 @@ Three things are missing:
 
 `rememberWithWarmth()` doesn't add a lock. If two requests miss at the same moment, both run the closure and both get `warm: false`. We reproduced that in the lab by starting a second call from inside the first closure: the closure ran twice, and both calls came back cold.
 
-If a cold report is expensive enough that you care, wrap the build in [Cache::withoutOverlapping() or Cache::funnel()](/laravel-cache-withoutoverlapping-funnel), or use `Cache::flexible()` so most requests get the stale value while it refreshes. The warm flag still tells you how often you pay for a cold build.
+If a cold report is expensive enough that you care, use `Cache::flexible()` so requests in the stale window get the old value while it refreshes. If the build must not run concurrently, look at [Cache::withoutOverlapping() or Cache::funnel()](/laravel-cache-withoutoverlapping-funnel). Serializing builds alone is not cache deduplication: recheck the key inside a lock if you want a waiting caller to reuse the first result. The warm flag tells you how often you pay for a cold build.
 
 ## Try it yourself
 
@@ -191,14 +191,14 @@ Cache::rememberWithWarmth('nothing', 60, fn () => null); // [null, false] again
 
 - `[$value, $warm] = Cache::rememberWithWarmth($key, $ttl, $callback)` returns the value and whether it came from the cache. Laravel 13.15+.
 - `remember()` now calls it, so switching changes nothing about storage, TTLs or events.
-- `null` results are never cached and never warm. `false`, `0`, `''` and `[]` are.
+- `null` results never count as hits and never come back warm. `false`, `0`, `''` and `[]` are.
 - It works on tags, `Cache::memo()` and enum keys. It is not on the contract and has no lock.
 
 ## FAQ
 
 <FAQ items={[
   { q: 'Which Laravel version added Cache::rememberWithWarmth()?', a: 'Laravel 13.15.0, released on 9 June 2026, from PR #60385. It is in every later 13.x release. It is not available in Laravel 12.' },
-  { q: 'What does warm mean exactly?', a: 'warm is true when the cache returned a non-null value, so the closure did not run. It is false when the closure ran and its result was stored, or when the closure returned null, which is never stored.' },
+  { q: 'What does warm mean exactly?', a: 'warm is true when the cache returned a non-null value, so the closure did not run. It is false when the closure ran. A null result is indistinguishable from a miss, so every call reruns the closure.' },
   { q: 'Does it work with Cache::memo() and tags?', a: 'Yes. Both are built on Illuminate\\Cache\\Repository. With Cache::memo(), warm means the value came from memory or from the store, without telling you which.' },
   { q: 'Is there a rememberForever or flexible version?', a: 'No. Pass null as the TTL to rememberWithWarmth() to store a value forever. Cache::flexible() does not return a warmth flag.' },
   { q: 'Does it stop a cache stampede?', a: 'No. It has no lock, like remember(). Two requests that miss at the same time both run the closure. Use Cache::flexible(), Cache::withoutOverlapping() or Cache::funnel() for that.' },
@@ -208,7 +208,7 @@ Cache::rememberWithWarmth('nothing', 60, fn () => null); // [null, false] again
 
 - [Cache::memo(): one Redis hit per request](/laravel-cache-memo), when the same key is read several times in one request
 - [Cache::flexible: serve stale cache while it refreshes](/laravel-cache-flexible-swr), when a cold build is too slow to make users wait
-- [Cache::withoutOverlapping() and Cache::funnel()](/laravel-cache-withoutoverlapping-funnel), when the cold build must not run twice at once
+- [Cache::withoutOverlapping() and Cache::funnel()](/laravel-cache-withoutoverlapping-funnel), when concurrent builds must be limited
 - [Laravel docs: retrieve and store](https://laravel.com/docs/13.x/cache#retrieve-store)
 
 ## Sources
