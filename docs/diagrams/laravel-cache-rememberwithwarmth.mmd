@@ -1,0 +1,9 @@
+flowchart LR
+  A["`rememberWithWarmth()
+  key, ttl, closure`"] --> G{"`Store has
+  a value?`"}
+  G -- yes --> W["`value, warm = true
+  closure skipped`"]
+  G -- "no or null" --> C["`Run the closure,
+  store the result`"]
+  C --> F["`value, warm = false`"]
