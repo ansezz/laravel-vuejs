@@ -1,0 +1,310 @@
+---
+id: 202
+title: "Laravel debounced jobs: only the last dispatch runs"
+seoTitle: "Laravel debounced jobs with #[DebounceFor] (13.6+)"
+excerpt: "Dispatch a job 10 times in 30 seconds and only the last one runs. #[DebounceFor] for queued jobs and listeners, with maxWait. Laravel 13.6+. 20 Pest tests."
+date: 2026-11-23T03:00:00Z
+snippet: "#[DebounceFor(30, maxWait: 120)]"
+categories: [laravel, vuejs]
+tags: [laravel, php, testing, inertia]
+---
+Your product editor autosaves every couple of seconds, and every save queues a search reindex. One person fixing a typo in a title just sent eight identical jobs to your queue. Laravel 13 can collapse that burst into one job with a single attribute: `#[DebounceFor]`.
+
+<TLDR
+  audience="Laravel + Vue developers whose autosaves, webhooks or model events dispatch the same queued job many times in a row"
+  learn={['What `#[DebounceFor]` does and which Laravel versions have it', 'How to debounce per record with `debounceId()`', 'How `maxWait` stops a busy record from never syncing', 'The gotchas: missing `debounceId()`, `Bus::dispatch()`, the sync queue, `ShouldBeUnique`, cache eviction']}
+  tested="Laravel 13.43 · PHP 8.4 · Pest 4 · database queue + array cache, real queue:work runs (20 tests, 67 assertions)"
+>
+
+- Add `#[DebounceFor(30)]` to a queued job and a `debounceId()` method. Dispatch it ten times for the same ID within 30 seconds and only the **last** dispatch runs. The others are deleted by the worker.
+- It shipped for jobs in Laravel 13.6.0 (21 April 2026) and for queued event listeners in 13.26.0 (18 August 2026).
+- `#[DebounceFor(30, maxWait: 120)]` forces a run after 120 seconds, even if dispatches keep coming.
+- Forget `debounceId()` and every instance of the job shares one key, so job #3 for product 3 cancels the jobs for products 1 and 2.
+
+</TLDR>
+
+## What #[DebounceFor] is, and why people miss it
+
+You know debounce from the front end: wait until the user stops typing, then search. `#[DebounceFor]` does the same thing for queued jobs. Each dispatch waits for the window, and only the newest one survives.
+
+It came from [PR #59507](https://github.com/laravel/framework/pull/59507) and shipped in [Laravel 13.6.0](https://github.com/laravel/framework/releases/tag/v13.6.0). Queued listeners got it in [13.26.0](https://github.com/laravel/framework/releases/tag/v13.26.0) ([PR #61169](https://github.com/laravel/framework/pull/61169)). The docs give it one short section between *Unique Jobs* and *Encrypted Jobs*, so most people read "unique" and stop there.
+
+```php title="app/Jobs/UpdateSearchIndex.php"
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Attributes\DebounceFor;
+
+#[DebounceFor(30)] // [!code highlight]
+class UpdateSearchIndex implements ShouldQueue
+{
+    use Queueable;
+
+    public function __construct(public int $productId) {}
+
+    public function debounceId(): string // [!code highlight]
+    {
+        return (string) $this->productId;
+    }
+
+    public function handle(): void
+    {
+        Product::find($this->productId)?->searchable();
+    }
+}
+```
+
+How it works, straight from the framework source: on dispatch, Laravel writes a random 40-character token to the cache under a key built from the job class and `debounceId()`. The newest dispatch overwrites the token. The job is queued with a 30-second delay. When the worker picks a job up, it compares the job's token with the cache. If they differ, a newer dispatch exists, so the job is deleted and `JobDebounced` fires.
+
+<Diagram name="laravel-debounced-jobs-debouncefor" alt="Three dispatches of the same job write tokens A, B and C to one cache key; the last write wins, so the key holds C. Thirty seconds later the worker checks each job's token against the cache. Jobs A and B don't match, so they are deleted and a JobDebounced event fires. Job C matches, so its handle method runs once with the latest data." caption="Every dispatch is queued. Only the one holding the latest token runs." />
+
+## The usual way vs #[DebounceFor]
+
+The usual answer is `ShouldBeUnique`. It keeps the **first** job and drops the rest, which is backwards for a reindex. Even if the job re-reads the database, it runs right away, usually before the user has finished typing, and the later edits are dropped until the lock is released.
+
+<CodeCompare before="ShouldBeUnique: first one wins" after="#[DebounceFor]: last one wins">
+
+```php title="app/Jobs/UpdateSearchIndex.php"
+class UpdateSearchIndex implements ShouldQueue, ShouldBeUnique
+{
+    use Queueable;
+
+    public $uniqueFor = 30;
+
+    public function __construct(public int $productId) {}
+
+    public function uniqueId(): string
+    {
+        return (string) $this->productId;
+    }
+
+    // dispatches #2..#8 are dropped at dispatch time;
+    // #1 runs right away, before the user has finished typing
+}
+```
+
+```php title="app/Jobs/UpdateSearchIndex.php"
+#[DebounceFor(30)]
+class UpdateSearchIndex implements ShouldQueue
+{
+    use Queueable;
+
+    public function __construct(public int $productId) {}
+
+    public function debounceId(): string
+    {
+        return (string) $this->productId;
+    }
+
+    // all 8 are queued; #1..#7 are deleted by the worker;
+    // #8 runs 30 s after the last change
+}
+```
+
+</CodeCompare>
+
+| | `ShouldBeUnique` | `#[DebounceFor]` |
+|---|---|---|
+| Which dispatch runs | The first | The last |
+| When duplicates are dropped | At dispatch, never queued | At execution, deleted by the worker |
+| When it runs | Right away (or its own delay) | After the window, counted from the **last** dispatch |
+| Storage | A cache lock | A plain cache value (token) |
+| Best for | "Never queue this twice" (billing, exports) | "Wait until things settle" (reindex, sync, notify) |
+
+In the lab, three dispatches for product 42 created three rows in the `jobs` table, each due 30 seconds later. After `queue:work` ran, only `abc` (the last title) was indexed, `JobDebounced` fired for `a` and `ab`, and the table was empty.
+
+## Real-world example: an Inertia autosave that reindexes once
+
+The Vue page autosaves the title. It already debounces on the client, but that only covers one tab. The price import, the stock webhook and a teammate's tab all touch the same product too.
+
+```vue title="resources/js/pages/Products/Edit.vue"
+<script setup lang="ts">
+import { useForm } from '@inertiajs/vue3'
+import { watch } from 'vue'
+
+const props = defineProps<{ product: { id: number; title: string } }>()
+
+const form = useForm({ title: props.product.title })
+
+let timer: ReturnType<typeof setTimeout> | undefined
+
+watch(() => form.title, () => {
+  clearTimeout(timer)
+  timer = setTimeout(() => {
+    form.patch(`/products/${props.product.id}`, { preserveScroll: true })
+  }, 800)
+})
+</script>
+
+<template>
+  <input v-model="form.title" />
+  <span v-if="form.recentlySuccessful">Saved</span>
+</template>
+```
+
+```php title="app/Http/Controllers/ProductController.php"
+public function update(UpdateProductRequest $request, Product $product)
+{
+    $product->update($request->validated());
+
+    UpdateSearchIndex::dispatch($product->id); // debounced per product
+
+    return back();
+}
+```
+
+We hit that endpoint five times, two seconds apart, with `M`, `Mu`, `Mug`, `Mug ` and `Mug XL`. Five jobs were queued. Thirty seconds after the last save the worker ran once, with `Mug XL`.
+
+<Callout type="tip" title="Debounce the listener, not the controller">
+
+If the reindex hangs off a model event, put the attribute on the queued listener. `debounceId()` receives the event, so it can key on the product. In the lab, four `ProductUpdated` events (three for product 42, one for 43) produced two runs: `Mug v3` and `Plate`.
+
+</Callout>
+
+```php title="app/Listeners/ReindexProduct.php"
+#[DebounceFor(30)]
+class ReindexProduct implements ShouldQueue
+{
+    public function debounceId(ProductUpdated $event): string
+    {
+        return (string) $event->product->id;
+    }
+
+    public function handle(ProductUpdated $event): void
+    {
+        $event->product->searchable();
+    }
+}
+```
+
+## maxWait: when the burst never ends
+
+Debounce has one failure mode: if dispatches keep arriving faster than the window, the job never runs. A shared document that someone edits every 20 seconds would never sync. `maxWait` caps that.
+
+```php title="app/Jobs/SyncDraft.php"
+#[DebounceFor(30, maxWait: 120)]
+class SyncDraft implements ShouldQueue
+{
+    // ...
+}
+```
+
+Laravel stores when the burst started. A dispatch that arrives 120 seconds or more after that start is queued with **no delay**, and the burst timer starts over.
+
+In the lab we dispatched `SyncDraft` every 20 seconds, eight times. The dispatch at second 120 (revision 7) ran at once. Revision 8, sent at second 140, started a new window and ran 30 seconds later. Without `maxWait`, nothing would have run until the edits stopped.
+
+<Callout type="heads-up" title="maxWait resets after a run since 13.27">
+
+Before Laravel 13.27.0, the burst start time lived on after the job ran, so the next quiet dispatch could skip its delay. [PR #61281](https://github.com/laravel/framework/pull/61281) clears it when a debounced job runs. Use 13.27+ if you rely on `maxWait`.
+
+</Callout>
+
+## Gotchas we hit in the lab
+
+**No `debounceId()` means one key for the whole class.** The default ID is an empty string. We dispatched `UpdateSearchIndexNoId` for products 1, 2 and 3. Only product 3 was indexed. That is the most dangerous mistake here, because nothing fails: two products silently miss their update.
+
+**Only the dispatch helpers debounce.** `Job::dispatch()` and `dispatch()` go through `PendingDispatch`, which takes the token. `Bus::dispatch(new Job)` and `Queue::push()` don't. In the lab, two `Bus::dispatch()` calls were queued with no delay and both ran.
+
+**The sync queue runs everything.** With `QUEUE_CONNECTION=sync` (the default in `phpunit.xml`), each dispatch runs immediately and holds the newest token at that moment. All three of our dispatches ran. Test the behaviour with the database queue and a real `queue:work`, like the tests below.
+
+**It can't be combined with `ShouldBeUnique`.** Dispatching a job that has both throws `LogicException: A debounced job cannot also implement ShouldBeUnique.` The same goes for listeners.
+
+**An explicit delay wins.** `UpdateSearchIndex::dispatch(3)->delay(5)` was queued for 5 seconds, not 30. It is still debounced: a newer dispatch replaces its token.
+
+**It fails open.** If the token is gone when the worker checks (eviction, `cache:clear`, a server pointed at another cache), the job runs. After `Cache::flush()`, both of our queued copies ran. That is the safe direction, so make the job idempotent. With several web servers, all of them must share one cache server, as the docs warn.
+
+**Superseded jobs still cost a pop.** The worker fetches each stale copy, checks the token and deletes it. Cheap, but a thousand dispatches still means a thousand rows to clean up.
+
+<Callout type="gotcha" title="Bus::fake() won't show the debounce">
+
+`Bus::fake()` records every dispatch. In the lab `Bus::assertDispatchedTimes(UpdateSearchIndex::class, 2)` passed for two dispatches. The token and the 30-second delay are set on each job, so you can assert on `$job->delay` and `$job->debounceOwner`, but which one would run is only decided by a worker.
+
+</Callout>
+
+## Where the token lives
+
+The key is `laravel_debounced_job:{class}:{debounceId}`, in your default cache store. Its TTL is ten times the window, with a 300-second minimum: our 30-second job's token was still there at second 299 and gone at second 301.
+
+To keep tokens out of a busy default store, return another one from `debounceVia()`:
+
+```php title="app/Jobs/UpdateSearchIndex.php"
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Support\Facades\Cache;
+
+public function debounceVia(): Repository
+{
+    return Cache::driver('redis');
+}
+```
+
+In the lab, a job returning `Cache::store('file')` wrote its token there and nothing to the array store. Child classes inherit the attribute too ([since 13.7.0](https://github.com/laravel/framework/pull/59795)): a subclass of `UpdateSearchIndex` debounced the same way.
+
+## Try it yourself
+
+<TryIt title="Watch three dispatches become one">
+
+```php
+// tests/Feature/DebounceTest.php (QUEUE_CONNECTION must not be sync)
+it('runs only the last dispatch', function () {
+    config(['queue.default' => 'database']);
+    $this->freezeTime();
+
+    UpdateSearchIndex::dispatch(42);
+    UpdateSearchIndex::dispatch(42);
+    UpdateSearchIndex::dispatch(42);
+
+    expect(DB::table('jobs')->count())->toBe(3);
+
+    $this->travel(31)->seconds();
+    $this->artisan('queue:work', ['--stop-when-empty' => true]);
+
+    expect(DB::table('jobs')->count())->toBe(0); // 1 ran, 2 deleted
+});
+```
+
+</TryIt>
+
+Add `RefreshDatabase` and the `jobs` table migration, and listen for `Illuminate\Queue\Events\JobDebounced` to count the dropped copies.
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ Replaces a hand-rolled cache token, a delay and a check in `handle()` |
+| How often you'll reach for it | ★★★★☆ Search reindexing, CRM and webhook syncs, "your doc changed" notifications, cache warming |
+| Risk if misused | ★★★☆☆ A missing `debounceId()` silently drops work for other records |
+| **Overall** | **4.5 / 5**: the right tool whenever "the latest state, once things settle" is what you want |
+
+## Recap
+
+- `#[DebounceFor(seconds)]` plus `debounceId()` on a queued job or listener: only the last dispatch in the window runs. Jobs since Laravel 13.6, listeners since 13.26.
+- Every dispatch is queued with the delay. The worker deletes stale copies and fires `JobDebounced`.
+- `maxWait` forces a run during endless bursts. Use 13.27+ so it resets after each run.
+- Always define `debounceId()`, dispatch with `Job::dispatch()` or `dispatch()`, test with a real queue, and keep it away from `ShouldBeUnique`.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version added debounced jobs?', a: 'Laravel 13.6.0, released 21 April 2026, from PR #59507. Queued event listeners can use DebounceFor since 13.26.0 (18 August 2026). It is not in Laravel 12.' },
+  { q: 'What is the difference between DebounceFor and ShouldBeUnique?', a: 'ShouldBeUnique keeps the first dispatch and refuses the rest at dispatch time. DebounceFor queues all of them and runs only the last one, after the window. The two cannot be combined on one job.' },
+  { q: 'Can I debounce at the dispatch site instead of with the attribute?', a: 'Not in Laravel 13.43. The attribute on the job or listener class is the only switch. A PR for fluent debounceFor() on PendingDispatch was closed without merging.' },
+  { q: 'Does it work with Redis, SQS and the database queue?', a: 'Yes. Debouncing uses the cache, not the queue driver. The queue only has to support delayed jobs. The sync queue runs every dispatch at once, so debouncing has no effect there.' },
+  { q: 'What happens if the cache is cleared?', a: 'The job fails open: when the token is missing, every queued copy runs. Make the job idempotent and point all servers at the same cache.' },
+]} />
+
+## Next steps
+
+- [Cache::withoutOverlapping() and Cache::funnel()](/laravel-cache-withoutoverlapping-funnel), when jobs may run but must not run at the same time
+- [Show a queued Laravel job in Vue](/laravel-vue-queued-job), to show progress for the job that does run
+- [Laravel Scout database engine with Vue](/laravel-scout-database-engine-vue), a natural place for a debounced reindex
+- [Laravel docs: debounced jobs](https://laravel.com/docs/13.x/queues#debounced-jobs)
+
+## Sources
+
+- [Laravel docs: debounced jobs](https://laravel.com/docs/13.x/queues#debounced-jobs)
+- [Laravel docs: debounced event listeners](https://laravel.com/docs/13.x/events#debounced-event-listeners)
+- [PR #59507: Add debounceable queued jobs](https://github.com/laravel/framework/pull/59507), in [Laravel v13.6.0](https://github.com/laravel/framework/releases/tag/v13.6.0) (21 April 2026)
+- [PR #59795: Allow the DebounceFor attribute to be inherited](https://github.com/laravel/framework/pull/59795), in [v13.7.0](https://github.com/laravel/framework/releases/tag/v13.7.0)
+- [PR #61169: Add debounceable queued listeners](https://github.com/laravel/framework/pull/61169), in [v13.26.0](https://github.com/laravel/framework/releases/tag/v13.26.0) (18 August 2026)
+- [PR #61281: Start a new max wait window after a debounced job runs](https://github.com/laravel/framework/pull/61281), in [v13.27.0](https://github.com/laravel/framework/releases/tag/v13.27.0)
+- [Source: `Illuminate\Bus\DebounceLock`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Bus/DebounceLock.php)
+- [Source: `Illuminate\Queue\CallQueuedHandler`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Queue/CallQueuedHandler.php)
