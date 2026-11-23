@@ -1,0 +1,14 @@
+flowchart LR
+  D1["`dispatch #1
+  token A`"] --> K[("`cache key
+  last token wins`")]
+  D2["`dispatch #2
+  token B`"] --> K
+  D3["`dispatch #3
+  token C`"] --> K
+  K --> W{"`Worker, 30 s later:
+  job token = cache token?`"}
+  W -- "A, B: no" --> X["`Deleted +
+  JobDebounced event`"]
+  W -- "C: yes" --> R["`handle() runs
+  once, latest data`"]
