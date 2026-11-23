@@ -1,0 +1,316 @@
+---
+id: 201
+title: "This week in Laravel & Inertia: AI SDK 1.4.1 and Laravel 12.73, Nov 23, 2026"
+seoTitle: "This week in Laravel & Inertia: AI SDK 1.4.1, 12.73 (Nov 23)"
+excerpt: "AI SDK 1.4.1 changes the OpenAI transcription default, reports failing sub-agents as failed tools and names bad API keys. Laravel 12.73 ships 12.x fixes."
+date: 2026-11-23T00:30:00Z
+snippet: "composer update laravel/ai laravel/framework"
+categories: [laravel]
+tags: [laravel, release, upgrade, testing]
+---
+Transcribing audio with OpenAI and calling `->diarize()`? After this week's `composer update`, that line throws before it sends a single byte. Laravel AI SDK **1.4.1** is a patch release, but it moves OpenAI transcription to a new default model, and that one doesn't do speakers.
+
+The rest of the week is good news. Failing sub-agents now look like failed tools, a wrong API key finally says so, and Laravel **12.73.0** brings last week's 13.43 security fixes plus a few 12.x-only follow-ups.
+
+<TLDR
+  audience="Laravel 12 and 13 developers using the Laravel AI SDK, or still running Laravel 12 in production"
+  learn={['The OpenAI transcription change in AI SDK 1.4.1 and how to keep diarization working', 'What a failing sub-agent looks like now, in your events and your error tracker', 'The new InvalidApiKeyException, ConversationTitleAgent and Gemini Decisions classification', 'The 12.x-only fixes in Laravel 12.73.0 on top of the 13.43 security fixes']}
+  tested="laravel/ai 1.4.0 → 1.4.1 on Laravel 13.42 · PHP 8.4 · Pest (5 tests: 401 → InvalidApiKeyException, throwing sub-agent, ConversationTitleAgent fake, gpt-transcribe + languages[], diarize() on the new default) · Laravel 12.72.0 → 12.73.0 (4 tests: EncodedParameter in query strings, array expires, Arr::except() with dotted keys, two whereNot() on one column). Anthropic, Gemini, Ollama and broadcast changes checked against the PRs, not run."
+>
+
+- **Laravel AI SDK 1.4.1**: OpenAI transcription now defaults to `gpt-transcribe`, which sends `languages[]` and **can't diarize**. `->diarize()` on the default throws a `LogicException`, so pass the old diarize model by name or switch provider.
+- A sub-agent that throws is now a **failed tool call**: `ToolFailed` fires, the model reads `The tool call failed: …`, and the exception is reported. A 401 throws `InvalidApiKeyException` (still a `RequestException`).
+- Also in 1.4.1: Gemini Decisions as a classification provider, a reusable `ConversationTitleAgent`, Anthropic `#[Strict]` tools and web search citations, and the full answer kept in stored conversations.
+- **Laravel 12.73.0** carries the same security fixes as 13.43 ([covered last week](/laravel-13-43-security-fixes-jsonschema-rules)), plus 12.x fixes for signed URLs with an array `expires`, `EncodedParameter` query strings and `exists`/`unique` rules with two `where()` on one column.
+
+</TLDR>
+
+## The week at a glance
+
+| Package | Version | Released (UTC) | Should you hurry? |
+|---|---|---|---|
+| `laravel/ai` | 1.4.1 | Nov 17 | Soon, and **check any OpenAI `->diarize()` call first** |
+| `laravel/framework` (12.x line) | 12.73.0 | Nov 17 | **Yes**, it carries security fixes |
+
+Laravel 13.43 and Reverb 1.14 came out the same day and have their own post: [Laravel 13.43: security fixes, JsonSchema::rules() and Reverb 1.14](/laravel-13-43-security-fixes-jsonschema-rules). Inertia, Wayfinder, Boost and Precognition had no new releases this week.
+
+## AI SDK 1.4.1: OpenAI transcription moves to gpt-transcribe
+
+OpenAI announced shutdowns for its older transcription models, so the SDK's OpenAI default moved from `gpt-4o-transcribe-diarize` to `gpt-transcribe` ([#1217](https://github.com/laravel/ai/pull/1217)). The new model takes a list of languages instead of one, and the SDK sends `->language('en')` as `languages[]` for you.
+
+The catch: `gpt-transcribe` doesn't support diarization. If you ask for speakers on the default model, 1.4.1 refuses before any request goes out.
+
+<CodeCompare before="laravel/ai 1.4.0" after="laravel/ai 1.4.1">
+
+```php title="app/Actions/TranscribeCall.php"
+use Laravel\Ai\Transcription;
+
+$transcript = Transcription::fromPath($recording)
+    ->diarize()
+    ->generate(provider: 'openai');
+
+// model: gpt-4o-transcribe-diarize
+// segments come back with speakers
+```
+
+```php title="app/Actions/TranscribeCall.php"
+use Laravel\Ai\Transcription;
+
+$transcript = Transcription::fromPath($recording)
+    ->diarize()
+    ->generate(provider: 'openai');
+
+// LogicException: OpenAI model [gpt-transcribe]
+// does not support diarization.
+```
+
+</CodeCompare>
+
+You have three ways out. Pass the old model by name (it works until OpenAI turns it off), set it as your default in `config/ai.php` under `providers.openai.models.transcription.default`, or move diarized jobs to a provider that still diarizes. The SDK's own error messages now point at ElevenLabs, Mistral or Gemini.
+
+```php title="app/Actions/TranscribeCall.php"
+$transcript = Transcription::fromPath($recording)
+    ->diarize()
+    ->generate(provider: 'openai', model: 'gpt-4o-transcribe-diarize'); // [!code highlight]
+```
+
+<Callout type="heads-up" title="This lands in a patch release">
+
+`composer update` happily installs 1.4.1 on a `^1.4` constraint. Search your code for `diarize(` before you deploy. Calls without diarization just switch model, and in our lab the request went out with `gpt-transcribe` and `languages[]=en`.
+
+</Callout>
+
+## A failing sub-agent is now a failed tool call
+
+Last week's 1.4.0 let agents survive a throwing tool. Sub-agents used as tools had their own older safety net: `AgentTool` caught the exception and returned the text `Agent failed: <message>` as a normal, **successful** result. So your listeners saw `ToolInvoked`, not `ToolFailed`, and a "tool status" badge in your UI showed green.
+
+1.4.1 removes that catch ([#1228](https://github.com/laravel/ai/pull/1228)). A sub-agent failure is now handled like any other tool's, in both `prompt()` and `stream()`:
+
+```php title="app/Ai/Agents/SupportLead.php"
+class SupportLead implements Agent, HasTools
+{
+    use Promptable;
+
+    public function instructions(): Stringable|string
+    {
+        return 'Answer support questions. Delegate research to the docs researcher.';
+    }
+
+    public function tools(): iterable
+    {
+        return [new DocsResearcher]; // an agent used as a tool
+    }
+}
+```
+
+```php title="tests/Feature/SubAgentFailureTest.php"
+SupportLead::fake([
+    new ToolCall('call-1', 'DocsResearcher', ['task' => 'Find the refund policy']),
+    'I could not reach the docs right now. Try again in a minute?',
+]);
+DocsResearcher::fake(fn () => throw new RuntimeException('Docs index is down.'));
+
+$response = (new SupportLead)->prompt('What is the refund policy?');
+
+$result = $response->steps->first()->toolResults[0];
+$result->failed; // true (1.4.0: false)
+$result->result; // "The tool call failed: Docs index is down."
+                 // (1.4.0: "Agent failed: Docs index is down.")
+```
+
+In our lab, `ToolFailed` fired, `ToolInvoked` didn't, and the run still ended with the model's apology. The sub-agent's own `AgentFailed` event still fires too.
+
+<Callout type="gotcha" title="Two things to check after updating">
+
+If your agent's instructions mention the text `Agent failed:`, change them to the new wording. And the sub-agent's exception now goes to `report()`, so expect new entries in Sentry or Flare that used to be swallowed.
+
+</Callout>
+
+## A 401 now says "check your API key"
+
+A missing or wrong key used to log only `HTTP request returned status code 401`. Now a 401 throws `InvalidApiKeyException` with the provider name in the message ([#1215](https://github.com/laravel/ai/pull/1215)):
+
+```text
+Missing or invalid API key for AI provider [openai]. HTTP request returned status code 401: ...
+```
+
+It extends `RequestException`, so your existing catch blocks keep working. If you want to treat it on its own, catch it first:
+
+```php title="app/Http/Controllers/SupportChatController.php"
+use Illuminate\Http\Client\RequestException;
+use Laravel\Ai\Exceptions\InvalidApiKeyException;
+
+try {
+    $response = (new SupportAgent)->prompt($message);
+} catch (InvalidApiKeyException $e) {
+    report($e); // a config problem, not a user problem
+    return back()->with('status', 'The assistant is offline for maintenance.');
+} catch (RequestException $e) {
+    return back()->with('status', 'Something went wrong, please try again.');
+}
+```
+
+Gemini and xAI don't use a 401 for bad keys (Gemini sends 403 or 400, xAI sends 400), so their errors are unchanged.
+
+## Title a conversation you created yourself
+
+`RememberConversation` titles the conversations it creates. If your app creates the conversation row first (to show it in a sidebar before the first reply, for example), it never got a title. Title generation now lives in `ConversationTitleAgent`, which you can call and replace ([#1229](https://github.com/laravel/ai/pull/1229)):
+
+```php title="app/Http/Controllers/ConversationController.php"
+use Laravel\Ai\Agents\ConversationTitleAgent;
+
+$conversation->update([
+    'title' => app(ConversationTitleAgent::class)->prompt($message)->text,
+]);
+```
+
+Want different titles? Extend it and bind your class in a service provider:
+
+```php title="app/Ai/Agents/SupportTitleAgent.php"
+use Laravel\Ai\Agents\ConversationTitleAgent;
+use Laravel\Ai\Attributes\UseSmartestModel;
+
+#[UseSmartestModel]
+class SupportTitleAgent extends ConversationTitleAgent
+{
+    public function instructions(): string
+    {
+        return 'Title this support thread in 3-6 words, naming the product area first.';
+    }
+}
+
+// AppServiceProvider::register()
+$this->app->bind(ConversationTitleAgent::class, SupportTitleAgent::class);
+```
+
+PHP doesn't inherit attributes, so put a model attribute on your subclass or it runs on the provider's default model. In tests, `ConversationTitleAgent::fake(['Refund Policy Question'])` gives you a fixed title, and a faked agent no longer spends one of its fake responses on the title.
+
+## Gemini Decisions for classification
+
+Classification asks typed questions (yes/no, choice, score) and returns probabilities. Gemini is now a classification provider through Google's Decisions API, with `gemini-decision-1` as the default model ([#1231](https://github.com/laravel/ai/pull/1231)). It takes images too, including HEIC, HEIF, BMP and TIFF on top of the usual JPEG, PNG, GIF and WebP:
+
+```php title="app/Actions/InspectReturnPhoto.php"
+use Laravel\Ai\Classification;
+use Laravel\Ai\Classification\Boolean;
+use Laravel\Ai\Files\Image;
+
+$result = Classification::of('Inspect the product in this photo.', [
+    Image::fromPath($photo),
+])
+    ->question('damaged', new Boolean('Does the product have visible damage?'))
+    ->classify(provider: 'gemini');
+
+if ($result['damaged']->isTrue(threshold: 0.8)) {
+    // send the return to a human
+}
+```
+
+Classification is still marked experimental in the SDK. We checked this against the PR, not against the live API.
+
+## The rest of 1.4.1
+
+- **Stored conversations keep the whole answer** ([#1222](https://github.com/laravel/ai/pull/1222)). When the model wrote its answer in the same step as a tool call and the run ended on an empty step, `prompt()` stored an empty `content`. The store now joins the text of every step, like `stream()` already did.
+- **Anthropic `#[Strict]` tools** ([#1219](https://github.com/laravel/ai/pull/1219)) now send `strict: true`, so Claude can't call them with input outside the schema. Anthropic caps a request at 20 strict tools.
+- **Anthropic web search results show up as citations** ([#1214](https://github.com/laravel/ai/pull/1214)), in `prompt()` and as `Citation` events in `stream()`.
+- **Anthropic attachment provider options** ([#1220](https://github.com/laravel/ai/pull/1220)): `withProviderOptions()` on a document or image now reaches Claude, so `cache_control` and `citations` work.
+- **Anthropic code execution keeps its container** across tool loop steps ([#1213](https://github.com/laravel/ai/pull/1213)), so a file written in step one is still there in step two.
+- **Gemini `store: true` runs** continue with `previous_interaction_id` instead of resending the whole history on every tool step ([#1189](https://github.com/laravel/ai/pull/1189)).
+- **Ollama streams run every tool call** ([#1218](https://github.com/laravel/ai/pull/1218)). Before, a streamed reply with three calls ran only the last one, with the arguments merged.
+- **`broadcastOnQueue()` `catch()` callbacks run** when the job fails ([#1223](https://github.com/laravel/ai/pull/1223)). They were silently skipped.
+- **OpenAI image moderation** can be set to `auto` with `withProviderOptions(['moderation' => 'auto'])` ([#1226](https://github.com/laravel/ai/pull/1226)). The default stays `low`.
+- **Structured output** survives a code fence with broken backticks ([#1216](https://github.com/laravel/ai/pull/1216)), so `$response->structured` isn't `[]` when the text holds valid JSON.
+
+## Laravel 12.73.0: the 13.43 fixes, for 12.x
+
+12.73.0 is the 12.x twin of 13.43: the mass assignment, component attribute XSS, debug page XSS and empty-field file validation fixes are all in it. We covered those, with code, in [the 13.43 post](/laravel-13-43-security-fixes-jsonschema-rules#security-fixes-upgrade-now). `JsonSchema::rules()` came along too ([#62501](https://github.com/laravel/framework/pull/62501)).
+
+A few more are backports from 13.x that the 13.43 post didn't cover. Worth knowing if you're on 12.x:
+
+| Fix | What changed in 12.73 | PR |
+|---|---|---|
+| Array `expires` | A signed URL whose `expires` is an array no longer counts as "never expires" | [#62411](https://github.com/laravel/framework/pull/62411) |
+| `EncodedParameter` | Last week's 12.72 encoded it again: `?q%3D000001` instead of `?q=000001`. Fixed | [#62417](https://github.com/laravel/framework/pull/62417) |
+| `Arr::forget()` | `except(['users.name', 'id'])` removed `users.id` and kept the top-level `id`. Fixed, and `$request->except()` uses it | [#62410](https://github.com/laravel/framework/pull/62410) |
+| `exists` / `unique` | Two `where()` or `whereNot()` on the same column kept only the last one | [#62463](https://github.com/laravel/framework/pull/62463), [#62476](https://github.com/laravel/framework/pull/62476) |
+| Wildcard rules | `items.*` rules now also run on an element whose key is an empty string | [#62409](https://github.com/laravel/framework/pull/62409) |
+| PostgreSQL | `Schema::dropAllTables()` (so `db:wipe` and `migrate:fresh`) skips tables owned by extensions instead of failing | [#62477](https://github.com/laravel/framework/pull/62477) |
+
+The `whereNot()` one is the sneaky kind. This rule let a banned user through on 12.72, because the second condition replaced the first:
+
+```php title="app/Http/Requests/InviteMemberRequest.php"
+use Illuminate\Validation\Rule;
+
+public function rules(): array
+{
+    return [
+        'email' => [
+            'required',
+            Rule::exists('members', 'email')
+                ->whereNot('status', 'banned')   // 12.72: dropped
+                ->whereNot('status', 'deleted'),
+        ],
+    ];
+}
+```
+
+<TryIt title="Try it yourself">
+
+Run this in a Laravel 12 app before and after `composer update laravel/framework`:
+
+```php title="tests/Feature/Laravel1273Test.php"
+use Illuminate\Routing\EncodedParameter;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Route;
+
+it('builds the query string you asked for', function () {
+    Route::get('/search', fn () => 'ok')->name('search');
+    Route::getRoutes()->refreshNameLookups();
+
+    expect(route('search', new EncodedParameter('q=000001'), false))->toBe('/search?q=000001');
+});
+
+it('forgets the top-level key after a dotted one', function () {
+    $input = ['users' => ['name' => 'Joe', 'id' => 1], 'id' => 99];
+
+    expect(Arr::except($input, ['users.name', 'id']))->toBe(['users' => ['id' => 1]]);
+});
+```
+
+Both fail on 12.72.0 and pass on 12.73.0.
+
+</TryIt>
+
+## Upgrade notes
+
+- **Laravel AI SDK:** `composer update laravel/ai` to 1.4.1. Before deploying, search for `diarize(` on OpenAI and pass `model: 'gpt-4o-transcribe-diarize'` or move those jobs to another provider. Update agent instructions that mention `Agent failed:`, and expect sub-agent exceptions in your error tracker.
+- **Laravel 12:** update to 12.73.0 for the security fixes. If you relied on `EncodedParameter` in a query string, 12.73 restores the 12.71 output. If a fluent `exists`/`unique` rule chains two conditions on one column, it now enforces both, which can reject input that passed before.
+- **Laravel 13:** you're on 13.43 already if you followed last week's post. Nothing new here.
+
+## Recap
+
+- AI SDK 1.4.1 moves OpenAI transcription to `gpt-transcribe`: `languages[]` instead of `language`, and no diarization on the default.
+- Failing sub-agents now fire `ToolFailed`, return `The tool call failed: …` to the model and get reported.
+- `InvalidApiKeyException`, `ConversationTitleAgent`, Gemini Decisions classification and a batch of Anthropic fixes round out the patch.
+- Laravel 12.73.0 brings the 13.43 security fixes to 12.x plus signed URL, `EncodedParameter`, `Arr::forget()` and `exists`/`unique` fixes.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Does AI SDK 1.4.1 break OpenAI transcription?', a: 'Only diarization. Plain transcription switches to gpt-transcribe and keeps working, with your language sent as languages[]. A call to diarize() on the default OpenAI model now throws a LogicException, so pass model: gpt-4o-transcribe-diarize or use ElevenLabs, Mistral or Gemini for speakers.' },
+  { q: 'Why do I suddenly see sub-agent errors in Sentry?', a: 'Before 1.4.1, AgentTool caught the exception and returned it as a normal tool result, so it was never reported. Now it goes through report() like any other failing tool. The parent run still continues.' },
+  { q: 'Do I need to change my catch blocks for InvalidApiKeyException?', a: 'No. It extends RequestException, so existing catches still work. Catch it first only if you want to handle a bad key differently.' },
+  { q: 'I already updated to Laravel 13.43. Is 12.73 relevant to me?', a: 'No. 12.73.0 is the Laravel 12 branch. Laravel 13 got the same fixes in 13.43 or earlier.' },
+  { q: 'Is 12.73 a security release?', a: 'Yes. It carries the same mass assignment, XSS and file validation fixes as 13.43. Update this week.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.43: security fixes, JsonSchema::rules() and Reverb 1.14](/laravel-13-43-security-fixes-jsonschema-rules)
+- [This week in Laravel & Inertia, Nov 16: Laravel 12.72, AI SDK 1.4 and Reverb 1.13](/this-week-in-laravel-inertia-2026-11-16)
+- [Call the Laravel AI SDK from a Vue page](/laravel-ai-sdk-vue)
+- [Laravel docs: AI SDK](https://laravel.com/framework/docs/13.x/ai-sdk)
+
+## Sources
+
+- [laravel/ai v1.4.1 release notes](https://github.com/laravel/ai/releases/tag/v1.4.1): [#1217](https://github.com/laravel/ai/pull/1217), [#1228](https://github.com/laravel/ai/pull/1228), [#1215](https://github.com/laravel/ai/pull/1215), [#1229](https://github.com/laravel/ai/pull/1229), [#1231](https://github.com/laravel/ai/pull/1231), [#1222](https://github.com/laravel/ai/pull/1222), [#1219](https://github.com/laravel/ai/pull/1219), [#1214](https://github.com/laravel/ai/pull/1214), [#1220](https://github.com/laravel/ai/pull/1220), [#1213](https://github.com/laravel/ai/pull/1213), [#1189](https://github.com/laravel/ai/pull/1189), [#1218](https://github.com/laravel/ai/pull/1218), [#1223](https://github.com/laravel/ai/pull/1223), [#1226](https://github.com/laravel/ai/pull/1226), [#1216](https://github.com/laravel/ai/pull/1216)
+- [laravel/framework v12.73.0 release notes](https://github.com/laravel/framework/releases/tag/v12.73.0): [#62411](https://github.com/laravel/framework/pull/62411), [#62417](https://github.com/laravel/framework/pull/62417), [#62410](https://github.com/laravel/framework/pull/62410), [#62463](https://github.com/laravel/framework/pull/62463), [#62476](https://github.com/laravel/framework/pull/62476), [#62409](https://github.com/laravel/framework/pull/62409), [#62477](https://github.com/laravel/framework/pull/62477), [#62501](https://github.com/laravel/framework/pull/62501)
