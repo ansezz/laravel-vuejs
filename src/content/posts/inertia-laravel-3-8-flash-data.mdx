@@ -1,0 +1,274 @@
+---
+id: 204
+title: "inertia-laravel 3.8: forgetFlashed() and toasts that survive a deploy"
+seoTitle: "inertia-laravel 3.8: forgetFlashed() and flash data fixes"
+excerpt: "inertia-laravel 3.8 adds Inertia::forgetFlashed() and stops flash data from vanishing on a 409 after a deploy, on empty responses and on Inertia::location(). Tested."
+date: 2026-11-24T00:30:00Z
+snippet: "Inertia::forgetFlashed('toast')->render('Welcome')"
+categories: [laravel, vuejs]
+tags: [inertia, laravel, vuejs, release]
+---
+You ship a deploy. A user who had the app open clicks **Save**, the write works, and the "Saved." toast never shows up. They click Save again. Now you have two posts. inertia-laravel **3.8** fixes that lost toast, plus two other places where flash data quietly went missing. It also adds `Inertia::forgetFlashed()`, so you can drop one flashed key before the page renders.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia 3 who use Inertia::flash() (the Vue starter kit toast does)"
+  learn={['Why the toast disappeared after a deploy, and how 3.8 brings it back', 'How `Inertia::forgetFlashed()` removes one flashed key (enums and dot notation work)', 'The two other flash fixes: empty responses and `Inertia::location()`', 'What to check when you update']}
+  tested="Laravel 13.43 · inertia-laravel 3.8.0 (and 3.7.0 for the before) · Pest 4 · PHP 8.4"
+>
+
+- **Deploy fix (#934).** When a stale tab triggers the asset-version `409`, the flash data is now put back in the session, so the full page reload still gets the toast. In our lab, all three preservation tests fail on 3.7.0 and pass on 3.8.0.
+- **New API (#935).** `Inertia::forgetFlashed('toast')` removes keys from the flash data before it reaches the page. It takes a string, an array, enum cases and dot notation, returns the factory so you can chain `->render()`, and does not make the remaining keys live longer.
+- **Two more fixes (#934, #936).** Flash data carried over from the previous request now survives an empty response that the middleware turns into `back()`, and an `Inertia::location()` response.
+- **PHP 8.6 (#929).** The package's CI now runs on PHP 8.6 with Laravel 13. Nothing to change in your app. Update with `composer update inertiajs/inertia-laravel`.
+
+</TLDR>
+
+## What's new at a glance
+
+| Change | PR | What you notice |
+|---|---|---|
+| Flash data kept on asset version change | [#934](https://github.com/inertiajs/inertia-laravel/pull/934) | The toast shows after the post-deploy full page reload |
+| Flash data kept when an empty response becomes `back()` | [#934](https://github.com/inertiajs/inertia-laravel/pull/934) | A carried-over toast is no longer eaten by a "return nothing" action |
+| `Inertia::forgetFlashed()` | [#935](https://github.com/inertiajs/inertia-laravel/pull/935) | Remove one flashed key without pulling them all |
+| Flash data kept on `Inertia::location()` | [#936](https://github.com/inertiajs/inertia-laravel/pull/936) | A toast survives the full page visit to the new location |
+| PHP 8.6 in the test matrix | [#929](https://github.com/inertiajs/inertia-laravel/pull/929) | Nothing. The `php: ^8.2` constraint is unchanged |
+
+inertia-laravel v3.8.0 was released on November 23, 2026 at 20:34 UTC. It is a server-only release: there is no new `@inertiajs/vue3` version, and the client code you already have handles everything below. If flash data is new to you, start with [Show a saved message in Vue](/laravel-vue-flash), which covers `Inertia::flash()` and the starter kit toast.
+
+## The toast that vanished after a deploy
+
+Here is the sequence that lost the toast on 3.7 and earlier. The tab still runs the old JavaScript bundle, so every request carries the old `X-Inertia-Version` header.
+
+1. The user submits the form. Inertia doesn't version-check a `POST`, so your controller runs, calls `Inertia::flash()` and redirects.
+2. The browser follows the redirect with a `GET` that has the old version. The middleware renders the page, which **pulls** the flash data out of the session, then notices the version mismatch.
+3. The middleware throws that rendered page away and answers `409` with `X-Inertia-Location`, so the client does a full page load to fetch the new assets. That's the normal [409 after a deploy](/deploy-laravel-vue#409-means-new-assets).
+4. The full page load renders the page again. The flash data was already pulled in step 2, so `page.flash` is empty. No toast.
+
+<Diagram
+  name="inertia-flash-version-change"
+  alt="A stale tab posts a form. The controller flashes a toast and redirects. The redirected GET carries the old asset version, so the middleware answers 409 with X-Inertia-Location. inertia-laravel 3.8 puts the pulled flash data back in the session first. The browser does a full page load, the page gets the flash data, and the starter kit's flash listener shows the toast."
+  caption="On 3.7 the flash data was gone by the time the full page load arrived. 3.8 puts it back."
+/>
+
+In 3.8, `Response` remembers the flash data it pulled in a request attribute, and the default `onVersionChange()` flashes it back into the session before returning the 409. The next request, the full page load, renders it as usual. Nothing changes in your controllers:
+
+```php title="app/Http/Controllers/PostController.php"
+use Inertia\Inertia;
+
+public function store(StorePostRequest $request): RedirectResponse
+{
+    Post::create($request->validated());
+
+    Inertia::flash('toast', ['type' => 'success', 'message' => 'Saved.']);
+
+    return to_route('posts.index');
+}
+```
+
+And on the client, nothing changes either. On an initial page load, `@inertiajs/core` fires the global `flash` event when `page.flash` isn't empty, and the Vue starter kit's `initializeFlashToast()` listens to exactly that event. So the restored toast shows on the fresh page, once. Our lab checks that the next visit has no `flash` key.
+
+<Callout type="gotcha" title="onFlash callbacks don't survive a reload">
+
+The fix restores the **data**, not your JavaScript. A per-visit callback like `router.post('/posts', data, { onFlash })` belonged to the old page and is gone after the full page load. Handle anything that must work after a deploy in a global listener (`router.on('flash', ...)`) or by reading `page.flash`, like the starter kit does.
+
+</Callout>
+
+### If you override onVersionChange()
+
+Some apps override `onVersionChange()` in `HandleInertiaRequests` to return the rendered page instead of forcing a reload. That page already contains the flash data, and it still does in 3.8: the upstream test suite covers that case. If your override builds its own response, look at the new parent method before you copy it: the extra lines that restore the flash data only run in the default implementation.
+
+A flash you pulled yourself with `Inertia::pullFlashed()` is **not** restored on a version change. That's deliberate: you took it, so you own it.
+
+## Inertia::forgetFlashed(): drop one key
+
+Until now you could add flash data with `Inertia::flash()`, read it with `Inertia::getFlashed()` or take all of it with `Inertia::pullFlashed()`. There was no clean way to remove a single key. 3.8 adds one:
+
+```php
+Inertia::forgetFlashed('toast');                    // one key
+Inertia::forgetFlashed(['toast', 'highlight']);     // several
+Inertia::forgetFlashed(FlashKey::Toast);            // enum cases, like flash()
+Inertia::forgetFlashed('toast.type');               // dot notation reaches into arrays
+```
+
+It returns the `ResponseFactory`, so it chains straight into `render()`, the same way `flash()` does. It works on flash data from the current request and on data carried over from the previous one (the redirect that brought the user here).
+
+### A page that already says it
+
+After registration, the controller flashes "Account created." and redirects to a welcome page. The welcome page has its own big "Welcome aboard" header, so a toast on top of it is noise. Forget it on that page only:
+
+<CodeCompare before="inertia-laravel 3.7" after="inertia-laravel 3.8">
+
+```php title="app/Http/Controllers/WelcomeController.php"
+public function __invoke(): Response
+{
+    // pullFlashed() takes everything, so put back what you want to keep
+    $flash = Inertia::pullFlashed();
+    unset($flash['toast']);
+
+    if ($flash !== []) {
+        Inertia::flash($flash);
+    }
+
+    return Inertia::render('Welcome');
+}
+```
+
+```php title="app/Http/Controllers/WelcomeController.php"
+public function __invoke(): Response
+{
+    return Inertia::forgetFlashed('toast')->render('Welcome');
+}
+```
+
+</CodeCompare>
+
+The "before" works, but it has a catch: `Inertia::flash()` flashes again, so whatever you put back lives for one more request. `forgetFlashed()` writes the remaining data back **without** re-flashing it. Our lab confirms it: forget a key on an export endpoint, and the other keys are still gone on the visit after that, exactly like normal flash data.
+
+### Drop a highlight that would point at nothing
+
+Say `store()` flashes the new post's ID so the list can highlight its row. If the user lands on a filtered list where that post isn't visible, the highlight points at nothing. Drop just that key and keep the toast:
+
+```php title="app/Http/Controllers/PostController.php"
+public function index(Request $request): Response
+{
+    $posts = Post::query()
+        ->when($request->query('status'), fn ($query, $status) => $query->where('status', $status))
+        ->latest()
+        ->paginate(20);
+
+    $highlight = Inertia::getFlashed()['highlight'] ?? null;
+
+    if ($highlight !== null && ! $posts->contains('id', $highlight)) {
+        Inertia::forgetFlashed('highlight');
+    }
+
+    return Inertia::render('posts/Index', ['posts' => $posts]);
+}
+```
+
+<Callout type="tip" title="dot notation removes part of an array">
+
+`forgetFlashed()` uses `Arr::forget()` under the hood. A literal key that contains a dot (`'user.name'`) is removed as is. Otherwise the dot walks into the array: `forgetFlashed('toast.type')` leaves `['message' => 'Saved.']` behind, a toast without a type. The starter kit calls `toast[data.type](...)`, so that half-toast would break. Forget the whole `toast` key instead.
+
+</Callout>
+
+If you forget the last key, the `flash` key disappears from the page object entirely, so `page.flash` is an empty object on the client. Calling it when nothing was flashed is a no-op.
+
+### Server or client?
+
+| You want to... | Use | Where |
+|---|---|---|
+| Remove one key before the page renders | `Inertia::forgetFlashed('key')` | Controller, middleware |
+| Read and remove everything | `Inertia::pullFlashed()` | Controller |
+| Read without removing | `Inertia::getFlashed()` | Controller |
+| Change flash data already on the page | `router.flash((current) => ...)` | Vue |
+
+The client-side `router.flash()` callback (Inertia 3) is for data that already arrived, such as clearing a toast after the user dismisses it. `forgetFlashed()` keeps the key from being sent at all.
+
+## The two other flash fixes
+
+Both fixes are about flash data that was carried over from the **previous** request and hadn't been shown yet.
+
+**Empty responses.** If an Inertia action returns nothing (a `void` controller method), the middleware turns the empty `200` into a redirect back (`onEmptyResponse()`). Redirects returned from a controller already reflashed the session. This one didn't, so carried-over flash data died here. In 3.8 the middleware reflashes when the empty response becomes a redirect.
+
+```php title="routes/web.php"
+// The toast from the previous save now survives this round trip.
+Route::put('/posts/order', function (Request $request) {
+    foreach ($request->input('ids', []) as $position => $id) {
+        Post::whereKey($id)->update(['position' => $position]);
+    }
+});
+```
+
+**`Inertia::location()`.** A location response is a `409` with an `X-Inertia-Location` header, and the client follows it with a full page visit. The middleware now treats it like a redirect and reflashes, so the toast reaches the new page. A plain `200` that happens to carry the same header (a file export, say) doesn't count: the upstream tests check that its flash data is not kept.
+
+```php title="app/Http/Controllers/BillingController.php"
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
+
+public function show(): SymfonyResponse
+{
+    // Full page visit to a non-Inertia page. The flashed toast comes along.
+    return Inertia::location(route('billing.portal'));
+}
+```
+
+## What we tested
+
+We copied our Inertia 3.11 lab, wrote the tests against inertia-laravel **3.7.0**, then updated to **3.8.0** with Laravel 13.43. The test file `tests/Feature/InertiaLaravel38FlashTest.php` has 10 tests and 65 assertions:
+
+- `forgetFlashed()` with a carried-over key, an array of enum cases, dot notation, the no-op case, and the "doesn't extend the lifetime" case.
+- The deploy case: a `POST`, a `GET` with an old `X-Inertia-Version` (409), then a full page load that `hasFlash('toast.message', 'Saved.')`, and a visit after that with no `flash` key.
+- The empty response and `Inertia::location()` cases.
+- The old pull-and-reflash workaround, to prove the remaining keys really do live one request longer.
+
+On 3.7.0 the nine new-behaviour tests fail (five because `forgetFlashed()` doesn't exist, the other four because the flash data is gone). On 3.8.0 all ten pass. The rest of the lab suite has the same results before and after the update.
+
+<TryIt title="Check the deploy case in your app">
+
+```php title="tests/Feature/FlashAfterDeployTest.php"
+use Inertia\Testing\AssertableInertia as Assert;
+
+it('keeps the toast when the asset version changed', function () {
+    config()->set('app.asset_url', 'https://cdn.example.com/new-build');
+
+    $this->post('/posts', ['title' => 'Hello'], ['X-Inertia' => 'true'])
+        ->assertRedirect('/posts');
+
+    $this->get('/posts', ['X-Inertia' => 'true', 'X-Inertia-Version' => 'old-build'])
+        ->assertStatus(409);
+
+    $this->get('/posts')->assertInertia(fn (Assert $page) => $page
+        ->hasFlash('toast.message', 'Saved.'));
+});
+```
+
+Run it with `php artisan test --filter=FlashAfterDeploy`. Setting `app.asset_url` changes the version the default `version()` method returns, which is the easiest way to fake a deploy in a test.
+
+</TryIt>
+
+## Upgrade notes
+
+<Steps>
+
+1. **Update the package.** `composer update inertiajs/inertia-laravel` (or `composer require inertiajs/inertia-laravel:^3.8`). No client update is needed.
+2. **Check custom `onVersionChange()` overrides.** If yours returns its own response, compare it with the new parent method, or call `parent::onVersionChange()` to keep the flash restore.
+3. **Replace pull-and-reflash workarounds** with `Inertia::forgetFlashed()`. They kept the remaining keys alive one request longer than you probably meant.
+4. **Nothing breaks.** No signatures changed. PHP 8.6 support is CI coverage: the `php: ^8.2` constraint is the same as before.
+
+</Steps>
+
+## Recap
+
+- After a deploy, the asset-version 409 no longer eats the toast: 3.8 puts the pulled flash data back for the full page load.
+- `Inertia::forgetFlashed()` removes keys (strings, arrays, enums, dot notation) without extending the life of the rest.
+- Carried-over flash data now survives empty responses and `Inertia::location()`.
+- Per-visit `onFlash` callbacks still can't survive a full page load. Use a global `flash` listener.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Do I need a new @inertiajs/vue3 version for this?', a: 'No. inertia-laravel 3.8 is a server-only release. The client already fires the global `flash` event on the initial page load, which is what shows the restored toast.' },
+  { q: 'What is the difference between forgetFlashed() and pullFlashed()?', a: '`pullFlashed()` returns all flash data and removes it. `forgetFlashed()` removes only the keys you name, returns the response factory so you can chain `render()`, and leaves the rest to age out normally.' },
+  { q: 'Can I forget a nested value inside a flashed array?', a: 'Yes, dot notation works (`forgetFlashed(\'toast.type\')`). Be careful with the starter kit toast: it needs both `type` and `message`, so forget the whole `toast` key.' },
+  { q: 'Why does my onFlash callback still not run after a deploy?', a: 'The 409 forces a full page load, so the JavaScript that registered the per-visit callback is gone. 3.8 restores the flash data, not the callback. Use `router.on(\'flash\')` or read `page.flash`.' },
+  { q: 'Does inertia-laravel 3.8 require PHP 8.6?', a: 'No. The package still requires PHP 8.2 or newer. PR #929 adds PHP 8.6 (with Laravel 13) to its test matrix.' },
+]} />
+
+## Next steps
+
+- [Show a saved message in Vue](/laravel-vue-flash): `Inertia::flash()`, the starter kit toast and `assertInertiaFlash`.
+- [Deploy Laravel and Vue: 409 means new assets](/deploy-laravel-vue#409-means-new-assets): why stale tabs get a 409.
+- [Inertia 3.11 live props](/inertia-3-11-live-props): the previous Inertia release we covered.
+- [Inertia docs: flash data](https://inertiajs.com/docs/v3/data-props/flash-data)
+
+## Sources
+
+- [inertia-laravel v3.8.0 release notes](https://github.com/inertiajs/inertia-laravel/releases/tag/v3.8.0)
+- [Full diff v3.7.0...v3.8.0](https://github.com/inertiajs/inertia-laravel/compare/v3.7.0...v3.8.0)
+- [PR #929: support for PHP 8.6](https://github.com/inertiajs/inertia-laravel/pull/929)
+- [PR #934: preserve flash data on asset version changes and empty responses](https://github.com/inertiajs/inertia-laravel/pull/934)
+- [PR #935: add `Inertia::forgetFlashed()`](https://github.com/inertiajs/inertia-laravel/pull/935)
+- [PR #936: preserve flash data on `Inertia::location()` responses](https://github.com/inertiajs/inertia-laravel/pull/936)
+- [Inertia docs: flash data](https://inertiajs.com/docs/v3/data-props/flash-data)
+- [Inertia docs: asset versioning](https://inertiajs.com/docs/v3/advanced/asset-versioning)
+- [Laravel Vue starter kit (`initializeFlashToast`)](https://github.com/laravel/vue-starter-kit)

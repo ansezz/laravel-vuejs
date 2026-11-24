@@ -1,0 +1,15 @@
+flowchart TD
+  A["`**Stale tab**
+  POST /posts
+  old X-Inertia-Version`"] -->|"controller runs"| B["`**Inertia::flash('toast')**
+  redirect to /posts`"]
+  B -->|"GET /posts, old version"| C["`**Middleware**
+  renders page, pulls flash
+  version mismatch`"]
+  C --> D["`**inertia-laravel 3.8**
+  puts the flash back
+  409 + X-Inertia-Location`"]
+  D -->|"full page load"| E["`**GET /posts**
+  page.flash.toast`"]
+  E -->|"initial flash event"| F["`**Toast: Saved.**
+  shown once`"]
