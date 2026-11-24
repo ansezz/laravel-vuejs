@@ -1,0 +1,11 @@
+flowchart LR
+  A["`First visit
+  with SSR`"] --> B["`Server HTML
+  has the fallback`"]
+  B --> C["`Hydration
+  paints the same fallback`"]
+  C --> D["`onMounted
+  renders the children`"]
+  E["`Later Inertia visit
+  or no SSR`"] --> F["`Children
+  immediately`"]

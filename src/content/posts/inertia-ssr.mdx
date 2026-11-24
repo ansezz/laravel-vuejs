@@ -4,7 +4,7 @@ title: "Server-render a Laravel and Vue Inertia app"
 excerpt: "Public pages that need HTML on the first response use the SSR bundle and a process that stays up. An app that is entirely behind login can skip it."
 description: "Server-render Inertia with npm run build:ssr, inertia:start-ssr, and a Vue page that does not read window during setup."
 seoTitle: "Inertia server rendering"
-updated: 2026-11-10T12:00:00Z
+updated: 2026-11-24T01:00:00Z
 date: 2026-10-10T07:50:00Z
 snippet: "npm run build:ssr"
 categories: [laravel, vuejs]
@@ -100,6 +100,12 @@ onMounted(() => {
 
 </CodeCompare>
 
+<Callout type="tip" title="Wrapping a third-party widget">
+
+If a chart or map reads `window` while it renders, wrap it in [`<WhenMounted>`](/inertia-whenmounted-vue) rather than turning SSR off for the page. Move *your* `window` reads into `onMounted` as well.
+
+</Callout>
+
 <Callout type="heads-up" title="Pinia and SSR">
 
 Pinia has the same constraint. Create the store inside the existing `withApp` callback, not at module scope, so two SSR requests do not share one store. That callback is the [Pinia guide](/pinia-laravel-inertia). A manual `setup` callback turns off the Vite plugin's SSR wiring.
@@ -146,6 +152,7 @@ The supervise step on a VPS, `php artisan optimize`, and the queue are the deplo
 
 - [Deploy a Laravel + Vue app](/deploy-laravel-vue): supervise the SSR process next to the queue.
 - [Pinia with Laravel and Inertia](/pinia-laravel-inertia): SSR-safe stores.
+- [Inertia WhenMounted](/inertia-whenmounted-vue): keep SSR for the page and mount a chart only in the browser.
 - [Set the page title in Inertia and Vue](/inertia-vue-document-title): titles that land in the SSR HTML.
 - [Inertia docs: server-side rendering](https://inertiajs.com/docs/v3/advanced/server-side-rendering)
 
