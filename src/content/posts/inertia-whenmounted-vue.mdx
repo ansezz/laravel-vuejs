@@ -1,0 +1,206 @@
+---
+id: 203
+title: "Inertia WhenMounted: SSR the page, mount the chart"
+excerpt: "Keep Inertia SSR on and wrap browser-only Vue widgets in WhenMounted. Fallback in the first HTML, children after mount. Inertia 3.8+. 11 lab tests."
+date: 2026-11-24T01:00:00Z
+snippet: "<WhenMounted>"
+categories: [vuejs, laravel]
+tags: [inertia, vuejs, laravel]
+---
+You turned on Inertia SSR, then dropped a sales chart onto the dashboard. The chart reads `window` to size itself, the server render throws, and Inertia falls back to an empty shell. The first HTML — the one link previews and search engines see — goes blank. You do not have to turn SSR off for the whole page.
+
+<TLDR
+  audience="Laravel + Vue developers on Inertia 3 with SSR, and a chart, map or editor that needs the browser"
+  learn={['What `<WhenMounted>` actually does (it is not a deferred prop)', 'When the fallback appears, and when children render immediately', 'The two ways window access still crashes SSR even inside WhenMounted']}
+  tested="Laravel 13.43 · inertia-laravel 3.7 · @inertiajs/vue3 3.11.0 · Vue 3.5 · vue/server-renderer + jsdom (11 tests)"
+>
+
+- `<WhenMounted>` shows a `fallback` slot during SSR and the first hydration paint, then its children after the component mounts in the browser. It shipped in Inertia 3.8.0 (1 October 2026).
+- It does not load props. Use `<Deferred>` for slow data and `<WhenVisible>` for blocks below the fold. Use `<WhenMounted>` for widgets that need `window` or `document`.
+- Vue slots are lazy, so a child that reads `window` in `setup` is safe inside the default slot. The same read in the page's own `<script setup>`, or at import time, still crashes the server render.
+- Apps without SSR, and later client-side Inertia visits, render the children immediately. The wrapped module is still imported on the server: WhenMounted does not tree-shake it out of the SSR bundle.
+
+</TLDR>
+
+## What WhenMounted is, and what it is not
+
+`<WhenMounted>` is a Vue component from `@inertiajs/vue3`. It is a mount flag, not a `typeof window` check. On the first visit the client has to hydrate the server HTML, so the first browser render has to match. Waiting until `onMounted` keeps both paints identical.
+
+It came from [PR #3218](https://github.com/inertiajs/inertia/pull/3218) by Evan Burrell, merged on 22 September 2026, and shipped in [Inertia 3.8.0](https://github.com/inertiajs/inertia/releases/tag/v3.8.0) on 1 October 2026. The docs live under [Server-side rendering](https://inertiajs.com/docs/v3/advanced/server-side-rendering), in a short *Client-Only Components* section. That is easy to miss if you went looking for a deferred-prop helper.
+
+It is not one. `<Deferred>` plus `Inertia::defer()` still load slow data after the first paint. `<WhenVisible>` plus `Inertia::optional()` still load props when a block is about to scroll in. `<WhenMounted>` does not request anything. It only decides when a subtree is allowed to render.
+
+```vue title="resources/js/pages/Dashboard.vue"
+<script setup>
+import { WhenMounted } from '@inertiajs/vue3'
+import SalesChart from '@/Components/SalesChart.vue'
+</script>
+
+<template>
+  <WhenMounted>
+    <template #fallback>
+      <div>Loading chart...</div>
+    </template>
+
+    <SalesChart />
+  </WhenMounted>
+</template>
+```
+
+<Diagram name="inertia-whenmounted-vue" alt="On a first visit with SSR, the server HTML contains the fallback, not the chart. Hydration renders that same fallback so the markup matches. After onMounted, the children replace it. A later client-side Inertia visit, or an app without SSR, skips the fallback and renders the children immediately." caption="The fallback is for the first server-rendered visit. Later visits go straight to the children." />
+
+## The usual way vs WhenMounted
+
+The usual fixes are all heavier than they need to be. Turn SSR off for the page and you lose HTML for every block, including the heading you wanted in the first response. Invent a deferred prop so `<Deferred>` can hide the chart, and you pay an extra HTTP request for something that needs no server data. Rewrite every widget to move `window` into `onMounted`, which is the right fix for *your* code, but not for a third-party chart that reads the viewport while it renders.
+
+<CodeCompare before="The chart runs during SSR" after="The chart waits for mount">
+
+```vue title="resources/js/pages/Dashboard.vue"
+<template>
+  <h1>{{ stats.title }}</h1>
+  <SalesChart :points="stats.points" />
+  <!-- setup reads window.innerWidth: the server render throws,
+       and the whole page falls back to an empty shell -->
+</template>
+```
+
+```vue title="resources/js/pages/Dashboard.vue"
+<template>
+  <h1>{{ stats.title }}</h1>
+
+  <WhenMounted>
+    <template #fallback>
+      <ChartSkeleton />
+    </template>
+
+    <SalesChart :points="stats.points" />
+  </WhenMounted>
+</template>
+```
+
+</CodeCompare>
+
+The first visit still server-renders the heading and the skeleton. In the lab, `renderToString` of a page wrapped in `<WhenMounted>` contained `Loading chart...` and not `Sales chart`. An unwrapped child that read `window.innerWidth` in `setup` threw `ReferenceError` and killed the render.
+
+## When the fallback appears
+
+The Inertia Vue app keeps a hydration flag. It starts `false` only when the page was server-rendered. `<WhenMounted>` snapshots that flag when it is created, then sets its own mounted state in `onMounted`.
+
+| Visit | What you see |
+|---|---|
+| First load with SSR | Fallback in the server HTML, same fallback during hydration, children after mount |
+| Later client-side Inertia visit | Children immediately; the fallback slot does not run |
+| App without SSR | Children immediately; the fallback slot does not run |
+| No fallback slot | Nothing in the server HTML for that subtree, then the children after mount |
+
+In the lab, a CSR mount (no `data-server-rendered` attribute) showed `Sales chart` and rendered the fallback slot zero times. Hydrating the real SSR HTML rendered the fallback once, then replaced it with the chart, and left no leftover fallback node.
+
+<Callout type="gotcha" title="It is a mount flag, not a window check">
+
+If you gate the chart on `typeof window !== 'undefined'`, the first client render already has `window` and will paint the children. The server painted the fallback. Vue reports a hydration mismatch. Waiting for mount is the point of the component.
+
+</Callout>
+
+## The two ways window still crashes SSR
+
+`<WhenMounted>` only skips the default slot. The rest of the page still runs on the server.
+
+A read inside the page's own `<script setup>` runs before the template, wrapper or not. In the lab, `const width = window.innerWidth` at the top of the page threw `ReferenceError` even with `<WhenMounted>` around the chart. The pattern in Inertia's own test page is a function that is only called from the default slot:
+
+```vue title="resources/js/pages/Dashboard.vue"
+<script setup>
+import { WhenMounted } from '@inertiajs/vue3'
+
+const clientWidth = () => window.innerWidth
+</script>
+
+<template>
+  <WhenMounted>
+    <template #fallback>
+      <div>Loading chart...</div>
+    </template>
+
+    <SalesChart :width="clientWidth()" />
+  </WhenMounted>
+</template>
+```
+
+That `clientWidth()` call sits in the default slot, so it does not run during `renderToString`. The same function is fine after mount: a CSR test resolved it to the jsdom path `/dashboard`.
+
+The other crash is earlier than render. `<WhenMounted>` does not tree-shake the wrapped component out of the SSR bundle. The module is still imported on the server. A top-level `export const viewportWidth = window.innerWidth` in the chart file threw on `import`, before the template ran. Keep the import itself server-safe; only the render needs the browser.
+
+<Callout type="heads-up" title="React needs a function child">
+
+JSX children are built eagerly, so `<Chart width={window.innerWidth} />` still runs on the server even inside `<WhenMounted>`. The React adapter accepts a function: `{() => <Chart width={window.innerWidth} />}`. Vue slots and Svelte snippets are already lazy, so Vue does not need that form.
+
+</Callout>
+
+## WhenMounted, Deferred, or WhenVisible?
+
+Pick the tool for the problem you actually have.
+
+| | `<WhenMounted>` | `<Deferred>` | `<WhenVisible>` |
+|---|---|---|---|
+| Problem | A widget needs `window` or `document` | The data is slow | The block is below the fold |
+| Server API | None | `Inertia::defer()` | `Inertia::optional()` |
+| Extra request | No | Yes, after the first paint | Yes, when the block nears the viewport |
+| First HTML | Fallback (and the rest of the page) | Fallback for that block | Fallback for that block |
+| Since | Inertia 3.8.0 | Inertia 2 | Inertia 2.0 |
+
+Before 3.8, people sometimes invented a deferred prop just to keep a chart out of the SSR tree. That works visually and costs a round trip. `<WhenMounted>` is the replacement for that workaround, not a new way to defer data.
+
+## Try it yourself
+
+<TryIt title="Confirm the first HTML has the fallback">
+
+```bash
+# with Inertia SSR running
+curl -s http://your-app.test/dashboard | grep -o "Loading chart..."
+```
+
+You should see the fallback in the first response, and not the chart's own markup. Then load the same URL in the browser: after hydration the chart replaces the fallback, with no hydration warning in the console.
+
+</TryIt>
+
+Wrap one third-party widget, not the whole page. The heading, the numbers and the layout can still live in the server HTML.
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★★☆ Replaces disabling SSR, or a dummy deferred prop, for one browser-only widget |
+| How often you'll reach for it | ★★★☆☆ Charts, maps, editors, anything that measures the viewport |
+| Risk if misused | ★★☆☆☆ A `window` read in the page setup or at import time still crashes SSR |
+| **Overall** | **4 / 5**: the missing piece once you already use SSR and one child cannot |
+
+## Recap
+
+- `<WhenMounted>` keeps Inertia SSR for the page and delays one subtree until it has mounted in the browser. Inertia 3.8.0 and later.
+- The fallback is for the first server-rendered visit. Later client visits, and apps without SSR, render the children immediately.
+- It does not load props and it does not strip the child from the SSR bundle. The import must stay server-safe.
+- Keep `window` and `document` out of the page's `<script setup>` and out of top-level module code. A function called only from the default slot is fine.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Inertia version added WhenMounted?', a: 'Inertia 3.8.0, released 1 October 2026, from PR #3218. It is in the current 3.11.0 Vue adapter. There is no Laravel-side API; inertia-laravel 3.7 does not need a matching change.' },
+  { q: 'Is WhenMounted for deferred props?', a: 'No. Use Deferred with Inertia::defer() to load slow data after the first paint, and WhenVisible with Inertia::optional() to load a block as it scrolls in. WhenMounted only delays rendering a subtree that needs the browser.' },
+  { q: 'Why not check typeof window yourself?', a: 'On the first client render, window already exists. The children would paint immediately and miss the server HTML, which is the fallback. WhenMounted waits for onMounted so both renders match.' },
+  { q: 'Does it work in an app that is not using SSR?', a: 'Yes. Without a server-rendered first visit, the children render immediately and the fallback slot does not run.' },
+  { q: 'Will it keep a heavy chart library out of the SSR bundle?', a: 'No. WhenMounted is runtime-only. The wrapped component is still imported on the server, it just is not rendered. Top-level code in that module must be safe to import in Node.' },
+]} />
+
+## Next steps
+
+- [Server-render a Laravel and Vue Inertia app](/inertia-ssr): the build, the process, and why `window` crashes the first render
+- [Inertia deferred props in Vue](/inertia-deferred-props-vue): load slow data after the first paint
+- [Inertia WhenVisible buffer](/inertia-whenvisible-buffer-vue): load below-the-fold props just before they scroll in
+- [Inertia docs: client-only components](https://inertiajs.com/docs/v3/advanced/server-side-rendering)
+
+## Sources
+
+- [Inertia v3: Server-side rendering, Client-Only Components](https://inertiajs.com/docs/v3/advanced/server-side-rendering)
+- [PR #3218: Add WhenMounted component](https://github.com/inertiajs/inertia/pull/3218), merged 22 September 2026
+- [Inertia v3.8.0](https://github.com/inertiajs/inertia/releases/tag/v3.8.0), released 1 October 2026
+- [Source: `packages/vue3/src/whenMounted.ts`](https://github.com/inertiajs/inertia/blob/v3.11.0/packages/vue3/src/whenMounted.ts) in 3.11.0
+- [Tests: `tests/when-mounted.spec.ts` and `tests/ssr.spec.ts`](https://github.com/inertiajs/inertia/blob/v3.11.0/tests/when-mounted.spec.ts)
