@@ -1,0 +1,305 @@
+---
+id: 205
+title: "Laravel 13.44: FormRequest model(), lockForNoKeyUpdate() and slow transaction alerts"
+seoTitle: "Laravel 13.44: FormRequest model() and lockForNoKeyUpdate()"
+excerpt: "Laravel 13.44 loads models straight from form request input, adds a PostgreSQL lock that doesn't block foreign keys, and warns you about slow transactions."
+date: 2026-11-25T00:30:00Z
+snippet: "$request->modelOrFail('project_id') // input id to model, one line"
+categories: [laravel]
+tags: [laravel, release, upgrade, testing]
+---
+Your Vue form posts `project_id`. Your controller turns it back into a `Project` with the same three lines it always does. And somewhere in production, a `lockForUpdate()` on a team row makes every "create project" request wait in line. Laravel **13.44** fixes all three: models straight from the form request, a lighter PostgreSQL row lock, and an alert for transactions that run too long.
+
+<TLDR
+  audience="Laravel 13 developers with Inertia or API forms that send IDs, PostgreSQL apps that lock rows, and anyone who has had a transaction killed by a timeout"
+  learn={['`$request->model()`, `modelOrFail()` and `models()` in form requests, and how to scope them to the current team', '`lockForNoKeyUpdate()`: lock a parent row without blocking inserts of its children', '`DB::whenTransactionRunsLongerThan()`, `migrate --schema-only` and options for `copyToDisk()`/`moveToDisk()`', 'The free speedups (`distinct`, Vite preloads, Redis cache) and what 12.74 brings to Laravel 12']}
+  tested="Laravel 13.44.1 · PHP 8.4 · Pest 4 · SQLite + PostgreSQL 17 (19 tests / 42 assertions: model()/modelOrFail()/models() incl. guessing, team scope and array input, lockForNoKeyUpdate() SQL per grammar plus real lock behaviour on PostgreSQL, whenTransactionRunsLongerThan() commit/rollback/nesting, migrate --schema-only against a real dump, copyToDisk()/moveToDisk() visibility, enum manager default, Notification::when(), distinct on 16,000 items). 16 of the 19 fail on 13.43.0."
+>
+
+- **13.44.1** is the version to install. It was released on **November 24, 2026** (16:11 UTC); the `v13.44.0` tag got no GitHub release and 13.44.1 only bumps the version number. Laravel 12 gets **12.74.0** the same day.
+- **`$request->modelOrFail('project_id')`** finds the model from the input (class guessed from the key) and throws a 404-style `ModelNotFoundException`. `model()` returns `null`, `models('project_ids')` returns a collection. Pass a closure to scope it to the user's team.
+- **`lockForNoKeyUpdate()`** compiles to `FOR NO KEY UPDATE` on PostgreSQL: writers still queue on the row, but inserts of child rows stop waiting. Other databases fall back to a normal update lock.
+- **Also new:** `DB::whenTransactionRunsLongerThan()`, `migrate --schema-only`, visibility and S3 options on `copyToDisk()`/`moveToDisk()`, enum default drivers, PHP 8.6 support, and a `distinct` rule that went from 2.3 s to 0.15 s on 16,000 items in our lab.
+
+</TLDR>
+
+## What's new at a glance
+
+| Change | PR | What it replaces |
+|---|---|---|
+| `model()`, `modelOrFail()`, `models()` on form requests | [#62523](https://github.com/laravel/framework/pull/62523), [#62576](https://github.com/laravel/framework/pull/62576) | `Project::findOrFail($request->validated('project_id'))` |
+| `lockForNoKeyUpdate()` | [#62544](https://github.com/laravel/framework/pull/62544) | `->lock('for no key update')` (PostgreSQL only, breaks MySQL) |
+| `DB::whenTransactionRunsLongerThan()` | [#62423](https://github.com/laravel/framework/pull/62423) | Finding out when the database kills the transaction |
+| `migrate --schema-only` / `migrate:fresh --schema-only` | [#62535](https://github.com/laravel/framework/pull/62535) | A custom command, or `--path` pointed at an empty folder |
+| Options on `copyToDisk()` / `moveToDisk()` | [#62524](https://github.com/laravel/framework/pull/62524) | `readStream()` + `writeStream()` + `delete()` by hand |
+| Enum as a manager's default driver | [#62559](https://github.com/laravel/framework/pull/62559) | `PaymentDriver::Stripe->value` |
+| Faster `distinct`, Vite preloads and Redis cache writes | [#62593](https://github.com/laravel/framework/pull/62593), [#62551](https://github.com/laravel/framework/pull/62551), [#62618](https://github.com/laravel/framework/pull/62618) | Nothing: you get them on update |
+
+## $request->model(): from input ID to model in one call
+
+Inertia forms send IDs: a project picked from a `<select>`, an assignee, a list of tag IDs. Until now every controller turned them back into models by hand.
+
+<CodeCompare before="Laravel 13.43" after="Laravel 13.44">
+
+```php title="app/Http/Controllers/TaskController.php"
+public function store(StoreTaskRequest $request)
+{
+    $project = Project::query()
+        ->where('team_id', $request->user()->team_id)
+        ->findOrFail($request->validated('project_id'));
+
+    $labels = Label::findMany($request->validated('label_ids', []));
+
+    $task = $project->tasks()->create($request->safe()->only('title'));
+    $task->labels()->sync($labels);
+
+    return to_route('tasks.show', $task);
+}
+```
+
+```php title="app/Http/Controllers/TaskController.php"
+public function store(StoreTaskRequest $request)
+{
+    $project = $request->modelOrFail('project_id', fn (Builder $query) => $query
+        ->where('team_id', $request->user()->team_id));
+
+    $labels = $request->models('label_ids');
+
+    $task = $project->tasks()->create($request->safe()->only('title'));
+    $task->labels()->sync($labels);
+
+    return to_route('tasks.show', $task);
+}
+```
+
+</CodeCompare>
+
+The three methods come from a new `InteractsWithModels` trait on `FormRequest`:
+
+| Method | Returns | Empty, unknown or array input |
+|---|---|---|
+| `model('project_id')` | `Project` or `null` | `null` |
+| `modelOrFail('project_id')` | `Project` | throws `ModelNotFoundException` (a 404 over HTTP) |
+| `models('label_ids')` | Eloquent `Collection` | empty collection (unknown IDs are skipped) |
+
+**The class is optional.** Laravel strips `_id` or `_ids`, singularises and studly-cases the rest, then looks in `App\Models` before the app root. `project_id` becomes `App\Models\Project`, `label_ids` becomes `App\Models\Label`. When the key doesn't match the model, pass it: `$request->model('assignee_id', User::class)`.
+
+**The closure scopes the query.** It can be the second argument, or the third after a class. Its conditions are grouped before the ID is applied, so an `orWhere` inside can't widen the lookup.
+
+```php title="app/Http/Controllers/TaskController.php"
+$assignee = $request->model('assignee_id', User::class, function (Builder $query) use ($request) {
+    $query->where('team_id', $request->user()->team_id);
+});
+```
+
+<Callout type="gotcha" title="It finds any row in the table unless you scope it">
+
+`model()` reads the raw input with `$request->input()`, not `validated()`, and it does no authorization. In our lab, a `project_id` that belonged to another team came straight back without the closure, and `null` with it. For anything tenant-owned, always pass the scope (or authorize the model afterwards). Keep a rule like `'project_id' => ['required', 'integer']` in `rules()` so bad input still gets a validation error instead of a 404.
+
+</Callout>
+
+One fix landed in the same release: an array like `?project_id[]=1&project_id[]=2` used to turn the lookup into `whereIn` and return whichever row came first. Since [#62576](https://github.com/laravel/framework/pull/62576), `model()` returns `null` and `modelOrFail()` throws for array input. `models()` is unchanged.
+
+When the ID is in the URL (`/projects/{project}`), keep using route model binding. `model()` is for IDs that arrive in the body or query string.
+
+## lockForNoKeyUpdate(): lock the parent, let children in
+
+On PostgreSQL, `lockForUpdate()` compiles to `FOR UPDATE`. That lock also blocks the `FOR KEY SHARE` lock a foreign key check takes. So while you hold a team row, every insert into `projects` with that `team_id` waits, and if the two transactions need each other's locks, you get a deadlock.
+
+`FOR NO KEY UPDATE` is the lock PostgreSQL itself takes for an `UPDATE` that doesn't touch the key. Writers still queue on the row; foreign key checks don't.
+
+<CodeCompare before="Laravel 13.43" after="Laravel 13.44">
+
+```php title="app/Actions/ReserveSeat.php"
+DB::transaction(function () use ($teamId) {
+    $team = Team::whereKey($teamId)->lockForUpdate()->firstOrFail();
+
+    // Meanwhile: every Project::create(['team_id' => $teamId]) waits here.
+    $team->increment('seats_used');
+});
+```
+
+```php title="app/Actions/ReserveSeat.php"
+DB::transaction(function () use ($teamId) {
+    $team = Team::whereKey($teamId)->lockForNoKeyUpdate()->firstOrFail();
+
+    // Other seat reservations still wait; new projects don't.
+    $team->increment('seats_used');
+});
+```
+
+</CodeCompare>
+
+We ran it against PostgreSQL 17 with a second session and a 500 ms `lock_timeout`:
+
+| Lock held on `teams.id = 1` | Other session inserts a project for team 1 | Other session updates team 1 |
+|---|---|---|
+| `lockForUpdate()` | blocked (lock timeout) | blocked |
+| `lockForNoKeyUpdate()` | **inserted** | blocked |
+
+On other databases the method still works, it just can't be lighter:
+
+| Database | SQL |
+|---|---|
+| PostgreSQL | `for no key update` |
+| MySQL / MariaDB | `for update` |
+| SQL Server | `with(rowlock,updlock,holdlock)` |
+| SQLite | no lock clause, same as `lockForUpdate()` |
+
+Keep `lockForUpdate()` when you're about to delete the row or change its key, because then you *want* new children to wait.
+
+## DB::whenTransactionRunsLongerThan(): hear about slow transactions first
+
+You already have `whenQueryingForLongerThan()` for total query time. The new hook times **transactions**, which is what transaction time limits care about (PlanetScale's Vitess kills them at 20 seconds, for example). You find out when one creeps up, not when it gets killed.
+
+```php title="app/Providers/AppServiceProvider.php"
+use Carbon\CarbonInterval;
+use Illuminate\Database\Connection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+
+public function boot(): void
+{
+    DB::whenTransactionRunsLongerThan(CarbonInterval::seconds(5), function (Connection $connection, $event, float $duration) {
+        Log::warning('Slow transaction', [
+            'connection' => $connection->getName(),
+            'outcome' => class_basename($event), // TransactionCommitted or TransactionRolledBack
+            'ms' => round($duration),
+        ]);
+    });
+}
+```
+
+What we confirmed in the lab:
+
+- The threshold is milliseconds as an `int`/`float`, or a `CarbonInterval`, or a `DateTimeInterface`.
+- It fires **after** the transaction ends, on commit or rollback, with the duration in ms.
+- Only the outermost transaction is timed. Two nested 80 ms transactions fired the handler once.
+- `DB::` registers it on the default connection. Use `DB::connection('reporting')->whenTransactionRunsLongerThan(...)` for others.
+
+<Callout type="heads-up" title="RefreshDatabase hides it in tests">
+
+`RefreshDatabase` wraps each test in a transaction, so your app's transactions become nested and are never timed on their own. Test this hook in a file without `RefreshDatabase`.
+
+</Callout>
+
+## migrate --schema-only: load the dump, run nothing
+
+If you squash migrations with `schema:dump`, `migrate` on an empty database loads the dump and then runs every migration added after it. Sometimes you only want the dump, for example a secondary connection in CI whose migrations run elsewhere.
+
+```bash
+php artisan migrate --schema-only
+php artisan migrate:fresh --schema-only --database=reporting
+```
+
+We tested it on PostgreSQL with a dump plus one newer migration: plain `migrate` created both tables, `--schema-only` created only the dumped one. On a database that has already run migrations there's no dump to load, so `--schema-only` does nothing at all.
+
+## copyToDisk() and moveToDisk() take visibility and S3 options
+
+`copyToDisk()` and `moveToDisk()` arrived in 13.x in September. Their weak spot: they wrote the file to the destination without any options, so a public avatar on S3 meant dropping back to streams.
+
+<CodeCompare before="Laravel 13.43" after="Laravel 13.44">
+
+```php title="app/Jobs/PublishAvatar.php"
+$stream = Storage::disk('local')->readStream($tmpPath);
+
+Storage::disk('s3')->writeStream("avatars/{$user->id}.jpg", $stream, [
+    'visibility' => 'public',
+    'CacheControl' => 'max-age=31536000',
+]);
+
+fclose($stream);
+Storage::disk('local')->delete($tmpPath);
+```
+
+```php title="app/Jobs/PublishAvatar.php"
+Storage::disk('local')->moveToDisk('s3', $tmpPath, "avatars/{$user->id}.jpg", [
+    'visibility' => 'public',
+    'CacheControl' => 'max-age=31536000',
+]);
+```
+
+</CodeCompare>
+
+The fourth argument is a visibility string (`'public'`) or an options array. Skip the target path with a named argument: `copyToDisk('s3', 'exports/users.csv', options: 'public')`. In our lab, files moved and copied between two local disks came out `public` and `private` as asked.
+
+## Faster without changing a line
+
+- **`distinct` on big arrays.** It used to compare every item with every other one. Our lab validated 16,000 integers in **2,286 ms on 13.43** and **145 ms on 13.44** ([#62593](https://github.com/laravel/framework/pull/62593)). Bulk imports from a Vue table, this one's for you.
+- **Vite preloads for Inertia apps.** `@vite` walked shared chunks once per path to them. The PR author measured an app with about 500 manifest entries going from ~55 ms to ~18.6 ms per render, with identical HTML ([#62551](https://github.com/laravel/framework/pull/62551)).
+- **Redis cache.** `putMany()` and `deleteMultiple()` now send one pipeline instead of one round trip per key: 50 keys, 50 round trips down to 1, per the PR's benchmark ([#62618](https://github.com/laravel/framework/pull/62618)). Cluster connections keep per-key calls.
+
+## Also in this release
+
+- **Enum default drivers** for your own managers: `getDefaultDriver()` can return `PaymentDriver::Stripe` ([#62559](https://github.com/laravel/framework/pull/62559)).
+- **PHP 8.6 support** ([#61771](https://github.com/laravel/framework/pull/61771)).
+- **Temporary upload URLs on the local disk stream the body** instead of reading it into memory, so big uploads stop hitting `memory_limit` ([#62533](https://github.com/laravel/framework/pull/62533)).
+- **`Notification::when()` / `unless()`**, including on the fake ([#62568](https://github.com/laravel/framework/pull/62568)).
+- **`UniqueJobSkipped` now fires for `Schedule::job()`** too ([#62480](https://github.com/laravel/framework/pull/62480)).
+- **Fixes:** `multiple_of` and field-based `gt`/`gte`/`lt`/`lte` normalise numbers like `min`/`max` ([#62590](https://github.com/laravel/framework/pull/62590)); logging in a passwordless user clears the previous user's password hash, which could make Sanctum SPA requests return 401 after switching users ([#62532](https://github.com/laravel/framework/pull/62532)); `ThrottleRequestsWithRedis` is atomic again for limits without `after()` ([#62534](https://github.com/laravel/framework/pull/62534)); JSON `whereNull()` works with binary MySQL collations ([#62583](https://github.com/laravel/framework/pull/62583)); `exists`/`unique` on SQLite JSON paths match numbers again ([#62601](https://github.com/laravel/framework/pull/62601)); quotes are escaped in attributes of secured Markdown mail ([#62597](https://github.com/laravel/framework/pull/62597)); queued collections with custom queueable IDs ([#62598](https://github.com/laravel/framework/pull/62598)); `whereFullText()` knows Polish, Estonian and Esperanto on PostgreSQL ([#62609](https://github.com/laravel/framework/pull/62609)).
+
+## Upgrade notes
+
+- Run `composer update laravel/framework`. You land on **13.44.1**; there's no reason to pin 13.44.0.
+- **Laravel 12:** **12.74.0** carries the fixes above plus a backport of the request key byte limit from 13.38, which closes an unauthenticated denial of service through one huge JSON key ([#62582](https://github.com/laravel/framework/pull/62582)). If you're on 12.x, this is the one to take this week. The new methods are 13.x only.
+- **`decimal:N` casts** now throw the cast's existing `MathException` for edge-case input that the numeric rules reject ([#62590](https://github.com/laravel/framework/pull/62590)). Normal numbers behave as before.
+- **`php artisan db`** now passes MySQL, MariaDB and SQL Server passwords through `MYSQL_PWD` / `SQLCMDPASSWORD` instead of the command line ([#62591](https://github.com/laravel/framework/pull/62591)).
+- If you have a method named `model()`, `models()` or `modelOrFail()` on a form request, it now overrides the framework's. Check its signature is compatible, or rename it.
+
+<TryIt title="Try $request->model() in 2 minutes">
+
+```php title="tests/Feature/RequestModelTest.php"
+use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Foundation\Http\FormRequest;
+
+it('loads the user from user_id, scoped by email domain', function () {
+    $user = User::factory()->create(['email' => 'eve@acme.test']);
+
+    $request = FormRequest::create('/', 'POST', ['user_id' => $user->id]);
+    $request->setContainer(app());
+
+    expect($request->model('user_id')?->is($user))->toBeTrue()
+        ->and($request->model('user_id', fn (Builder $q) => $q->where('email', 'like', '%@other.test')))->toBeNull()
+        ->and(fn () => $request->modelOrFail('missing_id', User::class))
+        ->toThrow(Illuminate\Database\Eloquent\ModelNotFoundException::class);
+});
+```
+
+Run `php artisan test --filter=RequestModelTest`. It passes on 13.44.1 (we ran it); on 13.43 the methods don't exist yet and it throws `BadMethodCallException`.
+
+</TryIt>
+
+## Recap
+
+- Update to **13.44.1** (or **12.74.0** on Laravel 12, which also backports a DoS fix).
+- `$request->model()`, `modelOrFail()` and `models()` replace the find-by-input boilerplate. Always scope tenant data with the closure.
+- `lockForNoKeyUpdate()` stops parent-row locks from blocking child inserts on PostgreSQL.
+- `DB::whenTransactionRunsLongerThan()` warns you before a slow transaction gets killed.
+- `migrate --schema-only`, options on `moveToDisk()`, and faster `distinct`, Vite and Redis cache come for free.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Does $request->model() check that the user may see the model?', a: 'No. It looks the ID up in the whole table. Pass a closure that scopes the query (for example by `team_id`), or authorize the model after you load it.' },
+  { q: 'Should I use model() instead of route model binding?', a: 'No. Route model binding is still the way when the ID is in the URL. `model()` is for IDs in the request body or query string, like a project picked in a form.' },
+  { q: 'Is lockForNoKeyUpdate() safe on MySQL?', a: 'Yes. On MySQL and MariaDB it compiles to a normal `for update`, so behaviour is the same as `lockForUpdate()`. Only PostgreSQL gets the lighter lock.' },
+  { q: 'Why is there no 13.44.0 release on GitHub?', a: 'The `v13.44.0` tag exists, but the release was published as 13.44.1 a few minutes later. The only change between them is the version number in `Application::VERSION`.' },
+  { q: 'Does whenTransactionRunsLongerThan() stop a slow transaction?', a: 'No. It runs your callback after the outermost transaction commits or rolls back, with the duration in milliseconds. Use it for logs and alerts.' },
+]} />
+
+## Next steps
+
+- [Laravel 13.43: security fixes, JsonSchema::rules() and Reverb 1.14](/laravel-13-43-security-fixes-jsonschema-rules)
+- [Laravel 13.40: slow job alerts, middleware insertBefore() and strict input](/laravel-13-40-slow-jobs-middleware-insert-strict-input)
+- [Laravel validation for Inertia forms](/laravel-form-request-inertia)
+- [Upload files from Vue to Laravel with Inertia](/laravel-vue-file-upload)
+
+## Sources
+
+- [laravel/framework v13.44.1 release](https://github.com/laravel/framework/releases/tag/v13.44.1), [v13.43.0...v13.44.0 compare](https://github.com/laravel/framework/compare/v13.43.0...v13.44.0) and [v12.74.0 release](https://github.com/laravel/framework/releases/tag/v12.74.0)
+- Feature PRs: [#62523](https://github.com/laravel/framework/pull/62523), [#62576](https://github.com/laravel/framework/pull/62576), [#62544](https://github.com/laravel/framework/pull/62544), [#62423](https://github.com/laravel/framework/pull/62423), [#62535](https://github.com/laravel/framework/pull/62535), [#62524](https://github.com/laravel/framework/pull/62524), [#62559](https://github.com/laravel/framework/pull/62559), [#61771](https://github.com/laravel/framework/pull/61771), [#62533](https://github.com/laravel/framework/pull/62533), [#62568](https://github.com/laravel/framework/pull/62568), [#62480](https://github.com/laravel/framework/pull/62480)
+- Performance PRs: [#62593](https://github.com/laravel/framework/pull/62593), [#62551](https://github.com/laravel/framework/pull/62551), [#62618](https://github.com/laravel/framework/pull/62618)
+- Fix PRs: [#62590](https://github.com/laravel/framework/pull/62590), [#62532](https://github.com/laravel/framework/pull/62532), [#62534](https://github.com/laravel/framework/pull/62534), [#62583](https://github.com/laravel/framework/pull/62583), [#62601](https://github.com/laravel/framework/pull/62601), [#62597](https://github.com/laravel/framework/pull/62597), [#62598](https://github.com/laravel/framework/pull/62598), [#62609](https://github.com/laravel/framework/pull/62609), [#62591](https://github.com/laravel/framework/pull/62591), [#62582](https://github.com/laravel/framework/pull/62582)
+- Docs: [Retrieving model input values](https://laravel.com/framework/docs/13.x/requests#retrieving-model-input-values), [Copying and moving files](https://laravel.com/framework/docs/13.x/filesystem#copying-moving-files), [Pessimistic locking](https://laravel.com/framework/docs/13.x/queries#pessimistic-locking)
+- [PostgreSQL: row-level locks](https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS)
