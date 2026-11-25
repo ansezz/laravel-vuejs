@@ -1,0 +1,253 @@
+---
+id: 206
+title: "Laravel Http::globalMiddleware(): trace and log every API call"
+seoTitle: "Laravel Http::globalMiddleware(): Trace Every API Call"
+excerpt: "Add X-Request-Id headers and log slow outgoing API calls once with Http::globalRequestMiddleware(), globalMiddleware(), and withoutGlobalConfiguration()."
+date: 2026-11-25T03:00:00Z
+snippet: "Http::globalRequestMiddleware(fn ($r) => $r->withHeader('X-Request-Id', ...));"
+categories: [laravel]
+tags: [laravel, php, testing]
+---
+
+You add `->withHeader('X-Request-Id', ...)` and a slow-call timer to your billing client, and three weeks later a shipping service and two webhook jobs are still firing naked `Http::post()` calls. When one times out in production, your logs have no trace ID and no duration. Register the middleware once in `AppServiceProvider` with `Http::globalRequestMiddleware()` and `Http::globalMiddleware()`, and every outgoing request inherits it.
+
+<TLDR
+  audience="Laravel 11–13 developers calling external APIs from controllers, queued jobs, or Http::pool() / Http::batch()"
+  learn={['How `globalRequestMiddleware()`, `globalResponseMiddleware()`, and `globalMiddleware()` work together', 'How to time every outgoing request and log failures cleanly', 'How `Http::withoutGlobalConfiguration()` keeps internal headers off third-party uploads', 'Five gotchas we hit in the lab: PSR-7 immutability, `Http::failedConnection()` under `Http::fake()`, retries, and test stacking']}
+  tested="Laravel 13.43 · PHP 8.4 · Guzzle 7 · Pest 4 (12 tests, 60 assertions against Http::fake() and a local PHP HTTP server)"
+>
+
+- Register `Http::globalRequestMiddleware()` and `Http::globalMiddleware()` once in `AppServiceProvider::boot()` to inject `X-Request-Id` headers and time every outgoing HTTP call, including `Http::pool()` and `Http::batch()`.
+- Both receive **PSR-7** `RequestInterface` and `ResponseInterface`, not Laravel's `Request` or `Response`. Forget `return` on `$request->withHeader(...)` and Laravel crashes with `Call to a member function getUri() on null`.
+- Use `Http::withoutGlobalConfiguration(fn () => ...)` when one external call—like a presigned S3 upload or outbound webhook—must not receive your global headers or `Http::globalOptions()`.
+- In tests, `Http::fake()` still runs global middleware, and `Http::failedConnection()` throws synchronously inside `Factory::fake()` when `on_stats` is set instead of hitting `->then()`'s rejection callback.
+
+</TLDR>
+
+## Why per-call headers and events fall short
+
+Most Laravel apps start by wrapping one API client with `withHeaders()`, or listening to `RequestSending` and `ResponseReceived` events. Both leave gaps:
+
+- **Per-call wrappers get skipped.** A new job or package calls `Http::get(...)` directly and misses your headers and logging. Even `Http::withHeaders()->pool()` drops chained headers on the pool requests.
+- **HTTP client events are read-only.** `RequestSending` fires after the request is already built for inspection, so you cannot add an `X-Request-Id` header from a listener, and correlating start and end times across `RequestSending` and `ResponseReceived` takes manual bookkeeping.
+
+Global HTTP middleware hooks into Guzzle's handler stack on every `PendingRequest` created by the `Http` factory—single calls, `Http::pool()`, and `Http::batch()` alike.
+
+<Diagram name="laravel-http-global-middleware-logging" alt="Every Http::get, pool, or batch call checks whether it is inside Http::withoutGlobalConfiguration(). If yes, globalMiddleware and globalOptions are stripped for that closure and restored afterwards. Otherwise, globalRequestMiddleware runs first to add headers such as X-Request-Id on the PSR-7 request, followed by full globalMiddleware that starts a timer, then per-request withRequestMiddleware and beforeSending callbacks. After Guzzle or Http::fake() returns a response, globalResponseMiddleware and the timer log the status and duration before the ResponseReceived event fires." caption="Where global middleware runs in Laravel's outgoing HTTP stack." />
+
+## The five global methods at a glance
+
+Laravel documents the first four in the [HTTP client guide](https://laravel.com/docs/13.x/http-client#global-middleware). The fifth, `withoutGlobalConfiguration()`, lives in `Factory.php` and is what Laravel Cloud itself uses so internal headers do not leak onto external calls.
+
+| Method | Receives | Can change | Runs on `Http::fake()`? |
+|---|---|---|---|
+| `Http::globalRequestMiddleware()` | PSR-7 `RequestInterface` | Request headers, URI, body | Yes |
+| `Http::globalResponseMiddleware()` | PSR-7 `ResponseInterface` | Response headers, status, body | Yes |
+| `Http::globalMiddleware()` | `$handler` + `RequestInterface`, `$options` | Both sides + promise rejection + timing | Yes |
+| `Http::globalOptions()` | Guzzle options array or closure | `allow_redirects`, `timeout`, `headers` | Passed to stack |
+| `Http::withoutGlobalConfiguration()` | Closure | Temporarily clears middleware + options | Yes |
+
+## Adding trace headers with globalRequestMiddleware
+
+If you already store a request or job trace ID in [Laravel Context](/laravel-context-request-id-logs-queued-jobs), one call in `AppServiceProvider::boot()` forwards it on every outgoing HTTP request.
+
+<CodeCompare before="Repeated at every call site (and dropped by pool)" after="Registered once in AppServiceProvider">
+
+```php title="app/Services/BillingClient.php"
+use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Facades\Http;
+
+$response = Http::withHeaders([
+    'User-Agent' => 'AcmeApp/1.0',
+    'X-Request-Id' => (string) Context::get('trace_id'),
+])->post('https://billing.example.test/charges', $payload);
+```
+
+```php title="app/Providers/AppServiceProvider.php"
+use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Facades\Http;
+use Psr\Http\Message\RequestInterface;
+
+public function boot(): void
+{
+    Http::globalRequestMiddleware(function (RequestInterface $request) {
+        $request = $request->withHeader('User-Agent', 'AcmeApp/1.0');
+
+        if ($traceId = Context::get('trace_id')) {
+            return $request->withHeader('X-Request-Id', (string) $traceId);
+        }
+
+        return $request;
+    });
+}
+```
+
+</CodeCompare>
+
+In our lab, `Http::pool()` and `Http::batch()` both inherited that `X-Request-Id` header across every request in the group—no extra wiring needed.
+
+<Callout type="gotcha" title="PSR-7 objects are immutable: always return the request">
+
+`globalRequestMiddleware()` passes a `Psr\Http\Message\RequestInterface`, **not** `Illuminate\Http\Client\Request`. Calling `$request->withHeader(...)` without `return` returns `null`, and the next handler crashes with `Error: Call to a member function getUri() on null`. Likewise, read headers with `$request->getHeaderLine('X-Trace')`, not Laravel's `$request->header()`.
+
+</Callout>
+
+## Timing and logging every API call with globalMiddleware
+
+`globalRequestMiddleware()` and `globalResponseMiddleware()` are wrappers around Guzzle's `Middleware::mapRequest()` and `Middleware::mapResponse()`. They run separately, so neither sees the other's timestamps without storing state somewhere.
+
+For outgoing timing and error logging, use `Http::globalMiddleware()` directly. It wraps `$handler($request, $options)` in one closure, measures elapsed time with `hrtime(true)`, and logs both slow responses and failed connections:
+
+```php title="app/Providers/AppServiceProvider.php"
+use GuzzleHttp\Promise\PromiseInterface;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+
+Http::globalMiddleware(function (callable $handler) {
+    return function (RequestInterface $request, array $options) use ($handler): PromiseInterface {
+        $startedAt = hrtime(true);
+
+        $logFailure = function (\Throwable $reason) use ($request, $startedAt): never {
+            Log::warning('http.client.failed', [
+                'method' => $request->getMethod(),
+                'host' => $request->getUri()->getHost(),
+                'ms' => round((hrtime(true) - $startedAt) / 1_000_000, 1),
+                'error' => $reason::class . ': ' . $reason->getMessage(),
+            ]);
+
+            throw $reason;
+        };
+
+        try {
+            return $handler($request, $options)->then(
+                function (ResponseInterface $response) use ($request, $startedAt) {
+                    $ms = round((hrtime(true) - $startedAt) / 1_000_000, 1);
+
+                    if ($ms >= 500 || $response->getStatusCode() >= 500) {
+                        Log::warning('http.client.slow_or_error', [
+                            'method' => $request->getMethod(),
+                            'host' => $request->getUri()->getHost(),
+                            'status' => $response->getStatusCode(),
+                            'ms' => $ms,
+                        ]);
+                    }
+
+                    return $response;
+                },
+                fn ($reason) => $logFailure(
+                    $reason instanceof \Throwable ? $reason : new \RuntimeException((string) $reason)
+                )
+            );
+        } catch (\Throwable $e) {
+            $logFailure($e);
+        }
+    };
+});
+```
+
+Notice the `try/catch` around `$handler($request, $options)`. We added it after hitting a subtle difference between real sockets and `Http::fake()` in our lab:
+
+- Against a **closed local port**, Guzzle returns a rejected promise with `GuzzleHttp\Exception\ConnectException`, so the `->then(..., $onRejected)` handler logs it before Laravel wraps it in `ConnectionException`.
+- Under **`Http::fake()` with `Http::failedConnection()`**, `Factory::fake()` calls `$response->wait()` immediately when `on_stats` is present (and `PendingRequest` always sets `on_stats`), so the exception throws synchronously before `->then()` is attached. Without the outer `try/catch`, your failure logger misses every faked outage in tests.
+
+## Bypassing globals with withoutGlobalConfiguration
+
+Once global headers and `Http::globalOptions()` are active, there is always one call that should not get them: a presigned S3 upload that rejects extra headers, an external webhook that should not see internal trace IDs, or a redirect check when `allow_redirects => false` is set globally.
+
+Wrap that call in `Http::withoutGlobalConfiguration()`:
+
+```php title="app/Services/PresignedUpload.php"
+use Illuminate\Support\Facades\Http;
+
+$response = Http::withoutGlobalConfiguration(function () use ($presignedUrl, $stream) {
+    return Http::withBody($stream, 'application/octet-stream')
+        ->put($presignedUrl);
+});
+
+// Global middleware and globalOptions are already restored here,
+// even if the callback above threw an exception.
+```
+
+Under the hood, `Factory::withoutGlobalConfiguration()` snapshots `$this->globalMiddleware` and `$this->globalOptions`, clears both to `[]`, runs your closure, and restores them in a `finally` block. That means your global stack is safe even when the third-party request throws.
+
+## Default Guzzle options with globalOptions
+
+`Http::globalOptions()` applies Guzzle options to every new `PendingRequest`, and per-request `->withOptions([...])` overrides them cleanly:
+
+```php title="app/Providers/AppServiceProvider.php"
+Http::globalOptions([
+    'allow_redirects' => false,
+    'connect_timeout' => 3,
+]);
+```
+
+In our lab against a local PHP server returning `302 Found`, `Http::get(...)` returned the `302` with its `Location` header intact instead of following the redirect, while `Http::withOptions(['allow_redirects' => true])->get(...)` followed it to `200 OK` and still carried the global `X-Request-Id` header.
+
+## Five gotchas we proved in the lab
+
+1. **Order of execution.** Global middleware runs **before** per-request `withRequestMiddleware()` and `beforeSending()`, and **before** `RequestSending` and `Http::fake()`'s recorder. `globalResponseMiddleware()` runs **before** `ResponseReceived` fires, so event listeners and `Http::assertSent()` both see your injected headers.
+2. **Retries run the middleware on every attempt.** With `Http::retry(3, 0)` against two `503`s and a `200`, our `globalMiddleware` callback ran three times (`[503, 503, 200]`). That is usually what you want for per-attempt timing, though any counter inside it records attempts rather than logical operations.
+3. **Never register global middleware per request or inside a loop.** `Http::globalRequestMiddleware()` pushes onto the shared `Factory` singleton's array. Calling it twice registers two closures and runs your middleware twice on every request. Keep registration in `AppServiceProvider::boot()`, and in unit tests reset with `Http::swap(new Factory(app('events')))` if a test registers its own global middleware.
+4. **Faked connection failures throw synchronously.** As shown above, `Http::failedConnection()` hits `Factory::fake()`'s `on_stats` check and calls `$response->wait()` inside the stub handler. Always include `try/catch` alongside `->then(..., $onRejected)` if you test failure logging with `Http::fake()`.
+5. **`withoutGlobalConfiguration()` clears both middleware and options.** If you set `globalOptions(['timeout' => 5])` and `globalRequestMiddleware(...)`, `withoutGlobalConfiguration()` strips both for the duration of the closure. Re-specify any per-call timeout or headers inside the closure if that call still needs them.
+
+<TryIt title="Run a 2-minute Pest check in your app">
+
+```php title="tests/Feature/HttpGlobalMiddlewareSmokeTest.php"
+use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
+use Psr\Http\Message\RequestInterface;
+
+it('adds X-Request-Id everywhere except inside withoutGlobalConfiguration', function () {
+    Http::swap(new Factory(app('events')));
+
+    Http::globalRequestMiddleware(fn (RequestInterface $request) => $request
+        ->withHeader('X-Request-Id', 'smoke-123')
+    );
+
+    Http::fake(['*' => Http::response('ok', 200)]);
+
+    Http::get('https://internal.example.test/ping');
+    Http::withoutGlobalConfiguration(fn () => Http::get('https://s3.example.test/upload'));
+
+    $recorded = Http::recorded();
+
+    expect($recorded[0][0]->hasHeader('X-Request-Id', 'smoke-123'))->toBeTrue()
+        ->and($recorded[1][0]->hasHeader('X-Request-Id'))->toBeFalse();
+});
+```
+
+</TryIt>
+
+## Recap
+
+- Put `Http::globalRequestMiddleware()`, `Http::globalResponseMiddleware()`, `Http::globalMiddleware()`, and `Http::globalOptions()` in `AppServiceProvider::boot()` so every outgoing call—including `Http::pool()` and `Http::batch()`—shares the same tracing and timing rules.
+- Treat the arguments as **PSR-7** (`RequestInterface` / `ResponseInterface`) and always `return` the modified instance.
+- Wrap `globalMiddleware()`'s `$handler($request, $options)` call in `try/catch` as well as `->then(..., $onRejected)` so both real socket rejections and `Http::failedConnection()` fakes are logged.
+- Use `Http::withoutGlobalConfiguration()` whenever an external upload or webhook must bypass your global headers and options.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Does Http::globalRequestMiddleware() work with Http::pool() and Http::batch()?', a: 'Yes. Unlike chaining Http::withHeaders()->pool(), Pool and Batch create their async requests through the same Http factory, so globalMiddleware and globalOptions apply to every request in the pool or batch.' },
+  { q: 'Why did my globalRequestMiddleware crash with Call to a member function getUri() on null?', a: 'PSR-7 requests are immutable. $request->withHeader(...) returns a new instance, so if you forget return $request->withHeader(...), null is passed down the Guzzle stack.' },
+  { q: 'Does Http::globalMiddleware() run when Http::fake() is active in tests?', a: 'Yes. Laravel pushes global middleware onto the Guzzle handler stack before the fake stub handler, so Http::assertSent() sees headers added by globalRequestMiddleware() and globalResponseMiddleware() runs on faked responses.' },
+  { q: 'How do I skip global headers for one S3 presigned URL or webhook?', a: 'Wrap that call in Http::withoutGlobalConfiguration(fn () => ...). Laravel clears globalMiddleware and globalOptions for the closure and restores them in a finally block.' },
+]} />
+
+## Next steps
+
+- [Laravel Http::pool(): call three APIs in the time of one](/laravel-http-pool-concurrent-requests): concurrent calls, `Http::batch()`, and why `withHeaders()->pool()` drops headers
+- [Laravel Context: trace requests across logs and queued jobs](/laravel-context-request-id-logs-queued-jobs): generate the `trace_id` that global HTTP middleware forwards downstream
+- [Laravel Sleep::fake(): test retry and backoff loops without waiting](/laravel-sleep-fake-test-retries): test `Http::retry()` timing alongside your middleware logs
+- [Laravel HTTP Client: Global Middleware](https://laravel.com/docs/13.x/http-client#global-middleware)
+
+## Sources
+
+- [Laravel 13.x docs: HTTP Client — Global Middleware & Global Options](https://laravel.com/docs/13.x/http-client#global-middleware)
+- [Laravel API: `Illuminate\Http\Client\Factory`](https://api.laravel.com/docs/13.x/Illuminate/Http/Client/Factory.html) (`globalMiddleware`, `globalRequestMiddleware`, `globalResponseMiddleware`, `globalOptions`, `withoutGlobalConfiguration`)
+- [Source: `src/Illuminate/Http/Client/Factory.php`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Http/Client/Factory.php)
+- [Source: `src/Illuminate/Http/Client/PendingRequest.php`](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Http/Client/PendingRequest.php)
