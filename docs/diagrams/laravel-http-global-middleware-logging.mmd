@@ -1,0 +1,15 @@
+flowchart LR
+  C["`Http::get / pool / batch`"] --> W{"`withoutGlobalConfiguration?`"}
+  W -- "Yes" --> B["`Strip globalMiddleware
+  & globalOptions`"]
+  W -- "No" --> G1["`globalRequestMiddleware
+  add X-Request-Id (PSR-7)`"]
+  G1 --> G2["`globalMiddleware
+  start timer`"]
+  G2 --> L["`withRequestMiddleware
+  + beforeSending`"]
+  B --> L
+  L --> H["`Guzzle / Http::fake()`"]
+  H --> R["`globalResponseMiddleware
+  + timer logs status/ms`"]
+  R --> E["`ResponseReceived event`"]
