@@ -1,0 +1,15 @@
+flowchart LR
+  A["`**Pick list:** open orders
+  with pending items`"] --> B{"`Which query?`"}
+  B -- "whereHas() + with('items')" --> C["`Right orders,
+  **every item** loaded
+  (picked ones too)`"]
+  B -- "with(['items' => fn])" --> D["`Right items,
+  **every order** kept
+  (empty cards)`"]
+  B -- "withWhereHas('items', fn)" --> E["`exists subquery **and**
+  eager load share
+  one closure`"]
+  E --> F["`Only orders with pending items,
+  only pending items,
+  2 queries`"]

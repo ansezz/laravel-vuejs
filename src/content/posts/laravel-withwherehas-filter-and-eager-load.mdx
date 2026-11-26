@@ -1,0 +1,271 @@
+---
+id: 207
+title: "Laravel withWhereHas(): filter and eager load with one closure"
+seoTitle: "Laravel withWhereHas(): Filter and Eager Load at Once"
+excerpt: "Hidden gem: withWhereHas() keeps only parents with matching children and loads only those children. Plus the orWhere leak and the nested dot trap. 20 Pest tests."
+date: 2026-11-26T02:00:00Z
+snippet: "Order::withWhereHas('items', fn ($q) => $q->where('status', 'pending'))->get();"
+categories: [laravel]
+tags: [laravel, php, inertia, vuejs]
+---
+Your warehouse pick list should show open orders that still have items to pick, and only those items. You write `whereHas('items', ...)`, the right orders show up, and the picker walks to the shelf for a T-shirt that's already in the box. So you copy the same closure into `with()`, and now two closures have to stay in sync forever. Laravel has had one method for this since 9.16: `withWhereHas()`.
+
+<TLDR
+  audience="Laravel developers who filter parents by a child condition and then show those children: pick lists, featured posts per author, unpaid invoices per client"
+  learn={['Why whereHas() and with() each solve half of the problem', 'withWhereHas() with an operator and count, column selection, and belongsTo', 'A paginated Vue + Inertia pick list in 3 queries', 'Gotchas we proved: orWhere leaks out of the eager query, dot notation only filters the last level, the loaded relation is a subset']}
+  tested="Laravel 13.44 · PHP 8.4 · Pest 4 · inertia-laravel 3.5 (20 tests, 63 assertions), plus a re-run on 13.36 for the column-selection fix"
+>
+
+- `Order::withWhereHas('items', fn ($q) => $q->where('status', 'pending'))` returns only orders with a pending item **and** loads only the pending items. It's literally `whereHas()` plus `with()` with the same closure: our lab compared `toRawSql()` and got identical SQL.
+- `orWhere()` inside the closure is grouped in the `exists` check but **not** in the eager query. Wrap it in `where(fn ...)` or use `whereIn()`, or the eager query reads matching rows from orders that aren't on the page.
+- `withWhereHas('orders.items', ...)` filters items only. The orders level loads every order. Nest `withWhereHas()` inside the closure to filter both.
+- Column selection with a callback (`'items:id,order_id,sku'`) needs Laravel 13.37+. On 13.36 it throws `RelationNotFoundException`.
+
+</TLDR>
+
+## What withWhereHas() is and why people miss it
+
+`withWhereHas()` adds an existence check and a constrained eager load from one closure. It arrived in Laravel 9.16 in June 2022 ([PR #42597](https://github.com/laravel/framework/pull/42597)). The docs give it one short paragraph near the end of the eager loading section, under "Constraining Eager Loads With Relationship Existence", so most people never scroll that far.
+
+```php title="app/Http/Controllers/PickListController.php"
+use App\Models\Order;
+
+$orders = Order::withWhereHas('items', function ($query) {
+    $query->where('status', 'pending');
+})->get();
+```
+
+The whole method in Laravel 13 is a few lines in `QueriesRelationships`:
+
+```php title="vendor/laravel/framework/src/Illuminate/Database/Eloquent/Concerns/QueriesRelationships.php"
+public function withWhereHas($relation, ?Closure $callback = null, $operator = '>=', $count = 1)
+{
+    if (! $callback) {
+        return $this->whereHas(Str::before($relation, ':'), null, $operator, $count)->with($relation);
+    }
+
+    [$name, $select] = $this->parseNameAndAttributeSelectionConstraint($relation);
+
+    return $this->whereHas($name, $callback, $operator, $count)
+        ->with([$name => $this->combineConstraints([$select, static fn ($query) => $callback($query)])]);
+}
+```
+
+No magic: one closure, passed to both places. That's the point. Nobody can update the filter and forget the eager load.
+
+<Diagram name="laravel-withwherehas-filter-and-eager-load" alt="Three ways to build a pick list. whereHas() alone keeps the right orders but with('items') loads every item, including picked ones. A constrained with() alone loads only pending items but keeps every order, so some orders show an empty list. withWhereHas() runs the same closure in an exists subquery and in the eager query, so only orders with pending items come back, each with only its pending items, in 2 queries." caption="whereHas() filters parents, with() filters children. withWhereHas() does both." />
+
+## The usual way vs withWhereHas()
+
+Our lab has four orders. A-1001 has one pending and one picked item, A-1002 is fully picked, B-2001 has two pending and one backordered item, and B-2002 is a cancelled order with a backordered item. Here's what each half gives you.
+
+| Query | Orders returned | Items loaded on A-1001 |
+|---|---|---|
+| `whereHas('items', $pending)->with('items')` | A-1001, B-2001 ✅ | MUG-01, **TEE-M (already picked)** ❌ |
+| `with(['items' => $pending])` | **all 4**, two with empty lists ❌ | MUG-01 ✅ |
+| `whereHas(..., $pending)->with(['items' => $pending])` | A-1001, B-2001 ✅ | MUG-01 ✅ |
+| `withWhereHas('items', $pending)` | A-1001, B-2001 ✅ | MUG-01 ✅ |
+
+The third row is the usual fix and it's correct. It just keeps the same rule in two places, and the day someone adds `->where('qty', '>', 0)` to one of them, the list is wrong again.
+
+<CodeCompare before="whereHas() + with(): same closure twice" after="withWhereHas(): one closure">
+
+```php title="app/Http/Controllers/PickListController.php"
+$pending = fn ($query) => $query->where('status', 'pending');
+
+Order::whereHas('items', $pending)
+    ->with(['items' => $pending])
+    ->get();
+```
+
+```php title="app/Http/Controllers/PickListController.php"
+Order::withWhereHas('items', fn ($query) => $query->where('status', 'pending'))
+    ->get();
+```
+
+</CodeCompare>
+
+Both run 2 queries. This is the SQL from the query log in our lab (table prefix trimmed):
+
+```sql
+-- 1. orders that have at least one pending item
+select * from "orders" where exists (
+  select * from "items"
+  where "orders"."id" = "items"."order_id" and "status" = ?
+) order by "id" asc
+
+-- 2. only the pending items of those orders
+select * from "items" where "items"."order_id" in (1, 3) and "status" = ?
+```
+
+## Options you didn't know it takes
+
+**An operator and a count.** The third and fourth arguments go to `whereHas()`. `withWhereHas('items', $pending, '>=', 2)` returned only B-2001, the order with two pending items. The count only applies to the existence check; the eager load still loads every pending item.
+
+**Column selection.** `withWhereHas('items:id,order_id,sku')` with no closure has worked since 9.43 ([PR #45168](https://github.com/laravel/framework/pull/45168)). With a closure, `withWhereHas('items:id,order_id,sku', fn ...)` threw `Call to undefined relationship [items:id,order_id,sku]` until Laravel 13.37 ([PR #62039](https://github.com/laravel/framework/pull/62039)). We ran the same test file on 13.36: 17 passed, and the 3 column-plus-closure tests failed with exactly that exception.
+
+**Either direction.** It works on `belongsTo` too. `Item::withWhereHas('order', fn ($q) => $q->where('status', 'open'))` returns items whose order is still open, with that order already loaded.
+
+**A one-condition shortcut.** Laravel 11.43 added `withWhereRelation()` ([PR #54668](https://github.com/laravel/framework/pull/54668)), which is to `withWhereHas()` what `whereRelation()` is to `whereHas()`. It isn't in the docs yet, but it's in the 13.x source and our tests passed:
+
+```php
+Order::withWhereRelation('items', 'status', 'pending')->get();
+Order::withWhereRelation('items', 'qty', '>=', 2)->get();
+```
+
+## Real-world example: a paginated pick list in Vue
+
+The warehouse screen lists open orders that still have something to pick, 20 per page, with just the columns the card shows. Keep `id` and the foreign key in the column list, as with any column-limited eager load.
+
+```php title="app/Http/Controllers/PickListController.php"
+use App\Models\Order;
+use Inertia\Inertia;
+
+class PickListController
+{
+    public function index()
+    {
+        return Inertia::render('PickList/Index', [
+            'orders' => Order::query()
+                ->where('status', 'open')
+                ->withWhereHas('items:id,order_id,sku,qty', fn ($query) => $query->where('status', 'pending'))
+                ->orderBy('id')
+                ->paginate(20, ['id', 'number'])
+                ->through(fn (Order $order) => [
+                    'id' => $order->id,
+                    'number' => $order->number,
+                    'items' => $order->items->map->only('id', 'sku', 'qty'),
+                ]),
+        ]);
+    }
+}
+```
+
+```vue title="resources/js/pages/PickList/Index.vue"
+<script setup lang="ts">
+import { Link } from '@inertiajs/vue3'
+
+type Item = { id: number; sku: string; qty: number }
+type Order = { id: number; number: string; items: Item[] }
+
+defineProps<{
+  orders: { data: Order[]; links: { url: string | null; label: string; active: boolean }[] }
+}>()
+</script>
+
+<template>
+  <section v-for="order in orders.data" :key="order.id" class="card">
+    <h2>{{ order.number }}</h2>
+    <ul>
+      <li v-for="item in order.items" :key="item.id">
+        {{ item.qty }} × {{ item.sku }}
+      </li>
+    </ul>
+  </section>
+
+  <nav>
+    <template v-for="link in orders.links" :key="link.label">
+      <Link v-if="link.url" :href="link.url" v-html="link.label" :class="{ active: link.active }" />
+    </template>
+  </nav>
+</template>
+```
+
+No `v-if="order.items.length"` guard, because an order with nothing to pick never reaches the page. Our lab test hit this route and asserted the Inertia props: 2 orders, A-1001 with only `MUG-01`, B-2001's second item with `qty` 3, a pagination `total` of 2, and 3 queries in all (the count, the orders, the items).
+
+<Callout type="tip" title="Show the real total next to the filtered list">
+
+Pickers like "2 of 3 left". Add `->withCount('items')` and you get `items_count` with the full total, while `items` stays filtered. In our lab, B-2001 came back with 2 loaded items and `items_count` 3.
+
+</Callout>
+
+## Gotchas
+
+<Callout type="gotcha" title="orWhere() leaks out of the eager query">
+
+The closure runs twice, and it isn't wrapped the same way both times. In the `exists` subquery Laravel groups your conditions in parentheses. In the eager query it doesn't. With `->where('status', 'pending')->orWhere('status', 'backordered')`, the second query in our lab was:
+
+```sql
+select * from "items" where "items"."order_id" in (1, 3) and "status" = ? or "status" = ?
+```
+
+That `or` escapes the `order_id in (...)` filter, so the query also read PIN-9 from the cancelled order B-2002. Eloquent dropped it while matching items to orders, so the page looked right. On a real table, though, the query reads every backordered item in the warehouse. Group the condition, or use `whereIn()`:
+
+```php
+fn ($query) => $query->where(fn ($q) => $q->where('status', 'pending')->orWhere('status', 'backordered'))
+fn ($query) => $query->whereIn('status', ['pending', 'backordered'])
+```
+
+A global scope on the related model doesn't save you. With `SoftDeletes` the query became `where (order_id in (1, 3) and status = ? or status = ?) and deleted_at is null`, and PIN-9 still came back.
+
+</Callout>
+
+**Dot notation only filters the last level.** `Customer::withWhereHas('orders.items', $pending)` returns the right customers and filters the items, but it eager loads **every** order of those customers. In our lab, the cancelled B-2002 and the fully picked A-1002 both came back with empty `items`. To filter each level, nest it:
+
+```php
+Customer::withWhereHas('orders', fn ($query) => $query->withWhereHas('items', $pending))->get();
+```
+
+That returned only A-1001 and B-2001 under the two customers.
+
+**The loaded relation is a subset, and Laravel treats it as loaded.** After `withWhereHas('items', $pending)`, `$order->items` is the pending items only. `loadMissing('items')` does nothing, because the relation is already loaded. `$order->items()->count()` asks the database (3), and `load('items')` replaces the subset with all items. If an API resource or a policy later reads `$order->items` expecting everything, it gets the filtered list.
+
+**Forget the foreign key and the list is empty.** `withWhereHas('items:id,sku', $pending)` still returns the 2 right orders, but every `items` collection is empty, because Eloquent can't match items back without `order_id`. No error, just blank cards.
+
+**It's an `exists` subquery.** Like `whereHas()`, the first query is `where exists (...)`. On big tables, index the foreign key together with the column you filter on, for example `(order_id, status)`.
+
+## Try it yourself
+
+<TryIt title="Find closures you wrote twice">
+
+```bash
+grep -rn -A3 "whereHas(" app --include=*.php | grep "with(\["
+```
+
+Each hit is a `whereHas()` followed by a constrained `with()`. If both get the same closure, swap them for one `withWhereHas()`, then check the closure for a bare `orWhere()` before you ship.
+
+</TryIt>
+
+## How useful is this?
+
+| | Score |
+|---|---|
+| Time saved per use | ★★★☆☆ One line instead of two, and one rule instead of two copies |
+| How often you'll reach for it | ★★★★☆ Pick lists, featured posts per author, unpaid invoices per client, active members per team |
+| Risk if misused | ★★★☆☆ Bare `orWhere()` and dot notation behave differently than they look |
+| **Overall** | **4 / 5**: a small method that removes a whole class of "the filter and the list disagree" bugs |
+
+## Recap
+
+- `withWhereHas('rel', $closure)` is `whereHas('rel', $closure)` plus `with(['rel' => $closure])`: same SQL, one closure.
+- It keeps only parents with matching children and loads only the matching children, in 2 queries.
+- It takes an operator and count, works on `belongsTo`, and supports `'rel:id,fk,col'` with a closure on Laravel 13.37+.
+- Group `orWhere()` in a nested `where()` or use `whereIn()`. Nest `withWhereHas()` for multi-level filters.
+- The loaded relation is the filtered subset. Use `withCount()` or `load()` when you need the full set.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Which Laravel version has withWhereHas()?', a: 'Laravel 9.16 (June 2022, PR #42597). Column selection without a closure came in 9.43, and column selection with a closure in 13.37. We tested on Laravel 13.44.' },
+  { q: 'Is withWhereHas() faster than whereHas() plus with()?', a: 'No. It builds exactly the same two queries. Our lab compared toRawSql() for both and got identical SQL. The win is one closure instead of two copies that can drift apart.' },
+  { q: 'Can I use orWhere inside the withWhereHas() closure?', a: 'Wrap it: where(fn ($q) => $q->where(...)->orWhere(...)), or use whereIn(). The exists check groups your conditions, but the eager load query does not, so a bare orWhere escapes the foreign key filter.' },
+  { q: 'Does withWhereHas() work with nested relations like orders.items?', a: 'It filters the last level only and loads every row of the levels before it. Nest the calls instead: withWhereHas(\'orders\', fn ($q) => $q->withWhereHas(\'items\', $closure)).' },
+  { q: 'Is there an orWithWhereHas()?', a: 'No. For a single column condition there is withWhereRelation() (Laravel 11.43+), which pairs whereRelation() with a matching eager load.' },
+]} />
+
+## Next steps
+
+- [Automatic eager loading](/laravel-automatic-eager-loading), for relations you load everywhere
+- [whereAny / whereAll / whereNone](/laravel-whereany-whereall-wherenone), the tidy way to write grouped `or` conditions
+- [latestOfMany()](/laravel-latestofmany-has-one-of-many), when you need one child per parent instead of a filtered list
+- [Laravel docs: Constraining Eager Loads With Relationship Existence](https://laravel.com/framework/docs/13.x/eloquent-relationships#constraining-eager-loads-with-relationship-existence)
+
+## Sources
+
+- [Laravel 13 docs: Constraining Eager Loads With Relationship Existence](https://laravel.com/framework/docs/13.x/eloquent-relationships#constraining-eager-loads-with-relationship-existence)
+- [Laravel 13 docs: Querying Relationship Existence](https://laravel.com/framework/docs/13.x/eloquent-relationships#querying-relationship-existence)
+- [laravel/framework PR #42597: Add Eloquent withWhereHas method (9.16)](https://github.com/laravel/framework/pull/42597)
+- [laravel/framework PR #45168: Eager load specific columns with withWhereHas (9.43)](https://github.com/laravel/framework/pull/45168)
+- [laravel/framework PR #54668: Add withWhereRelation (11.43)](https://github.com/laravel/framework/pull/54668)
+- [laravel/framework PR #62039: Column selection in withWhereHas() with a callback (13.37)](https://github.com/laravel/framework/pull/62039)
+- [Source: QueriesRelationships concern](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Database/Eloquent/Concerns/QueriesRelationships.php)
