@@ -1,0 +1,16 @@
+flowchart LR
+  A["`**POST /login**
+  email + password`"] --> B["`Timebox::call(fn, 200 ms)`"]
+  B --> C{"`User found?`"}
+  C -- "no" --> D["`~1 ms:
+  nothing to hash`"]
+  C -- "yes" --> E{"`Hash::check()`"}
+  E -- "wrong" --> F["`~190 ms:
+  bcrypt cost 12`"]
+  E -- "right" --> G["`returnEarly()
+  log in, no wait`"]
+  D --> H["`usleep(the rest)
+  → 200 ms`"]
+  F --> H
+  H --> I["`Same answer,
+  same time`"]

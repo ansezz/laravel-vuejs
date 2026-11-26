@@ -1,0 +1,307 @@
+---
+id: 208
+title: "Laravel Timebox: constant-time login and reset flows"
+seoTitle: "Laravel Timebox: Stop Login Timing Leaks"
+excerpt: "Hidden gem: Timebox pads a callback to a fixed time so login and reset requests can't reveal which emails exist. What Laravel boxes already, and what you must box yourself. 25 Pest tests."
+date: 2026-11-26T12:00:00Z
+snippet: "(new Timebox)->call(fn ($timebox) => $this->check($email, $password), microseconds: 200_000);"
+categories: [laravel]
+tags: [laravel, php, inertia, vuejs]
+---
+Your login form says "These credentials do not match our records" for every failure. Nice and vague. But an unknown email comes back in 1 ms, and a real account with the wrong password takes 190 ms, because only the second one runs bcrypt. Anyone with a stopwatch can sort your emails into "customer" and "not a customer" without reading a single word of the response.
+
+<TLDR
+  audience="Laravel developers with a login, password reset, magic link or API token endpoint that must not reveal which accounts exist"
+  learn={['Why a vague error message is not enough when the response time differs', 'What Laravel already boxes for you (attempt, validate, attemptWhen, sendResetLink, reset) and how long the box is', 'How to box your own flow, with a queued mail and a Vue + Inertia form', 'Gotchas we proved: a short box does nothing, returnEarly() sticks to the instance, the broker status and exists: rules leak']}
+  tested="Laravel 13.44 · PHP 8.4 · Pest 4 (25 tests, 80 assertions) · real-clock timings with bcrypt cost 12"
+>
+
+- `Illuminate\Support\Timebox` runs your closure, then sleeps until a minimum time has passed. In our lab an unknown email took **0 ms** and a wrong password **190 ms**. Inside a 400 ms box both took **400 ms**.
+- Laravel already boxes `Auth::attempt()`, `validate()`, `attemptWhen()`, `Password::sendResetLink()` and `Password::reset()` for 200 ms. Change it with the `auth.timebox_duration` config key (in microseconds). Your own flows (magic links, API tokens, 2FA) are on you.
+- The box only helps if it is **longer than your slowest path**. A 30 ms box around an 80 ms mail send protects nothing, and our test measured exactly that gap.
+- Call `returnEarly()` only on the success path. The flag stays on the instance, so a reused `Timebox` stops padding every later failure.
+
+</TLDR>
+
+## The leak: two failures, two different clocks
+
+Here is the "usual" login check. It's what most hand-rolled endpoints look like.
+
+```php title="app/Actions/NaiveLogin.php"
+public function attempt(string $email, string $password): bool
+{
+    $user = User::where('email', $email)->first();
+
+    if (! $user) {
+        return false; // nothing to hash, answers right away
+    }
+
+    return Hash::check($password, $user->password); // bcrypt: slow on purpose
+}
+```
+
+Both branches return `false`, and the controller shows the same message for both. The timing doesn't match. We ran it with bcrypt cost 12, the median of three runs:
+
+| Request | Naive | Inside a 400 ms Timebox |
+|---|---|---|
+| Unknown email | **0 ms** | **400 ms** |
+| Real account, wrong password | **190 ms** | **400 ms** |
+| Real account, right password | 190 ms | 190 ms (returns early) |
+
+An attacker doesn't need a precise clock. 190 ms against 0 ms survives a bad network and a noisy server. They try a list of emails and keep the slow ones.
+
+## What Timebox does
+
+`Timebox` has been in Laravel since the 2022 fix for a login timing attack ([PR #44069](https://github.com/laravel/framework/pull/44069)). The helpers docs give it a short section: it makes a callback always take a fixed amount of time, and it does nothing if the callback is already slower. The whole class is about 30 lines:
+
+```php title="vendor/laravel/framework/src/Illuminate/Support/Timebox.php"
+public function call(callable $callback, int $microseconds)
+{
+    $exception = null;
+
+    $start = microtime(true);
+
+    try {
+        $result = $callback($this);
+    } catch (Throwable $caught) {
+        $exception = $caught;
+    }
+
+    $remainder = (int) ($microseconds - ((microtime(true) - $start) * 1_000_000));
+
+    if (! $this->earlyReturn && $remainder > 0) {
+        $this->usleep($remainder);
+    }
+
+    if ($exception) {
+        throw $exception;
+    }
+
+    return $result;
+}
+```
+
+Three details matter. The unit is **microseconds**, so `200_000` is 200 ms. An exception is held until the wait is over and then rethrown (since Laravel 10, [PR #45893](https://github.com/laravel/framework/pull/45893)), so a thrown "no such user" can't be faster than a returned one. And the sleep goes through `Sleep::usleep()`, which means `Sleep::fake()` skips it in tests.
+
+<Diagram name="laravel-timebox-constant-time-login" alt="A login request enters Timebox::call with a 200 millisecond box. If no user is found, the work takes about 1 millisecond because there is nothing to hash. If a user is found and Hash::check fails, the work takes about 190 milliseconds because of bcrypt cost 12. If Hash::check succeeds, the closure calls returnEarly(), the user is logged in, and there is no wait. Both failure paths then run usleep for the remaining time, so both end at 200 milliseconds and return the same answer in the same time." caption="Failures are padded to the same finish line. A success skips the wait." />
+
+## What Laravel already boxes
+
+You get this for free in the session guard and the password broker:
+
+| Method | Boxed | Returns early on success |
+|---|---|---|
+| `Auth::attempt()` | yes | yes |
+| `Auth::attemptWhen()` | yes | yes |
+| `Auth::validate()` | yes | yes |
+| `Password::sendResetLink()` | yes | no, the link request always waits |
+| `Password::reset()` | yes | yes |
+
+We checked each one with `Sleep::fake()`. A failed `attempt()` for an unknown email and for a wrong password both recorded one sleep of under 200 ms, and a successful one recorded none. The box was moved to wrap the user lookup itself in 2025, because the first version started the clock *after* the query and left a small gap ([PR #55701](https://github.com/laravel/framework/pull/55701), backported to 11.x).
+
+The length comes from one config key that is **not** in the stock `config/auth.php`, so the default of 200 000 applies until you add it:
+
+```php title="config/auth.php"
+return [
+    // ...
+    'timebox_duration' => 400_000, // microseconds
+];
+```
+
+We set it to 750 000 in a test and the fake recorded a wait of about 750 ms. The PR author added the option because 200 ms wasn't enough on a slow server.
+
+<Callout type="gotcha" title="Is 200 ms enough for you?">
+
+On our lab machine, bcrypt at cost 12 took about 190 ms. The default box leaves 10 ms of headroom. Raise your hashing cost, or move to a slower server, and the box silently stops covering the slow path. Time your own login and set `timebox_duration` to a comfortable margin above it.
+
+</Callout>
+
+## Box your own flow
+
+Laravel can't box what it doesn't own. A magic-link request is a classic: look up the user, send an email, return the same message for everyone. Here is a controller that does it right, with the mail queued so the slow part isn't in the request:
+
+```php title="app/Http/Controllers/MagicLinkController.php"
+use Illuminate\Support\Timebox;
+use Inertia\Inertia;
+
+class MagicLinkController
+{
+    public function __construct(private Timebox $timebox) {}
+
+    public function __invoke(Request $request): RedirectResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email']]);
+
+        $this->timebox->call(function () use ($data) {
+            $user = User::where('email', $data['email'])->first();
+
+            if ($user) {
+                SendMagicLink::dispatch($user->email); // queued, not sent here
+            }
+        }, microseconds: 150_000);
+
+        Inertia::flash('status', 'If that email has an account, a sign-in link is on its way.');
+
+        return back();
+    }
+}
+```
+
+The container builds a fresh `Timebox` every time it resolves one (our test checks that two resolutions are different objects), so each request gets its own. That matters, as you'll see in the gotchas.
+
+The Vue side is a plain Inertia form. It shows the same flash message whatever the server found ([flash data](/laravel-vue-flash) is an Inertia 3 feature):
+
+```vue title="resources/js/pages/Auth/MagicLink.vue"
+<script setup lang="ts">
+import { useForm, usePage } from '@inertiajs/vue3'
+
+const form = useForm({ email: '' })
+const page = usePage()
+</script>
+
+<template>
+  <form @submit.prevent="form.post('/magic-link')">
+    <input v-model="form.email" type="email" autocomplete="email" />
+    <p v-if="form.errors.email">{{ form.errors.email }}</p>
+    <button :disabled="form.processing">Email me a link</button>
+    <p v-if="page.flash.status">{{ page.flash.status }}</p>
+  </form>
+</template>
+```
+
+In our tests a real email and an unknown email got the same redirect, the same status code and the same flash. Each request recorded exactly one box, and only the real account queued a job.
+
+<Callout type="tip" title="Validate before the box, not inside it">
+
+A malformed email is rejected before the lookup, the same for everyone, so it doesn't need padding. Our test confirmed that a validation error records no sleep at all.
+
+</Callout>
+
+## Gotchas we proved
+
+### A short box protects nothing
+
+Timebox adds time, it never removes any. If one path takes longer than the box, that path leaks again. We simulated a magic link that sends mail inside the request (80 ms) around a 30 ms box:
+
+| Request | 30 ms box, mail inside | 150 ms box, mail inside |
+|---|---|---|
+| Unknown email | 30 ms | 150 ms |
+| Real account | **80 ms** | 150 ms |
+
+The 30 ms box made the real account **50 ms slower** than the unknown one. Pick a box above the worst case you've measured, and prefer to queue the slow work so the worst case is small to begin with.
+
+### returnEarly() sticks to the instance
+
+`returnEarly()` sets a public property and nothing ever resets it. On a reused `Timebox`, a success followed by a failure skips the padding for the failure:
+
+```php title="tests/Feature/GemTimeboxTest.php"
+$shared = new Timebox;
+
+$shared->call(fn ($t) => $t->returnEarly(), 100_000);        // a success
+$shared->call(fn () => 'a failure to be padded', 100_000);   // no wait!
+
+Sleep::assertNeverSlept();
+```
+
+The session guard has the same shape. In one test process, `Auth::attempt()` with a good password followed by one with a bad email recorded no sleep at all. After `Auth::forgetGuards()` the next failure was padded again.
+
+On PHP-FPM every request builds a new guard, so a normal login endpoint is fine. It bites in tests, in anything that keeps a guard or a `Timebox` alive across requests (long-running workers, a singleton in the container), and in loops that call `attempt()` many times. Create a `new Timebox` per call, and call `returnEarly()` only after you have verified the credentials.
+
+### The response must match too
+
+A box fixes the clock, not the content. Two leaks we saw in the lab:
+
+- `Password::sendResetLink()` returns `INVALID_USER` for an unknown email and `RESET_LINK_SENT` for a known one. Both took one box, but if your controller shows `__($status)`, the message gives it away. Return one generic message, as the controller above does.
+- An `exists:users,email` validation rule answers an unknown email with a validation error and a known one with a pass. That is an oracle, no stopwatch needed.
+
+The PR that added the box says it plainly: starter kits can leak user existence in other ways, and Timebox is for developers who built their own flow and expect it to prevent enumeration.
+
+### Padding costs a worker
+
+`usleep()` holds a PHP worker for the whole wait. A failed login that waits 200 ms occupies a worker for 200 ms, so a flood of bad attempts costs you real capacity. Put a `throttle` limit in front of the endpoint. The box slows down enumeration, the rate limit stops volume.
+
+## Test it without waiting
+
+You don't want a 400 ms sleep in every test. `Sleep::fake()` makes the box instant and records the wait, so you can assert that the box ran:
+
+```php title="tests/Feature/LoginTimingTest.php"
+use Carbon\CarbonInterval;
+use Illuminate\Support\Sleep;
+
+it('boxes a failed login for an unknown email', function () {
+    Sleep::fake();
+
+    $this->post('/login', ['email' => 'nobody@example.test', 'password' => 'x'])
+        ->assertSessionHasErrors('email');
+
+    Sleep::assertSleptTimes(1);
+    Sleep::assertSlept(fn (CarbonInterval $d) => $d->totalMicroseconds > 100_000);
+});
+
+it('does not pad a successful login', function () {
+    Sleep::fake();
+
+    $this->post('/login', ['email' => $this->ana->email, 'password' => 'correct horse']);
+
+    Sleep::assertNeverSlept();
+});
+```
+
+A fake can only prove that the box *ran*. To prove it is *long enough*, time the real endpoint once on your production-like hardware, as we did with `hrtime()` in the lab, and keep that number in mind when you set `timebox_duration`.
+
+<TryIt title="Try it yourself">
+
+Time your own login for a missing and a real email, then box it. Paste this in `php artisan tinker` and use an email you own:
+
+```php
+use Illuminate\Support\Facades\Auth;
+
+$t = fn ($email) => (function () use ($email) {
+    $s = hrtime(true);
+    Auth::validate(['email' => $email, 'password' => 'wrong']);
+    return round((hrtime(true) - $s) / 1e6).' ms';
+})();
+
+[$t('nobody@example.test'), $t('you@example.com')];
+```
+
+Both numbers should be about the same and at least 200 ms, because `validate()` is boxed. Now check what your own custom endpoints return for those two emails.
+
+</TryIt>
+
+## Recap
+
+- A vague error message doesn't help if the response time tells the truth. Unknown email 0 ms, wrong password 190 ms: the stopwatch wins.
+- `Timebox::call($callback, $microseconds)` pads to a minimum, rethrows exceptions after the wait and never cuts a slow callback short.
+- Laravel boxes `attempt`, `attemptWhen`, `validate`, `sendResetLink` and `reset` for 200 ms. Tune it with `auth.timebox_duration`.
+- Box your own flows with a time above the slowest path, queue the slow work, and keep the response identical.
+- `new Timebox` per call, and `returnEarly()` only on a verified success.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'Does Timebox make timing attacks impossible?', a: 'No. It masks the big, obvious differences. Network noise and small variations remain, and the Laravel PR itself says preventing timing attacks completely is virtually impossible. It raises the cost for an attacker, and you should add rate limiting and a generic response on top.' },
+  { q: 'Why not just add a random sleep?', a: 'Random jitter averages out. An attacker repeats the request and compares medians. A fixed minimum puts both paths at the same finish line, so repeating the request tells them nothing new.' },
+  { q: 'How long should the box be?', a: 'Longer than your slowest path with margin, measured on production-like hardware. With bcrypt cost 12 taking 190 ms in our lab, the 200 ms default was tight. Our 400 ms box left plenty of room.' },
+  { q: 'Does returnEarly() let an attacker tell success from failure?', a: 'By timing, yes, but the person who typed the right password already knows it worked. The box hides which accounts exist, not whether your own login succeeded.' },
+  { q: 'Can I use it with Sleep::fake()?', a: 'Yes. Timebox sleeps through Sleep::usleep(), so a fake makes it instant and assertSlept() or assertSleptTimes() can check that it ran.' },
+]} />
+
+## Next steps
+
+- [Sleep::fake()](/laravel-sleep-fake-test-retries), the testing half of this post
+- [Signed email links](/laravel-signed-email-link-vue), the other half of a magic link flow
+- [Fortify with Vue](/laravel-fortify-vue), if you'd rather not hand-roll authentication
+- [Queued jobs with a Vue progress bar](/laravel-vue-queued-job), for the work you take out of the request
+- [Laravel docs: Timebox](https://laravel.com/docs/13.x/helpers#timebox)
+
+## Sources
+
+- [Laravel 13 docs: Timebox](https://laravel.com/docs/13.x/helpers#timebox)
+- [laravel/framework PR #44069: Patch for timeless timing attack vulnerability in user login (8.x)](https://github.com/laravel/framework/pull/44069)
+- [laravel/framework PR #45893: Add support to handle exceptions on Timebox (10.x)](https://github.com/laravel/framework/pull/45893)
+- [laravel/framework PR #55701: Move Timebox for Authentication and add to password resets](https://github.com/laravel/framework/pull/55701)
+- [laravel/framework PR #55705: Backporting Timebox fixes to 11.x](https://github.com/laravel/framework/pull/55705)
+- [Source: Timebox class](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Support/Timebox.php)
+- [Source: SessionGuard](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Auth/SessionGuard.php)
+- [Source: PasswordBroker](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Auth/Passwords/PasswordBroker.php)
