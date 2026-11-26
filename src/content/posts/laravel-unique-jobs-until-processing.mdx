@@ -1,0 +1,319 @@
+---
+id: 209
+title: "ShouldBeUnique vs ShouldBeUniqueUntilProcessing in Laravel"
+excerpt: "Hidden gem: two interfaces decide when a queued job's lock is released. Which to pick, how stuck locks happen, and what unique jobs don't cover. 24 Pest tests."
+date: 2026-11-26T21:00:00Z
+snippet: "class RebuildReport implements ShouldQueue, ShouldBeUnique"
+categories: [laravel]
+tags: [laravel, php, inertia, vuejs]
+---
+Your user clicks "Rebuild report", nothing seems to happen, so they click again. And again. Now three four-minute jobs are chewing through the same tables, and the third click wasn't even a mistake, just a slow page.
+
+<TLDR
+  audience="Laravel developers with queued jobs that a button, a webhook or a model event can dispatch many times"
+  learn={['What ShouldBeUnique and ShouldBeUniqueUntilProcessing really lock, and when each one lets go', 'How to give the lock a real key, and why a job without a uniqueId is unique for every argument at once', 'How to tell the user their click was a duplicate with UniqueJobSkipped', 'Gotchas we proved: stuck locks after queue:clear, queue:retry skipping the lock, batches, the null cache store']}
+  tested="Laravel 13.44 · PHP 8.4 · Pest 4 (24 tests, 65 assertions) · real queue:work on the database queue"
+>
+
+- Implement `ShouldBeUnique` and a second `dispatch()` is **dropped** while a copy is waiting **or running**. The lock is released when the job finishes, or fails its last try.
+- Implement `ShouldBeUniqueUntilProcessing` instead and the lock is released the moment a worker **picks the job up**. A click during the run queues a fresh job, which is what you want when the job reads data at the start.
+- Define `uniqueId()`. Without it, `RebuildReport::dispatch(1)` and `RebuildReport::dispatch(2)` share one lock and the second job silently disappears.
+- Add `#[UniqueFor(seconds)]`. With no expiry, a lock whose job was deleted (`queue:clear`) blocks that key forever.
+
+</TLDR>
+
+## The double click problem
+
+Here is the job, with no protection. It rebuilds a team's report from scratch.
+
+```php title="app/Jobs/RebuildReport.php"
+class RebuildReport implements ShouldQueue
+{
+    use Queueable;
+
+    public function __construct(public int $teamId) {}
+
+    public function handle(): void
+    {
+        // four minutes of aggregates, then truncate and rewrite report_rows
+    }
+}
+```
+
+You could guard the button in Vue, and you should. But a double click isn't the only source: a webhook retries, two admins press the same button, a model observer fires on every save. The server has to be the one that says "I already have that one".
+
+## ShouldBeUnique in one line
+
+Add the interface, a key and an expiry:
+
+```php title="app/Jobs/RebuildReport.php"
+use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Queue\Attributes\UniqueFor;
+
+#[UniqueFor(900)] // seconds
+class RebuildReport implements ShouldQueue, ShouldBeUnique // [!code highlight]
+{
+    use Queueable;
+
+    public function __construct(public int $teamId) {}
+
+    public function uniqueId(): string // [!code highlight]
+    {
+        return (string) $this->teamId;
+    }
+
+    // handle() as before
+}
+```
+
+Now `RebuildReport::dispatch(7)` twice leaves **one** row in the `jobs` table. The second call is dropped before it ever touches the queue. There's no exception and no return value you can check, which we'll fix in a minute.
+
+It's just a cache lock under a predictable name:
+
+```text
+laravel_unique_job:App\Jobs\RebuildReport:7
+```
+
+That's the job class plus whatever `uniqueId()` returns. A different team (`dispatch(8)`) is a different key and queues normally. You can also set a `public $uniqueId` property instead of the method, and our test confirmed it behaves the same.
+
+## When does the lock let go?
+
+This is the whole decision, and it fits in one table. We dispatched a job, then dispatched the same job again at three moments:
+
+| Moment of the second dispatch | `ShouldBeUnique` | `ShouldBeUniqueUntilProcessing` |
+|---|---|---|
+| Copy waiting in the queue | dropped | dropped |
+| Copy **running right now** | **dropped** | **accepted**, queued behind it |
+| Copy finished | accepted | accepted |
+
+<Diagram name="laravel-unique-jobs-until-processing" alt="A dispatch checks the unique lock. If the lock is held, the job is dropped and a UniqueJobSkipped event fires. If it is free, the lock is taken and the job is pushed to the queue, where it waits with the lock held. When a worker picks it up, a ShouldBeUniqueUntilProcessing job releases the lock before handle runs. A ShouldBeUnique job releases the lock after handle finishes, or after its last failed try." caption="Same lock, same dispatch check. Only the release point moves." />
+
+So the question to ask is: **if someone changes the data while the job is running, does the job need to run again?**
+
+<CodeCompare before="ShouldBeUnique" after="ShouldBeUniqueUntilProcessing">
+
+```php title="app/Jobs/ImportCatalog.php"
+// Running twice at once would corrupt things.
+// Extra clicks during the run are noise.
+class ImportCatalog implements ShouldQueue, ShouldBeUnique
+```
+
+```php title="app/Jobs/UpdateSearchIndex.php"
+// Reads the row when it starts.
+// An edit made mid-run needs another pass.
+class UpdateSearchIndex implements ShouldQueue, ShouldBeUniqueUntilProcessing
+```
+
+</CodeCompare>
+
+A rule of thumb: a **sync with the outside world** (import, charge, export one file) wants `ShouldBeUnique`. A **refresh from your own data** (reindex, rebuild a summary, recalculate a total) wants `ShouldBeUniqueUntilProcessing`, because the click during the run is real news the running job may have missed.
+
+<Callout type="gotcha" title="Until processing is not mutual exclusion">
+
+Once the lock is released at pickup, nothing stops the queued copy from starting on a second worker while the first is still running. If two runs must never overlap, use `ShouldBeUnique`, or wrap the work in a [cache lock](/laravel-cache-withoutoverlapping-funnel).
+
+</Callout>
+
+## What happens when it fails
+
+A failed job doesn't free the key until Laravel gives up on it. We gave a job three tries and made it throw every time:
+
+| After | Jobs waiting | Lock held? |
+|---|---|---|
+| Try 1 fails (released for a retry) | 1 | yes |
+| Try 2 fails | 1 | yes |
+| Try 3 fails (out of attempts) | 0, one `failed_jobs` row | **no** |
+
+That's the right call: the retry is still "the" job, so a duplicate would just race it. Once the job lands in `failed_jobs`, the key is free again.
+
+Dispatch itself is covered too. When we pointed the job at a connection that threw during the push, the lock came back, so one broken push doesn't block the key. The same happens with `afterCommit()` jobs: dispatch inside a transaction that rolls back and the lock is released with it.
+
+## Tell the user what happened
+
+A silent drop is bad UX. The user clicked, got a "Queued!" toast, and nothing is new. Laravel fires `Illuminate\Queue\Events\UniqueJobSkipped` with the dropped job whenever a unique dispatch loses the race. The event was added in August 2026 ([PR #61039](https://github.com/laravel/framework/pull/61039)), so a controller can listen for it and answer honestly:
+
+```php title="app/Http/Controllers/ReportRebuildController.php"
+use App\Jobs\RebuildReport;
+use Illuminate\Queue\Events\UniqueJobSkipped;
+use Illuminate\Support\Facades\Event;
+use Inertia\Inertia;
+
+public function store(Team $team): RedirectResponse
+{
+    $skipped = false;
+
+    Event::listen(UniqueJobSkipped::class, function () use (&$skipped) {
+        $skipped = true;
+    });
+
+    RebuildReport::dispatch($team->id);
+
+    Inertia::flash('status', $skipped
+        ? 'A rebuild is already running.'
+        : 'Rebuild queued.');
+
+    return back();
+}
+```
+
+The dispatch runs at the end of that statement, so by the next line `$skipped` is already known. In our test, the first POST flashed "Rebuild queued.", the second "A rebuild is already running.", and another team's POST queued normally.
+
+The Vue page just prints the flash, whatever it says:
+
+```vue title="resources/js/pages/Reports/Show.vue"
+<script setup lang="ts">
+import { useForm, usePage } from '@inertiajs/vue3'
+
+const props = defineProps<{ team: { id: number } }>()
+const form = useForm({})
+const page = usePage()
+</script>
+
+<template>
+  <button :disabled="form.processing" @click="form.post(`/teams/${props.team.id}/report/rebuild`)">
+    Rebuild report
+  </button>
+  <p v-if="page.flash.status">{{ page.flash.status }}</p>
+</template>
+```
+
+<Callout type="tip" title="Count the skips too">
+
+The same event is a free metric. Listen for it once in a service provider and log or count it. If skips climb, your lock is too long or your users are clicking a button that gives no feedback. The [Context post](/laravel-context-request-id-logs-queued-jobs) shows how to tie such a log line to a request.
+
+</Callout>
+
+Listeners registered in a controller stay registered for the life of the process. That's harmless on PHP-FPM, where the process dies with the request. On Octane, register one listener in a provider instead.
+
+## Gotchas we proved
+
+### No uniqueId means one lock for everything
+
+This is the quiet one. Here is a job that implements `ShouldBeUnique` and forgets the key:
+
+```php title="tests/Feature/GemUniqueJobsTest.php"
+RebuildNoId::dispatch(1);
+RebuildNoId::dispatch(2);
+RebuildNoId::dispatch(3);
+
+expect(DB::table('jobs')->count())->toBe(1); // only team 1 will ever be rebuilt
+```
+
+The key is the class name plus an empty string, so every team shares it. Teams 2 and 3 are dropped without a sound. Always return something from `uniqueId()` that includes every argument that makes two jobs "different".
+
+### A stuck lock never expires by itself
+
+Without `#[UniqueFor]` (or `uniqueFor()`), the lock has no expiry. If the job disappears without finishing, nothing ever frees the key. We jumped the clock forward a full year and the dispatch was still dropped.
+
+How does a job disappear? `php artisan queue:clear` deletes the rows and leaves every lock behind. So does flushing your Redis or a deploy that wipes the queue table. In our test, after `queue:clear`, the dispatch stayed blocked until we cleared the key by hand:
+
+```php title="php artisan tinker"
+use Illuminate\Bus\UniqueLock;
+use Illuminate\Support\Facades\Cache;
+
+Cache::lock(UniqueLock::getKey(new RebuildReport(7)))->forceRelease();
+```
+
+With `#[UniqueFor(60)]`, a dispatch after 61 seconds is accepted even if the old job is still waiting. Pick a number longer than your worst queue wait plus run time. Too short and you lose the protection, too long and a stuck key hurts for longer.
+
+### queue:retry skips the lock
+
+A job that finally lands in `failed_jobs` has released its lock. `php artisan queue:retry` pushes it straight back onto the queue and doesn't take the lock again. In our test the retried job sat in the queue, nobody held the key, and a fresh `dispatch()` was accepted too. Now there are two copies.
+
+If that matters, retry failed unique jobs one at a time, and check that no other copy is waiting.
+
+### Batches and fakes
+
+- **Batches ignore it.** The docs say unique constraints don't apply to jobs inside a batch, and we confirmed it: two identical unique jobs in `Bus::batch()` both landed in the queue.
+- **`Queue::fake()` keeps the lock.** The job never runs, so the lock is never released. A second dispatch in the same test is dropped, which is usually what you want to assert, and surprising when it isn't.
+
+### The cache store has to remember locks
+
+The lock lives in your default cache store. The docs list `memcached`, `redis`, `dynamodb`, `database`, `file` and `array`. With `CACHE_STORE=null` in an environment, our two dispatches both went through, because the null store never remembers a lock. Set `uniqueVia()` on the job to use a different store than the default, and make sure every web server and worker talks to the same one.
+
+```php title="app/Jobs/RebuildReport.php"
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Support\Facades\Cache;
+
+public function uniqueVia(): Repository
+{
+    return Cache::store('redis');
+}
+```
+
+Our test with a dedicated store showed the lock in that store and not in the default one, and released from there when the job finished.
+
+<TryIt title="Try it yourself">
+
+With `QUEUE_CONNECTION=database` and a real cache store (not `null`), make the job above unique, then run this in `php artisan tinker`:
+
+```php
+use App\Jobs\RebuildReport;
+use Illuminate\Support\Facades\DB;
+
+RebuildReport::dispatch(7);
+RebuildReport::dispatch(7);
+RebuildReport::dispatch(8);
+
+DB::table('jobs')->count(); // 2: team 7 once, team 8 once
+```
+
+Now run `php artisan queue:clear`, dispatch team 7 again and watch it get dropped. That's your stuck lock. Clear it with the `forceRelease()` line above.
+
+</TryIt>
+
+## Test it
+
+The quick version is a fake queue and a Pest test that checks your key:
+
+```php title="tests/Feature/UniqueRebuildTest.php"
+use App\Jobs\RebuildReport;
+use Illuminate\Support\Facades\Queue;
+
+it('queues one rebuild per team', function () {
+    Queue::fake();
+
+    RebuildReport::dispatch(7);
+    RebuildReport::dispatch(7);
+    RebuildReport::dispatch(8);
+
+    Queue::assertPushed(RebuildReport::class, 2);
+});
+```
+
+`Queue::fake()` still takes the lock, as we saw, so this test proves your `uniqueId()` is right. To prove the release point, switch the connection to `database` in a test, run `queue:work --once` and dispatch from inside the job, as our lab tests do.
+
+## Recap
+
+- `ShouldBeUnique` holds a cache lock from dispatch until the job finishes or fails its last try. A dispatch during the run is dropped.
+- `ShouldBeUniqueUntilProcessing` frees the lock at pickup. A dispatch during the run is queued, and nothing stops two runs from overlapping.
+- Always write `uniqueId()` and `#[UniqueFor]`. No id means one lock for all arguments, and no expiry means a deleted job leaves a permanent block.
+- `UniqueJobSkipped` tells you (and the user) when a dispatch was dropped.
+- `queue:clear` leaves locks, `queue:retry` ignores them, batches skip them, and the `null` cache store disables them.
+
+## FAQ
+
+<FAQ items={[
+  { q: 'What is the difference between ShouldBeUnique and ShouldBeUniqueUntilProcessing?', a: 'ShouldBeUnique keeps the lock until the job finishes or fails its last try. ShouldBeUniqueUntilProcessing releases it as soon as a worker starts the job, so a new copy can be queued while the first one runs.' },
+  { q: 'How do I make a job unique per user or per record?', a: 'Add a `uniqueId()` method (or a `$uniqueId` property) that returns the user or record id. Without it, every dispatch of the class shares one lock.' },
+  { q: 'Why is my unique job never dispatched again?', a: 'A lock is probably stuck, usually after `queue:clear` or a cache flush, with no `#[UniqueFor]` expiry set. Release it with `Cache::lock(UniqueLock::getKey($job))->forceRelease()` and add an expiry.' },
+  { q: 'Does ShouldBeUnique work with Redis, the database and the file cache?', a: 'Yes. It needs a cache store that supports atomic locks: memcached, redis, dynamodb, database, file or array. The null store does not make jobs unique, and all servers must share the same store.' },
+  { q: 'Can I use ShouldBeUnique with #[DebounceFor]?', a: 'No. Laravel throws a LogicException if a job is both unique and debounced. Debounce keeps the last dispatch, unique keeps the first, so pick one.' },
+]} />
+
+## Next steps
+
+- [Debounced jobs with #[DebounceFor]](/laravel-debounced-jobs-debouncefor), when you want the last dispatch to win instead of the first
+- [Cache::withoutOverlapping() and Cache::funnel()](/laravel-cache-withoutoverlapping-funnel), for stopping overlap at run time
+- [Show a queued job in Vue](/laravel-vue-queued-job), the status row and polling for the page
+- [Laravel docs: Unique jobs](https://laravel.com/docs/13.x/queues#unique-jobs)
+
+## Sources
+
+- [Laravel 13 docs: Unique jobs](https://laravel.com/docs/13.x/queues#unique-jobs)
+- [Laravel 13 docs: Keeping jobs unique until processing begins](https://laravel.com/docs/13.x/queues#keeping-jobs-unique-until-processing-begins)
+- [Laravel 13 docs: Unique job locks](https://laravel.com/docs/13.x/queues#unique-job-locks)
+- [laravel/framework PR #61039: Add a UniqueJobSkipped event](https://github.com/laravel/framework/pull/61039)
+- [Source: UniqueLock](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Bus/UniqueLock.php)
+- [Source: CallQueuedHandler](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Queue/CallQueuedHandler.php)
+- [Source: PendingDispatch](https://github.com/laravel/framework/blob/13.x/src/Illuminate/Foundation/Bus/PendingDispatch.php)
