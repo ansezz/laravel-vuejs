@@ -1,0 +1,11 @@
+flowchart TD
+  A["`**dispatch()**
+  RebuildReport(7)`"] --> B{"`Lock free?`"}
+  B -- "no" --> C["`Dropped
+  UniqueJobSkipped fires`"]
+  B -- "yes" --> D["`Lock taken,
+  job waits in the queue`"]
+  D -- "worker picks it up" --> F["`handle() runs`"]
+  D -. "UntilProcessing releases the lock here" .-> F
+  F -- "ShouldBeUnique releases the lock here
+  (or after the last failed try)" --> I["`Key is free again`"]
